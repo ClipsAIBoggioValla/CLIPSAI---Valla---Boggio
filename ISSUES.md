@@ -10,14 +10,14 @@ Orden de ejecución sugerido según dependencias. Cada una arranca en una rama p
 
 **Objetivo:** Tener una base de datos funcional y persistente para que el resto del sistema (backends) puedan apoyarse en ella.
 
-**Alcance incluido:** `docker-compose.yml` con servicio de Postgres + volumen; script/migración con tablas `usuarios`, `videos`, `jobs`, `clips` y sus relaciones (FKs).
+**Alcance incluido:** `docker-compose.yml` con servicio de Postgres + volumen; script/migración con tablas `usuarios`, `videos`, `jobs`, `clips` (con campos para estado de publicación y red social) y sus relaciones (FKs).
 **Alcance excluido:** Lógica de negocio, endpoints, seeds de datos de prueba más allá de lo mínimo para verificar.
 
 **Dependencias:** Ninguna.
 
 **Criterios de aceptación:**
 - `docker-compose up` levanta Postgres con datos persistidos entre reinicios (probado bajando y subiendo el contenedor)
-- Las 4 tablas existen con sus relaciones correctas (FK Job→Video, FK Clip→Job, FK Video→Usuario)
+- Las tablas existen con sus relaciones correctas (FK Job→Video, FK Clip→Job, FK Video→Usuario)
 
 **Evidencias:** captura de `\dt` + `\d` de cada tabla en `psql`, captura de datos sobreviviendo un `docker-compose down && up`.
 
@@ -25,17 +25,17 @@ Orden de ejecución sugerido según dependencias. Cada una arranca en una rama p
 
 ## Issue 2 — Contrato estable del motor de clipsai
 
-**Descripción:** Envolver el pipeline actual (`main.py` y módulos asociados) en una interfaz clara y estable — sin tocar su lógica interna — que reciba (video, tipo de contenido, preset) y devuelva (lista de clips con metadata: timestamps, score, ruta, estado).
+**Descripción:** Envolver el pipeline actual (`main.py` y módulos asociados) en una interfaz clara y estable — sin tocar su lógica interna —, eliminando selecciones de tipos de contenido o presets innecesarios.
 
-**Objetivo:** Desacoplar el motor de la capa web para poder desarrollar ambos en paralelo sin que cambios internos del motor rompan la API.
+**Objetivo:** Desacoplar el motor de la capa web utilizando el flujo de video estandarizado que ya funciona correctamente.
 
-**Alcance incluido:** Función/módulo invocable (o wrapper por subprocess) con esa firma fija; manejo de errores devueltos de forma estructurada (no solo prints).
-**Alcance excluido:** Cambios a la lógica de detección, whisper, audio_analyzer o al prompt de IA.
+**Alcance incluido:** Función/módulo invocable (o wrapper por subprocess) con la firma simplificada `(video, transcripcion)`; manejo de errores devueltos de forma estructurada.
+**Alcance excluido:** Detección de tipos de contenido (podcast, gaming) o lógica multi-cámara.
 
 **Dependencias:** Ninguna (puede ir en paralelo con la Issue 1).
 
 **Criterios de aceptación:**
-- Se puede invocar el motor con los 3 tipos de contenido existentes/planeados (opinión, podcast, gaming) desde un único punto de entrada
+- Se puede invocar el motor desde un único punto de entrada pasando únicamente el video y su transcripción
 - Un error interno del pipeline se devuelve como resultado estructurado (no un crash sin info)
 
 **Evidencias:** ejemplo de invocación con salida (input/output) documentado en el PR.
@@ -67,16 +67,15 @@ Orden de ejecución sugerido según dependencias. Cada una arranca en una rama p
 
 **Objetivo:** Que un usuario autenticado pueda iniciar el procesamiento de un video sin bloquear el request.
 
-**Alcance incluido:** `POST /videos` (sube archivo de video **junto con su transcripción**, valida formato/tamaño de ambos), `POST /videos/{id}/jobs` (crea Job en estado `pendiente`, dispara procesamiento en background), `GET /jobs/{id}` (consulta estado).
-**Alcance excluido:** Cancelación de jobs en curso, reintentos automáticos, generación automática de la transcripción dentro de este flujo (el sistema sigue recibiéndola como input del usuario).
+**Alcance incluido:** `POST /videos` (sube archivo de video junto con su transcripción, valida formato/tamaño de ambos), `POST /videos/{id}/jobs` (crea Job en estado `pendiente`, dispara procesamiento en background), `GET /jobs/{id}` (consulta estado).
+**Alcance excluido:** Cancelación de jobs en curso, reintentos automáticos.
 
 **Dependencias:** Issue 1, Issue 2, Issue 3.
 
 **Criterios de aceptación:**
 - Subir un video no bloquea el request (responde antes de que termine el procesamiento)
 - El estado del Job pasa correctamente por `pendiente` → `procesando` → `completado`/`error`
-- Un archivo con formato inválido es rechazado con un mensaje claro
-- Subir un video sin su transcripción es rechazado con un mensaje claro (la transcripción sigue siendo obligatoria)
+- Un archivo con formato inválido o sin su transcripción es rechazado con un mensaje claro
 
 **Evidencias:** captura de polling a `GET /jobs/{id}` mostrando el cambio de estado en el tiempo.
 
@@ -88,7 +87,7 @@ Orden de ejecución sugerido según dependencias. Cada una arranca en una rama p
 
 **Objetivo:** Completar el CRUD que pide la consigna sobre la entidad Clip.
 
-**Alcance incluido:** `GET /clips` (con filtro por video/tipo de contenido/estado), `PATCH /clips/{id}` (título, tags), `DELETE /clips/{id}`, `GET /clips/{id}/descarga`.
+**Alcance incluido:** `GET /clips` (con filtro por video/estado), `PATCH /clips/{id}` (título, tags), `DELETE /clips/{id}`, `GET /clips/{id}/descarga`.
 **Alcance excluido:** Edición del contenido del video en sí (recorte manual).
 
 **Dependencias:** Issue 4.
@@ -113,7 +112,7 @@ Orden de ejecución sugerido según dependencias. Cada una arranca en una rama p
 **Dependencias:** Issue 3, Issue 4, Issue 5.
 
 **Criterios de aceptación:**
-- Cada endpoint devuelve exactamente la misma forma de respuesta que su equivalente en FastAPI (mismo JSON shape, mismos códigos de estado)
+- Cada endpoint devuelve exactamente la misma forma de respuesta que su equivalente en FastAPI
 - Un mismo usuario/token puede operar indistintamente contra cualquiera de los dos backends
 
 **Evidencias:** tabla comparativa endpoint por endpoint con captura de respuesta de ambos backends ante el mismo request.
@@ -122,39 +121,38 @@ Orden de ejecución sugerido según dependencias. Cada una arranca en una rama p
 
 ## Issue 7 — Frontend #1 (React): auth, subida y seguimiento de Jobs
 
-**Descripción:** Vistas de login/registro, subida de video (con selección de tipo de contenido y preset) y pantalla de seguimiento de estado del Job.
+**Descripción:** Vistas de login/registro, subida de video (video + transcripción) y pantalla de seguimiento de estado del Job.
 
 **Objetivo:** Cubrir el flujo de entrada del usuario al sistema.
 
-**Alcance incluido:** Formularios de auth, formulario de subida (video + su transcripción), vista de progreso con polling y feedback visual del estado.
-**Alcance excluido:** Gestión de clips (va en la Issue 8).
+**Alcance incluido:** Formularios de auth, formulario de subida simplificado (video + transcripción), vista de progreso con polling y feedback visual del estado.
+**Alcance excluido:** Selección de tipos de contenido (podcast/gaming) — el formulario es único y simplificado.
 
 **Dependencias:** Issue 3, Issue 4.
 
 **Criterios de aceptación:**
 - Un usuario puede registrarse, loguearse, subir un video y ver el estado de su Job actualizarse sin recargar la página
-- Errores de validación (ej. formato de archivo inválido) se muestran en la UI
+- Errores de validación se muestran claramente en la UI
 
 **Evidencias:** grabación corta o capturas del flujo completo.
 
 ---
 
-## Issue 8 — Frontend #1 (React): gestión de Clips
+## Issue 8 — Frontend #1 (React): gestión y publicación de Clips
 
-**Descripción:** Vista de listado de clips con filtros, edición de metadata, borrado y descarga.
+**Descripción:** Vista de listado de clips con filtros, edición de metadata, borrado, descarga y acción de publicación automática a redes sociales.
 
-**Objetivo:** Completar el flujo de CRUD del lado del usuario.
+**Objetivo:** Completar el flujo de CRUD y la integración social del lado del usuario.
 
-**Alcance incluido:** Listado con filtros, edición inline o modal, confirmación de borrado, botón de descarga.
-**Alcance excluido:** Reproducción/edición de video dentro del navegador más allá de un preview básico.
+**Alcance incluido:** Listado con filtros, edición inline o modal, confirmación de borrado, botón de descarga y botón/modal de "Publicar en Redes".
+**Alcance excluido:** Reproductor avanzado o editor multi-pista dentro del navegador.
 
 **Dependencias:** Issue 5, Issue 7.
 
 **Criterios de aceptación:**
-- Listar, editar y borrar un clip funciona de punta a punta contra el backend
-- El filtro por tipo de contenido/estado actualiza la lista correctamente
+- Listar, editar, borrar y gatillar la publicación de un clip funciona de punta a punta contra el backend
 
-**Evidencias:** capturas del listado antes/después de editar y borrar un clip.
+**Evidencias:** capturas del listado antes/después de editar, borrar o publicar un clip.
 
 ---
 
@@ -178,89 +176,70 @@ Orden de ejecución sugerido según dependencias. Cada una arranca en una rama p
 
 ## Issue 10 — Feature: subtitulado automático (burned-in)
 
-**Descripción:** Generar subtítulos quemados sobre cada clip usando los timestamps palabra por palabra que ya produce el transcriptor.
+**Descripción:** Generar subtítulos quemados sobre cada clip usando los timestamps palabra por palabra que produce el transcriptor.
 
-**Objetivo:** Mejorar la calidad de los clips generados sin depender de edición manual del usuario.
+**Objetivo:** Mejorar la retención y la calidad visual de los clips sin requerir edición manual del usuario.
 
-**Alcance incluido:** Integración al motor (Issue 2) para que cada Clip generado incluya versión con subtítulos quemados; el archivo resultante queda referenciado en la metadata del Clip.
+**Alcance incluido:** Integración al motor (Issue 2) mediante FFmpeg / MoviePy para incrustar subtítulos legibles y sincronizados con el audio; el archivo resultante queda referenciado en la metadata del Clip.
 **Alcance excluido:** Subtítulos editables por el usuario desde el frontend, traducción a otros idiomas.
 
-**Dependencias:** Issue 2, Issue 5 (para exponer el resultado en la API).
+**Dependencias:** Issue 2, Issue 5.
 
 **Criterios de aceptación:**
-- Un clip generado incluye subtítulos legibles y sincronizados con el audio
-- El estilo de subtítulo es consistente entre los 3 tipos de contenido
+- Cada clip generado incluye subtítulos dinámicos, legibles y sincronizados con el audio
 
-**Evidencias:** clip de ejemplo (o captura de frames) mostrando los subtítulos quemados.
+**Evidencias:** clip de ejemplo (o capturas de frames) mostrando los subtítulos quemados.
 
 ---
 
 ## Issue 11 — Feature: generación de hook inicial
 
-**Descripción:** Detectar y anteponer un segmento corto al inicio de cada clip, pensado para enganchar al espectador antes de continuar con el resto del contenido.
+**Descripción:** Detectar y anteponer un segmento corto de alta energía al inicio de cada clip, pensado para enganchar al espectador antes de continuar con el resto del contenido.
 
-**Objetivo:** Aumentar el potencial de retención/viralidad de los clips generados.
+**Objetivo:** Aumentar el potencial de retención/viralidad de los clips en redes de formato vertical.
 
-**Alcance incluido:** Lógica que, reutilizando el scoring de momentos ya existente, identifique el fragmento con mayor potencial de "gancho" dentro del clip y lo reordene/anteponga.
-**Alcance excluido:** Generación de hooks con contenido sintético (texto/voz generada) — el hook sale de material ya existente en el video.
+**Alcance incluido:** Lógica en el motor que, reutilizando el scoring de `audio_analyzer` y la transcripción, identifique el fragmento con mayor "gancho" dentro del clip y lo anteponga al inicio.
+**Alcance excluido:** Generación de contenido sintético (voces o imágenes generadas por IA).
 
 **Dependencias:** Issue 2.
 
 **Criterios de aceptación:**
-- Cada clip generado arranca con el segmento identificado como hook, no con el inicio cronológico original
-- El hook es notablemente distinto (más alta energía/score) que el promedio del resto del clip, verificable con los datos de `audio_analyzer`
+- El clip generado arranca con el segmento identificado como hook
+- El fragmento del hook demuestra un nivel de energía/score superior al promedio del clip
 
 **Evidencias:** comparación de un clip con y sin la feature activada, mostrando el score del segmento elegido como hook.
 
 ---
 
-## Issue 12 — Feature: compositor de podcast (multi-cámara)
+## Issue 12 — Feature: subida automática a redes sociales
 
-**Descripción:** Conmutación de cámara/plano entre 2 personas ubicadas en distintas partes del video, según quién esté hablando.
+**Descripción:** Módulo de integración para publicar directamente clips generados en plataformas de formato vertical (ej. TikTok, Instagram Reels, YouTube Shorts) mediante sus APIs oficiales o un servicio/webhook de automatización.
 
-**Objetivo:** Soportar el tipo de contenido "podcast" de forma completa, no solo como transcripción/detección genérica.
+**Objetivo:** Permitir que el usuario dispare o programe la publicación automática de un clip desde la plataforma.
 
-**Alcance incluido:** Detección de quién habla (por audio o por posición ya conocida de cada persona en el frame), recorte/composición dinámica siguiendo al hablante activo.
-**Alcance excluido:** Detección facial/reconocimiento de identidad; se asume una disposición conocida de las 2 cámaras/posiciones.
+**Alcance incluido:** Endpoint `POST /clips/{id}/publicar` (recibe plataforma destino y metadata opcional), ejecución asíncrona de la subida y actualización del estado del clip a `publicado` guardando la URL/ID devuelta por la red social.
+**Alcance excluido:** Programación con calendario multicuenta avanzado.
 
-**Dependencias:** Issue 2.
+**Dependencias:** Issue 5, Issue 10, Issue 11.
 
 **Criterios de aceptación:**
-- Un video de podcast de prueba con 2 personas genera un clip que conmuta correctamente el encuadre según quién habla
-- No hay saltos de cámara mientras la misma persona sigue hablando
+- Invocar el endpoint de publicación envía el clip a la red seleccionada y registra la respuesta/link exitoso
+- La UI refleja el cambio de estado del clip a `publicado`
 
-**Evidencias:** clip de ejemplo mostrando al menos 2 conmutaciones de cámara correctas.
+**Evidencias:** logs del backend confirmando la llamada exitosa a la API externa y URL/ID de la publicación obtenida.
 
 ---
 
-## Issue 13 — (Opcional) Feature: compositor de gaming
-
-**Descripción:** Composición y formato específico para contenido de videojuegos.
-
-**Objetivo:** Sumar el tercer tipo de contenido si el tiempo del proyecto lo permite.
-
-**Alcance incluido:** Composición vertical adaptada a gameplay + cámara del streamer (si aplica).
-**Alcance excluido:** Todo lo que no sea la composición del formato — la detección de momentos virales ya es genérica.
-
-**Dependencias:** Issue 2.
-
-**Criterios de aceptación:**
-- Un video de gaming de prueba genera un clip con la composición esperada
-
-**Evidencias:** clip de ejemplo.
-
----
-
-## Issue 14 — Seguridad y empaquetado final
+## Issue 13 — Seguridad y empaquetado final
 
 **Descripción:** Eliminar cualquier secreto hardcodeado del código (incluida la API key ya detectada en `main.py`), migrar todo a variables de entorno, y completar el `docker-compose.yml` para levantar el sistema completo.
 
-**Objetivo:** Dejar el sistema en condiciones seguras y desplegables para la entrega.
+**Objetivo:** Dejar el sistema en condiciones seguras y desplegables para la entrega final.
 
 **Alcance incluido:** `.env.example`, revisión de todo el código en busca de secretos, `docker-compose.yml` final con DB + backends + frontends.
 **Alcance excluido:** Configuración de CI/CD, despliegue a un servidor externo.
 
-**Dependencias:** Issue 6, Issue 9.
+**Dependencias:** Issue 6, Issue 9, Issue 12.
 
 **Criterios de aceptación:**
 - `git grep` por patrones de API keys no encuentra nada hardcodeado
@@ -270,18 +249,18 @@ Orden de ejecución sugerido según dependencias. Cada una arranca en una rama p
 
 ---
 
-## Issue 15 — Documentación de API (OpenAPI/Swagger)
+## Issue 14 — Documentación de API (OpenAPI/Swagger)
 
 **Descripción:** Documentar ambos backends con OpenAPI/Swagger.
 
 **Objetivo:** Cumplir el objetivo de documentación medible del trabajo final.
 
-**Alcance incluido:** Spec OpenAPI generada/mantenida para FastAPI y Express, accesible vía `/docs` o similar en ambos.
+**Alcance incluido:** Spec OpenAPI generada/mantenida para FastAPI y Express, accesible vía `/docs` o `/api-docs` en ambos backends.
 **Alcance excluido:** Generación de SDK cliente automático.
 
-**Dependencias:** Issue 6.
+**Dependencias:** Issue 6, Issue 12.
 
 **Criterios de aceptación:**
-- Ambos backends exponen su documentación interactiva y coincide con los endpoints reales
+- Ambos backends exponen su documentación interactiva actualizada con los nuevos endpoints de publicación
 
 **Evidencias:** capturas de `/docs` de ambos backends.
