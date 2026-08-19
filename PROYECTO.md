@@ -29,7 +29,7 @@ La lógica de detección y edición ya validada por el motor **no se modifica** 
 ## 3. Alcances Funcionales
 
 - Registro e inicio de sesión con JWT
-- Subida de video, con selección de tipo de contenido (opinión, gaming, podcast) y preset de calidad (viral / natural / cinemático)
+- Subida de video, con selección de tipo de contenido (opinión, gaming, podcast) y preset de calidad (viral / natural / cinemático), acompañada de la transcripción del video (el sistema sigue requiriéndola como input, no la genera de forma transparente)
 - Disparo asíncrono del análisis (creación de un `Job`) con consulta de estado (`pendiente` → `procesando` → `completado` / `error`)
 - Detección de momentos por análisis de audio (RMS, eventos) combinada con IA sobre la transcripción — lógica ya existente, sin cambios
 - **Subtitulado automático**: generación de subtítulos quemados (burned-in) sobre cada clip, sincronizados con la transcripción ya generada por el pipeline
