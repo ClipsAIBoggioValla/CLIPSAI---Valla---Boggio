@@ -1,0 +1,6 @@
+# Fuerza finales de linea LF en scripts que corren en contenedores Linux
+# (evita que Git en Windows los convierta a CRLF y rompa el shebang).
+*.sh              text eol=lf
+*.sql             text eol=lf
+docker-compose.yml text eol=lf
+.env.example      text eol=lf
