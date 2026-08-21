@@ -1,0 +1,55 @@
+# ==============================================================================
+# clipsai — Infraestructura base (Issue 1)
+# ------------------------------------------------------------------------------
+# Levanta PostgreSQL 15 con:
+#   - Persistencia via volumen nombrado (postgres_data)
+#   - Scripts DDL de inicializacion en ./init-scripts/
+#   - Healthcheck con pg_isready para que otros servicios puedan depender de el
+#
+# Uso:
+#   1) cp .env.example .env  (y editar valores)
+#   2) docker compose up -d
+#   3) docker compose logs -f db   # ver init scripts corriendo
+#   4) docker compose exec db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+# ==============================================================================
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: clipsai-db
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      # Locale y timezone consistentes para timestamps del dominio
+      PGTZ: ${POSTGRES_TZ:-UTC}
+      TZ: ${POSTGRES_TZ:-UTC}
+    ports:
+      # Se expone el puerto configurable en el host, siempre contra el 5432 interno
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      # Persistencia de datos entre `docker compose down` y `up`
+      - postgres_data:/var/lib/postgresql/data
+      # Scripts DDL/seed ejecutados UNA sola vez, al inicializar el volumen vacio
+      - ./init-scripts:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # pg_isready se autentica con el usuario/db reales para evitar falsos positivos
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\" -h 127.0.0.1 -p 5432"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks:
+      - clipsai-net
+
+volumes:
+  postgres_data:
+    name: clipsai_postgres_data
+
+networks:
+  clipsai-net:
+    name: clipsai-net
+    driver: bridge
