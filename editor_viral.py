@@ -187,7 +187,7 @@ class VideoEditor:
         criterio = ""
         
         if info_path.exists():
-            with open(info_path, 'r') as f:
+            with open(info_path, 'r', encoding='utf-8') as f:
                 info_clips = json.load(f)
             if index < len(info_clips):
                 info = info_clips[index]
