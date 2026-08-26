@@ -10,6 +10,13 @@ import json
 import time
 import subprocess
 import sys
+
+# Forzar la codificación de la consola a UTF-8 en Windows para evitar errores
+# al imprimir caracteres especiales (✓, ►, etc.) en PowerShell
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
 import requests
 from typing import List, Dict, Optional
 
@@ -520,6 +527,21 @@ def llamar_openai_compatible(prompt: str) -> str:
 
 def obtener_clips_ia(transcripcion: str, datos_audio: List[Dict], datos_enriquecidos: Dict = None) -> List[Dict]:
     """Envía datos a la IA y retorna los clips detectados."""
+    # Validación amigable: verificar que esté configurada al menos una clave de IA
+    # antes del paso [4/6].
+    has_anthropic = bool(ANTHROPIC_API_KEY)
+    has_openai = bool(os.getenv("OPENAI_API_KEY", ""))
+    has_deepseek = bool(os.getenv("DEEPSEEK_API_KEY", ""))
+    
+    if not has_anthropic and not has_openai and not has_deepseek:
+        raise ValueError(
+            "Falta la clave de API para la inteligencia artificial. "
+            "Por favor completa una de estas variables en tu archivo `.env`: "
+            "- ANTHROPIC_API_KEY (para Claude/Anthropic) - ya viene en el .env example"
+            "- OPENAI_API_KEY (para OpenAI/DirectSeek API) - ya viene en el .env example"
+            "- DEEPSEEK_API_KEY (para DeepSeek SDK directo) - ya viene en el .env example"
+        )
+
     proveedor = "Claude (Anthropic)" if ANTHROPIC_API_KEY else "DeepSeek"
     print(f"[4/6] Analizando con IA ({proveedor})...")
 
