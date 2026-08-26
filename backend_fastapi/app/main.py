@@ -8,9 +8,9 @@ from fastapi import FastAPI
 
 from .config import get_settings
 from .database import Base, engine
-from .routers import auth, jobs, videos
+from .routers import auth, clips, jobs, videos
 
-from .models import Job, Usuario, Video  # noqa: F401 — registra modelos para create_all
+from .models import Clip, Job, Usuario, Video  # noqa: F401 — registra modelos para create_all
 
 _settings = get_settings()
 
@@ -26,6 +26,11 @@ async def lifespan(app: FastAPI):
         conn.execute(text("ALTER TABLE videos ADD COLUMN IF NOT EXISTS duration_seconds DOUBLE PRECISION;"))
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS result_metadata JSONB;"))
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS error_message TEXT;"))
+        conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS video_id UUID;"))
+        conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS score DOUBLE PRECISION;"))
+        conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS tags JSONB;"))
+        conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'ready';"))
+        conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;"))
         try:
             conn.execute(text("ALTER TABLE jobs DROP CONSTRAINT IF EXISTS chk_jobs_status;"))
         except Exception:
@@ -60,6 +65,7 @@ app = FastAPI(
 app.include_router(auth.router)
 app.include_router(videos.router)
 app.include_router(jobs.router)
+app.include_router(clips.router)
 
 
 @app.get("/health", tags=["infra"], summary="Healthcheck simple")
