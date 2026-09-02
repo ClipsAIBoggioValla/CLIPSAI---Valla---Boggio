@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .database import Base, engine
-from .routers import auth, clips, jobs, videos
+from .routers import auth, clips, jobs, stats, videos
 
 from .models import Clip, Job, Usuario, Video  # noqa: F401 — registra modelos para create_all
 
@@ -69,6 +69,8 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     ],
@@ -96,6 +98,7 @@ app.include_router(auth.router)
 app.include_router(videos.router)
 app.include_router(jobs.router)
 app.include_router(clips.router)
+app.include_router(stats.router)
 
 
 @app.get("/health", tags=["infra"], summary="Healthcheck simple")
