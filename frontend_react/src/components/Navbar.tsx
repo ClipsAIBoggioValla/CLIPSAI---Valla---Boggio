@@ -25,6 +25,9 @@ export default function Navbar() {
             <NavLink to="/dashboard" className={({ isActive }) => `${linkBase} ${isActive ? active : idle}`}>
               Dashboard
             </NavLink>
+            <NavLink to="/clips" className={({ isActive }) => `${linkBase} ${isActive ? active : idle}`}>
+              Biblioteca
+            </NavLink>
             <NavLink to="/upload" className={({ isActive }) => `${linkBase} ${isActive ? active : idle}`}>
               Subir
             </NavLink>

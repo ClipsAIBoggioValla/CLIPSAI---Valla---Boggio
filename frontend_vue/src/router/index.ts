@@ -7,6 +7,7 @@ const router = createRouter({
     { path: '/', redirect: '/dashboard' },
     { path: '/auth', name: 'auth', component: () => import('@/views/AuthView.vue') },
     { path: '/dashboard', name: 'dashboard', component: () => import('@/views/DashboardView.vue'), meta: { requiresAuth: true } },
+    { path: '/clips', name: 'clips', component: () => import('@/views/ClipLibraryView.vue'), meta: { requiresAuth: true } },
     { path: '/upload', name: 'upload', component: () => import('@/views/UploadView.vue'), meta: { requiresAuth: true } },
     { path: '/jobs/:jobId', name: 'job', component: () => import('@/views/JobStatusView.vue'), meta: { requiresAuth: true }, props: true },
     { path: '/:pathMatch(.*)*', redirect: '/dashboard' },
