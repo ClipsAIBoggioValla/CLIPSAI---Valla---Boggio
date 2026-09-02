@@ -21,7 +21,9 @@ EXPOSE 8000
 
 # Usuario no-root
 RUN useradd --create-home --shell /bin/bash appuser \
-    && chown -R appuser:appuser /app
+    && chown -R appuser:appuser /app \
+    && mkdir -p /storage/uploads \
+    && chown appuser:appuser /storage/uploads
 USER appuser
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

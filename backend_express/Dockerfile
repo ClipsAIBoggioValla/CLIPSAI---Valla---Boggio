@@ -15,7 +15,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Instalar dependencias de Node.js
-COPY backend_express/package*.json ./
+COPY package*.json ./
 RUN npm ci --only=production
 
 # Instalar dependencias de Python requeridas por el motor de subproceso
@@ -23,10 +23,14 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt --break-system-packages
 
 # Copiar el código del backend Express y los scripts del motor Python
-COPY backend_express/src ./src
-COPY engine.py engine_subprocess.py ./
+COPY src ./src
+COPY scripts ./scripts
+COPY ../engine.py ../engine_subprocess.py ./
 
 EXPOSE 8001
+
+# Directorio compartido de subidas (volumen clipsai_uploads)
+RUN mkdir -p /storage/uploads && chown node:node /storage/uploads
 
 # Usuario no-root (usando el usuario 'node' nativo de la imagen oficial)
 RUN chown -R node:node /app

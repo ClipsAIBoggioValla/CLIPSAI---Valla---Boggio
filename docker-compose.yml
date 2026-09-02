@@ -64,13 +64,53 @@ services:
       JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-60}
       APP_ENV: ${APP_ENV:-development}
       TZ: ${POSTGRES_TZ:-UTC}
+      UPLOAD_DIR: /storage/uploads
     ports:
       - "${BACKEND_FASTAPI_PORT:-8000}:8000"
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      # Volumen compartido de subidas entre ambos backends (paridad Issue 6)
+      - clipsai_uploads:/storage/uploads
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - clipsai-net
+
+  # ----------------------------------------------------------------------------
+  # Backend Express (Issue 6 — paridad completa con FastAPI)
+  # ----------------------------------------------------------------------------
+  backend_express:
+    build:
+      context: ./backend_express
+      dockerfile: Dockerfile
+    container_name: clipsai-backend-express
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: 8001
+      DATABASE_URL: ${EXPRESS_DATABASE_URL:-postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-60}
+      UPLOAD_DIR: /storage/uploads
+      CLIPSAI_PYTHON: python3
+      TZ: ${POSTGRES_TZ:-UTC}
+    ports:
+      - "${BACKEND_EXPRESS_PORT:-8001}:8001"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      # Volumen compartido de subidas entre ambos backends (paridad Issue 6)
+      - clipsai_uploads:/storage/uploads
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8001/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -81,6 +121,8 @@ services:
 volumes:
   postgres_data:
     name: clipsai_postgres_data
+  clipsai_uploads:
+    name: clipsai_uploads
 
 networks:
   clipsai-net:
