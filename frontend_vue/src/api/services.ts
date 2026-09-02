@@ -49,6 +49,29 @@ export const statsService = {
   },
 }
 
+export const clipService = {
+  async getClips(params?: import('@/types/api').ClipListParams): Promise<import('@/types/api').ClipListResponse> {
+    const cleaned: Record<string, string> = {}
+    if (params?.q?.trim()) cleaned.q = params.q.trim()
+    if (params?.min_score !== undefined) cleaned.min_score = String(params.min_score)
+    if (params?.sort_by) cleaned.sort_by = params.sort_by
+    if (params?.page) cleaned.page = String(params.page)
+    if (params?.limit) cleaned.limit = String(params.limit)
+    if (params?.video_id) cleaned.video_id = params.video_id
+    if (params?.status) cleaned.status = params.status
+    const qs = Object.keys(cleaned).length ? `?${new URLSearchParams(cleaned).toString()}` : ''
+    const { data } = await apiClient.get<import('@/types/api').ClipListResponse>(`/clips${qs}`)
+    return data
+  },
+  async list(params?: { video_id?: string; status?: string }): Promise<import('@/types/api').ClipResponse[]> {
+    const qs = params
+      ? `?${new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined) as [string, string][]).toString()}`
+      : ''
+    const { data } = await apiClient.get<import('@/types/api').ClipResponse[]>(`/clips${qs}`)
+    return data
+  },
+}
+
 export const jobService = {
   async createJob(videoId: string): Promise<JobResponse> {
     const { data: raw } = await apiClient.post<JobResponse & { id?: string; job_id?: string }>(`/videos/${videoId}/jobs`)
