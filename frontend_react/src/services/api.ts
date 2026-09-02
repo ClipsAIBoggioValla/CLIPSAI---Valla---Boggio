@@ -1,0 +1,87 @@
+import { http } from '@/lib/apiClient'
+import type {
+  AuthToken,
+  AuthUser,
+  ClipResponse,
+  ClipUpdate,
+  JobResponse,
+  UserLogin,
+  UserRegister,
+  VideoUploadResponse,
+} from '@/types/api'
+
+function normalizeVideo(raw: VideoUploadResponse & { filename?: string; title?: string }): VideoUploadResponse {
+  const filename = raw.filename ?? raw.title ?? ''
+  const title = raw.title ?? raw.filename ?? filename
+  return { ...raw, filename, title }
+}
+
+function normalizeJob(raw: JobResponse & { id?: string; job_id?: string; status?: string }): JobResponse {
+  const id = raw.id ?? raw.job_id ?? ''
+  const status = (raw.status ?? 'PENDING').toString().toUpperCase() as JobResponse['status']
+  return { ...raw, id, job_id: raw.job_id ?? id, status } as JobResponse
+}
+
+export const authService = {
+  login(data: UserLogin): Promise<AuthToken> {
+    return http.postJson<AuthToken>('/auth/login', data, { noAuth: true })
+  },
+  register(data: UserRegister): Promise<AuthUser> {
+    return http.postJson<AuthUser>('/auth/registro', data, { noAuth: true })
+  },
+  me(): Promise<AuthUser> {
+    return http.get<AuthUser>('/auth/me')
+  },
+}
+
+export const videoService = {
+  async upload(videoFile: File, transcriptFile: File): Promise<VideoUploadResponse> {
+    const fd = new FormData()
+    fd.append('video', videoFile, videoFile.name)
+    fd.append('transcription', transcriptFile, transcriptFile.name)
+    const raw = await http.post<VideoUploadResponse>('/videos', fd)
+    return normalizeVideo(raw as VideoUploadResponse & { filename?: string; title?: string })
+  },
+  async list(): Promise<VideoUploadResponse[]> {
+    const raws = await http.get<(VideoUploadResponse & { filename?: string; title?: string })[]>('/videos')
+    return raws.map(normalizeVideo)
+  },
+}
+
+export const jobService = {
+  async createJob(videoId: string): Promise<JobResponse> {
+    const raw = await http.post<JobResponse & { id?: string; job_id?: string }>(`/videos/${videoId}/jobs`)
+    return normalizeJob(raw as JobResponse & { id?: string; job_id?: string })
+  },
+  async getJobStatus(jobId: string): Promise<JobResponse> {
+    const raw = await http.get<JobResponse & { id?: string; job_id?: string }>(`/jobs/${jobId}`)
+    return normalizeJob(raw as JobResponse & { id?: string; job_id?: string })
+  },
+}
+
+export const clipService = {
+  list(params?: { video_id?: string; status?: string }): Promise<ClipResponse[]> {
+    const qs = params
+      ? '?' +
+        new URLSearchParams(
+          Object.entries(params).filter(([, v]) => v !== undefined) as [string, string][],
+        ).toString()
+      : ''
+    return http.get<ClipResponse[]>(`/clips${qs}`)
+  },
+  get(clipId: string): Promise<ClipResponse> {
+    return http.get<ClipResponse>(`/clips/${clipId}`)
+  },
+  update(clipId: string, data: ClipUpdate): Promise<ClipResponse> {
+    return http.patchJson<ClipResponse>(`/clips/${clipId}`, data)
+  },
+  remove(clipId: string): Promise<void> {
+    return http.delete<void>(`/clips/${clipId}`)
+  },
+  downloadUrl(clipId: string): string {
+    const raw: string =
+      ((import.meta as unknown as { env?: Record<string, string> })?.env?.VITE_API_URL ?? '').trim()
+    const base = (raw || 'http://localhost:8000').replace(/\/$/, '')
+    return `${base}/clips/${clipId}/descarga`
+  },
+}

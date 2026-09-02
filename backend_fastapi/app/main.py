@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .database import Base, engine
@@ -60,7 +61,36 @@ app = FastAPI(
         "Se conecta a la Postgres dockerizada de la Issue 1."
     ),
     lifespan=lifespan,
+    redirect_slashes=False,
 )
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.middleware("http")
+async def handle_options_preflight(request, call_next):  # type: ignore[no-untyped-def]
+    if request.method == "OPTIONS":
+        from fastapi.responses import Response
+
+        response = Response(status_code=200)
+        origin = request.headers.get("origin", "*")
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Methods"] = "POST, GET, OPTIONS, PUT, DELETE, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        return response
+    return await call_next(request)
 
 app.include_router(auth.router)
 app.include_router(videos.router)
