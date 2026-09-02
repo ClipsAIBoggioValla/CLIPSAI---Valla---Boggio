@@ -1,5 +1,5 @@
 import { apiClient } from '@/api/client'
-import type { AuthToken, AuthUser, JobResponse, UserLogin, UserRegister, VideoUploadResponse } from '@/types/api'
+import type { AuthToken, AuthUser, JobResponse, StatsSummary, UserLogin, UserRegister, VideoUploadResponse } from '@/types/api'
 
 function normalizeVideo(raw: VideoUploadResponse & { filename?: string; title?: string }): VideoUploadResponse {
   const filename = raw.filename ?? raw.title ?? ''
@@ -39,6 +39,13 @@ export const videoService = {
   async list(): Promise<VideoUploadResponse[]> {
     const { data: raws } = await apiClient.get<(VideoUploadResponse & { filename?: string; title?: string })[]>('/videos')
     return raws.map(normalizeVideo)
+  },
+}
+
+export const statsService = {
+  async getSummary(): Promise<StatsSummary> {
+    const { data } = await apiClient.get<StatsSummary>('/stats/summary')
+    return data
   },
 }
 
