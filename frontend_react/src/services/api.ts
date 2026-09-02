@@ -5,6 +5,7 @@ import type {
   ClipResponse,
   ClipUpdate,
   JobResponse,
+  StatsSummary,
   UserLogin,
   UserRegister,
   VideoUploadResponse,
@@ -56,6 +57,12 @@ export const jobService = {
   async getJobStatus(jobId: string): Promise<JobResponse> {
     const raw = await http.get<JobResponse & { id?: string; job_id?: string }>(`/jobs/${jobId}`)
     return normalizeJob(raw as JobResponse & { id?: string; job_id?: string })
+  },
+}
+
+export const statsService = {
+  getSummary(): Promise<StatsSummary> {
+    return http.get<StatsSummary>('/stats/summary')
   },
 }
 
