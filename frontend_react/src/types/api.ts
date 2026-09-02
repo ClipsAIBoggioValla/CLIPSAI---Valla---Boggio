@@ -102,6 +102,27 @@ export class ApiError extends Error {
   }
 }
 
+export interface ScoreDistributionItem {
+  range: string
+  count: number
+  label: string
+}
+
+export interface RecentJobSummary {
+  id: string
+  status: string
+  created_at: string
+}
+
+export interface StatsSummary {
+  total_videos: number
+  total_clips: number
+  avg_score: number
+  estimated_time_saved_minutes: number
+  score_distribution: ScoreDistributionItem[]
+  recent_job: RecentJobSummary | null
+}
+
 export function getJobId(job: JobResponse): string {
   return job.job_id ?? job.id
 }
