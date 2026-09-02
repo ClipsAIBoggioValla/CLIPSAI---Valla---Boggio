@@ -1,4 +1,4 @@
-from .clip import ClipBase, ClipResponse, ClipUpdate
+from .clip import ClipBase, ClipListItem, ClipListResponse, ClipResponse, ClipUpdate
 from .job import JobResponse
 from .stats import RecentJobSummary, ScoreDistributionItem, StatsSummaryResponse
 from .token import Token, TokenPayload
@@ -7,6 +7,8 @@ from .video import VideoResponse
 
 __all__ = [
     "ClipBase",
+    "ClipListItem",
+    "ClipListResponse",
     "ClipResponse",
     "ClipUpdate",
     "JobResponse",

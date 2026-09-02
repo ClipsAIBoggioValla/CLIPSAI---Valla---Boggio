@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import AuthPage from '@/pages/AuthPage'
+import ClipLibraryPage from '@/pages/ClipLibraryPage'
 import DashboardPage from '@/pages/DashboardPage'
 import UploadPage from '@/pages/UploadPage'
 import JobStatusPage from '@/pages/JobStatusPage'
@@ -17,6 +18,14 @@ export default function App() {
           element={
             <ProtectedRoute>
               <DashboardPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/clips"
+          element={
+            <ProtectedRoute>
+              <ClipLibraryPage />
             </ProtectedRoute>
           }
         />
