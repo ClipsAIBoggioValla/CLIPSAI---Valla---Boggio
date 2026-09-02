@@ -25,6 +25,13 @@ function handleLogout() {
             Dashboard
           </RouterLink>
           <RouterLink
+            to="/clips"
+            class="px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+            :class="$route.path === '/clips' ? 'bg-violet-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'"
+          >
+            Biblioteca
+          </RouterLink>
+          <RouterLink
             to="/upload"
             class="px-3 py-2 rounded-lg text-sm font-medium transition-colors"
             :class="$route.path === '/upload' ? 'bg-violet-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'"
