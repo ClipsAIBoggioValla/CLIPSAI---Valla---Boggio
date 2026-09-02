@@ -41,11 +41,11 @@ async function handleSubmit() {
 </script>
 
 <template>
-  <div class="min-h-screen bg-gray-950 text-white">
+  <div class="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
     <div class="max-w-3xl mx-auto px-4 py-8 sm:py-12">
       <div class="mb-8">
         <h1 class="text-2xl sm:text-3xl font-bold tracking-tight">Subir video</h1>
-        <p class="text-gray-400 mt-2">Sube tu video y su transcripción para generar clips automáticamente.</p>
+        <p class="text-slate-600 mt-2">Sube tu video y su transcripción para generar clips automáticamente.</p>
       </div>
 
       <div v-if="error" role="alert" class="mb-6 rounded-xl bg-red-500/10 border border-red-500/30 px-4 py-3 flex gap-3">
@@ -53,37 +53,37 @@ async function handleSubmit() {
         <p class="text-sm text-red-300">{{ error }}</p>
       </div>
 
-      <form class="bg-gray-900 border border-gray-800 rounded-2xl p-6 sm:p-8 space-y-6" @submit.prevent="handleSubmit">
+      <form class="bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 shadow-sm rounded-2xl p-6 sm:p-8 space-y-6" @submit.prevent="handleSubmit">
         <div>
-          <label class="block text-sm font-medium text-gray-300 mb-2">Archivo de Video <span class="text-violet-400">*</span></label>
-          <label class="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-700 bg-gray-800/50 hover:bg-gray-800 hover:border-gray-600 transition p-6 sm:p-8 cursor-pointer">
+          <label class="block text-slate-900 dark:text-white font-bold mb-2">Archivo de Video <span class="text-brand-500">*</span></label>
+          <label class="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-600 hover:border-violet-500 bg-slate-50 dark:bg-slate-800/50 border-2 border-dashed border-slate-300 dark:border-slate-600 hover:border-violet-500 transition p-6 sm:p-8 cursor-pointer">
             <span class="text-3xl mb-2">🎬</span>
-            <span class="text-sm font-medium text-gray-200">{{ videoFile ? videoFile.name : 'Arrastra o selecciona tu video' }}</span>
-            <span class="text-xs text-gray-500 mt-1">.mp4, .mov (máx. 500MB)</span>
-            <span v-if="videoFile" class="text-xs text-violet-400 mt-2">{{ (videoFile.size / 1024 / 1024).toFixed(1) }} MB</span>
+            <span class="text-slate-800 dark:text-slate-200 font-semibold">{{ videoFile ? videoFile.name : 'Arrastra o selecciona tu video' }}</span>
+            <span class="text-slate-600 dark:text-slate-400 font-medium mt-1">.mp4, .mov (máx. 500MB)</span>
+            <span v-if="videoFile" class="text-xs text-brand-500 mt-2">{{ (videoFile.size / 1024 / 1024).toFixed(1) }} MB</span>
             <input type="file" accept=".mp4,.mov,.avi,video/mp4,video/quicktime" class="hidden" :disabled="status !== 'idle'" @change="onVideoChange" />
           </label>
         </div>
 
         <div>
-          <label class="block text-sm font-medium text-gray-300 mb-2">Archivo de Transcripción <span class="text-violet-400">*</span></label>
-          <label class="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-700 bg-gray-800/50 hover:bg-gray-800 hover:border-gray-600 transition p-6 sm:p-8 cursor-pointer">
+          <label class="block text-slate-900 dark:text-white font-bold mb-2">Archivo de Transcripción <span class="text-brand-500">*</span></label>
+          <label class="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-600 hover:border-violet-500 bg-slate-50 dark:bg-slate-800/50 border-2 border-dashed border-slate-300 dark:border-slate-600 hover:border-violet-500 transition p-6 sm:p-8 cursor-pointer">
             <span class="text-3xl mb-2">📄</span>
-            <span class="text-sm font-medium text-gray-200">{{ transcriptFile ? transcriptFile.name : 'Arrastra o selecciona tu transcripción' }}</span>
-            <span class="text-xs text-gray-500 mt-1">.txt (UTF-8)</span>
-            <span v-if="transcriptFile" class="text-xs text-violet-400 mt-2">{{ (transcriptFile.size / 1024).toFixed(0) }} KB</span>
+            <span class="text-slate-800 dark:text-slate-200 font-semibold">{{ transcriptFile ? transcriptFile.name : 'Arrastra o selecciona tu transcripción' }}</span>
+            <span class="text-slate-600 dark:text-slate-400 font-medium mt-1">.txt (UTF-8)</span>
+            <span v-if="transcriptFile" class="text-xs text-brand-500 mt-2">{{ (transcriptFile.size / 1024).toFixed(0) }} KB</span>
             <input type="file" accept=".txt,.srt,text/plain" class="hidden" :disabled="status !== 'idle'" @change="onTranscriptChange" />
           </label>
         </div>
 
-        <button type="submit" :disabled="status !== 'idle' || !videoFile || !transcriptFile" class="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:bg-gray-700 disabled:text-gray-400 disabled:cursor-not-allowed text-white font-medium py-3.5 px-4 transition">
+        <button type="submit" :disabled="status !== 'idle' || !videoFile || !transcriptFile" class="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold py-3.5 px-4 transition">
           <span v-if="status !== 'idle'" class="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
           {{ status === 'uploading' ? 'Subiendo archivos...' : status === 'creating_job' ? 'Iniciando procesamiento...' : 'Subir y procesar' }}
         </button>
 
         <div v-if="status !== 'idle'" class="space-y-2">
-          <div class="h-2 bg-gray-800 rounded-full overflow-hidden"><div class="h-full w-full bg-violet-600 animate-pulse rounded-full" /></div>
-          <p class="text-xs text-center text-gray-500">No cierres esta ventana</p>
+          <div class="h-2 bg-white dark:bg-slate-800 rounded-full overflow-hidden"><div class="h-full w-full bg-gradient-to-r from-violet-600 to-indigo-600 animate-pulse rounded-full" /></div>
+          <p class="text-xs text-center text-slate-600">No cierres esta ventana</p>
         </div>
       </form>
     </div>

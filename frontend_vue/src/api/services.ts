@@ -49,6 +49,37 @@ export const statsService = {
   },
 }
 
+export const userService = {
+  async getMe(): Promise<import('@/types/api').UserProfile> {
+    const { data } = await apiClient.get<import('@/types/api').UserProfile>('/users/me')
+    return data
+  },
+  async updateMe(data: import('@/types/api').UserUpdate): Promise<import('@/types/api').UserProfile> {
+    const { data: res } = await apiClient.patch<import('@/types/api').UserProfile>('/users/me', data)
+    return res
+  },
+  async changePassword(data: import('@/types/api').PasswordChange): Promise<{ detail: string }> {
+    const { data: res } = await apiClient.put<{ detail: string }>('/users/me/password', data)
+    return res
+  },
+}
+
+export const clipService = {
+  async getClips(params?: import('@/types/api').ClipListParams): Promise<import('@/types/api').ClipListResponse> {
+    const cleaned: Record<string, string> = {}
+    if (params?.q?.trim()) cleaned.q = params.q.trim()
+    if (params?.min_score !== undefined) cleaned.min_score = String(params.min_score)
+    if (params?.sort_by) cleaned.sort_by = params.sort_by
+    if (params?.page) cleaned.page = String(params.page)
+    if (params?.limit) cleaned.limit = String(params.limit)
+    if (params?.video_id) cleaned.video_id = params.video_id
+    if (params?.status) cleaned.status = params.status
+    const qs = Object.keys(cleaned).length ? `?${new URLSearchParams(cleaned).toString()}` : ''
+    const { data } = await apiClient.get<import('@/types/api').ClipListResponse>(`/clips${qs}`)
+    return data
+  },
+}
+
 export const jobService = {
   async createJob(videoId: string): Promise<JobResponse> {
     const { data: raw } = await apiClient.post<JobResponse & { id?: string; job_id?: string }>(`/videos/${videoId}/jobs`)

@@ -14,12 +14,67 @@ export interface AuthToken {
   token_type: string
 }
 
+export type ThemePreference = 'dark' | 'light' | 'system'
+
 export interface AuthUser {
   id: string
   email: string
   full_name: string | null
+  avatar_url?: string | null
+  theme_preference?: ThemePreference
   created_at: string
   updated_at: string
+}
+
+export interface UserProfile {
+  id: string
+  email: string
+  full_name: string | null
+  avatar_url: string | null
+  theme_preference: ThemePreference
+  created_at: string
+}
+
+export interface UserUpdate {
+  full_name?: string | null
+  avatar_url?: string | null
+  theme_preference?: ThemePreference
+}
+
+export interface PasswordChange {
+  current_password: string
+  new_password: string
+}
+
+export interface ClipListItem {
+  id: string
+  job_id: string
+  title: string | null
+  score: number | null
+  start_time: number
+  end_time: number
+  transcript: string | null
+  created_at: string
+}
+
+export interface ClipListResponse {
+  items: ClipListItem[]
+  total: number
+  page: number
+  limit: number
+  total_pages: number
+}
+
+export type ClipSortBy = 'created_at_desc' | 'created_at_asc' | 'score_desc' | 'score_asc'
+
+export interface ClipListParams {
+  q?: string
+  min_score?: number
+  sort_by?: ClipSortBy
+  page?: number
+  limit?: number
+  video_id?: string
+  status?: string
 }
 
 export interface VideoUploadResponse {
