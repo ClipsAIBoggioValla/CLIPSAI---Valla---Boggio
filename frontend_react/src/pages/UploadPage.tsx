@@ -48,11 +48,11 @@ export default function UploadPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white">
+    <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
       <div className="max-w-3xl mx-auto px-4 py-8 sm:py-12">
         <div className="mb-8">
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Subir video</h1>
-          <p className="text-gray-400 mt-2">Sube tu video y su transcripción para generar clips automáticamente.</p>
+          <p className="text-slate-600 mt-2">Sube tu video y su transcripción para generar clips automáticamente.</p>
         </div>
 
         {error && (
@@ -62,19 +62,19 @@ export default function UploadPage() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="bg-gray-900 border border-gray-800 rounded-2xl p-6 sm:p-8 space-y-6">
+        <form onSubmit={handleSubmit} className="bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 shadow-sm rounded-2xl p-6 sm:p-8 space-y-6">
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Archivo de Video <span className="text-violet-400">*</span>
+            <label className="block text-slate-900 dark:text-white font-bold mb-2">
+              Archivo de Video <span className="text-brand-500">*</span>
             </label>
-            <label className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-700 bg-gray-800/50 hover:bg-gray-800 hover:border-gray-600 transition p-6 sm:p-8 cursor-pointer">
+            <label className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-600 hover:border-violet-500 bg-slate-50 dark:bg-slate-800/50 border-2 border-dashed border-slate-300 dark:border-slate-600 hover:border-violet-500 transition p-6 sm:p-8 cursor-pointer">
               <span className="text-3xl mb-2">🎬</span>
-              <span className="text-sm font-medium text-gray-200">
+              <span className="text-slate-800 dark:text-slate-200 font-semibold">
                 {videoFile ? videoFile.name : 'Arrastra o selecciona tu video'}
               </span>
-              <span className="text-xs text-gray-500 mt-1">.mp4, .mov (máx. 500MB)</span>
+              <span className="text-slate-600 dark:text-slate-400 font-medium mt-1">.mp4, .mov (máx. 500MB)</span>
               {videoFile && (
-                <span className="text-xs text-violet-400 mt-2">{(videoFile.size / 1024 / 1024).toFixed(1)} MB</span>
+                <span className="text-xs text-brand-500 mt-2">{(videoFile.size / 1024 / 1024).toFixed(1)} MB</span>
               )}
               <input
                 type="file"
@@ -87,17 +87,17 @@ export default function UploadPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Archivo de Transcripción <span className="text-violet-400">*</span>
+            <label className="block text-slate-900 dark:text-white font-bold mb-2">
+              Archivo de Transcripción <span className="text-brand-500">*</span>
             </label>
-            <label className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-700 bg-gray-800/50 hover:bg-gray-800 hover:border-gray-600 transition p-6 sm:p-8 cursor-pointer">
+            <label className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-600 hover:border-violet-500 bg-slate-50 dark:bg-slate-800/50 border-2 border-dashed border-slate-300 dark:border-slate-600 hover:border-violet-500 transition p-6 sm:p-8 cursor-pointer">
               <span className="text-3xl mb-2">📄</span>
-              <span className="text-sm font-medium text-gray-200">
+              <span className="text-slate-800 dark:text-slate-200 font-semibold">
                 {transcriptFile ? transcriptFile.name : 'Arrastra o selecciona tu transcripción'}
               </span>
-              <span className="text-xs text-gray-500 mt-1">.txt (UTF-8)</span>
+              <span className="text-slate-600 dark:text-slate-400 font-medium mt-1">.txt (UTF-8)</span>
               {transcriptFile && (
-                <span className="text-xs text-violet-400 mt-2">{(transcriptFile.size / 1024).toFixed(0)} KB</span>
+                <span className="text-xs text-brand-500 mt-2">{(transcriptFile.size / 1024).toFixed(0)} KB</span>
               )}
               <input
                 type="file"
@@ -112,7 +112,7 @@ export default function UploadPage() {
           <button
             type="submit"
             disabled={isUploading || !videoFile || !transcriptFile}
-            className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:bg-gray-700 disabled:text-gray-400 disabled:cursor-not-allowed text-white font-medium py-3.5 px-4 transition"
+            className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold py-3.5 px-4 transition"
           >
             {isUploading ? (
               <>
@@ -126,10 +126,10 @@ export default function UploadPage() {
 
           {isUploading && (
             <div className="space-y-2">
-              <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
-                <div className="h-full w-full bg-violet-600 animate-pulse rounded-full" />
+              <div className="h-2 bg-white dark:bg-slate-800 rounded-full overflow-hidden">
+                <div className="h-full w-full bg-gradient-to-r from-violet-600 to-indigo-600 animate-pulse rounded-full" />
               </div>
-              <p className="text-xs text-center text-gray-500">No cierres esta ventana</p>
+              <p className="text-xs text-center text-slate-600">No cierres esta ventana</p>
             </div>
           )}
         </form>

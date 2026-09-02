@@ -1,3 +1,4 @@
+/* WCAG Auth: text-slate-950 dark:text-white font-extrabold text-3xl tracking-tight | text-slate-700 dark:text-slate-300 font-medium | text-slate-900 dark:text-slate-200 font-bold text-sm mb-1.5 | bg-slate-50 dark:bg-slate-800 text-slate-950 dark:text-white font-semibold border-2 border-slate-300 dark:border-slate-600 focus:border-violet-600 focus:bg-white | text-slate-700 dark:text-slate-300 font-medium | text-violet-700 dark:text-violet-400 font-bold hover:underline */
 import { useState, type FormEvent } from 'react'
 import { useNavigate, Navigate } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
@@ -48,15 +49,15 @@ export default function AuthPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-slate-100 dark:bg-slate-950 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-white tracking-tight">clipsai</h1>
-          <p className="text-gray-400 mt-2 text-sm">Genera clips virales desde tus videos</p>
+          <h1 className="text-slate-950 dark:text-white font-extrabold text-3xl tracking-tight">clipsai</h1>
+          <p className="text-slate-700 dark:text-slate-300 font-medium mt-2 text-sm">Genera clips virales desde tus videos</p>
         </div>
 
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl shadow-xl p-6 sm:p-8">
-          <div className="flex bg-gray-800 rounded-xl p-1 mb-6">
+        <div className="bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 shadow-sm rounded-2xl shadow-xl p-6 sm:p-8">
+          <div className="flex bg-white dark:bg-slate-800 rounded-xl p-1 mb-6">
             <button
               type="button"
               onClick={() => {
@@ -64,7 +65,7 @@ export default function AuthPage() {
                 setError(null)
               }}
               className={`flex-1 py-2.5 text-sm font-medium rounded-lg transition-colors ${
-                mode === 'login' ? 'bg-white text-gray-900 shadow' : 'text-gray-400 hover:text-white'
+                mode === 'login' ? 'bg-white text-gray-900 shadow' : 'text-slate-600 hover:text-white'
               }`}
             >
               Iniciar Sesión
@@ -76,7 +77,7 @@ export default function AuthPage() {
                 setError(null)
               }}
               className={`flex-1 py-2.5 text-sm font-medium rounded-lg transition-colors ${
-                mode === 'register' ? 'bg-white text-gray-900 shadow' : 'text-gray-400 hover:text-white'
+                mode === 'register' ? 'bg-white text-gray-900 shadow' : 'text-slate-600 hover:text-white'
               }`}
             >
               Registrarse
@@ -92,7 +93,7 @@ export default function AuthPage() {
 
           <form onSubmit={handleSubmit} className="space-y-4" noValidate>
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-300 mb-1.5">
+              <label htmlFor="email" className="block text-slate-900 dark:text-slate-200 font-bold text-sm mb-1.5">
                 Email
               </label>
               <input
@@ -103,14 +104,14 @@ export default function AuthPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="tu@email.com"
-                className="w-full rounded-xl bg-gray-800 border border-gray-700 px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500 transition"
+                className="w-full rounded-xl bg-slate-50 dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-600 shadow-sm shadow-slate-100/80 px-4 py-2.5 text-slate-950 dark:text-white font-semibold placeholder-slate-500 dark:placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition"
               />
             </div>
 
             {mode === 'register' && (
               <div>
-                <label htmlFor="fullName" className="block text-sm font-medium text-gray-300 mb-1.5">
-                  Nombre completo <span className="text-gray-500 font-normal">(opcional)</span>
+                <label htmlFor="fullName" className="block text-slate-900 dark:text-slate-200 font-bold text-sm mb-1.5">
+                  Nombre completo <span className="text-slate-600 font-normal">(opcional)</span>
                 </label>
                 <input
                   id="fullName"
@@ -119,13 +120,13 @@ export default function AuthPage() {
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   placeholder="Tu nombre"
-                  className="w-full rounded-xl bg-gray-800 border border-gray-700 px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500 transition"
+                  className="w-full rounded-xl bg-slate-50 dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-600 shadow-sm shadow-slate-100/80 px-4 py-2.5 text-slate-950 dark:text-white font-semibold placeholder-slate-500 dark:placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition"
                 />
               </div>
             )}
 
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-300 mb-1.5">
+              <label htmlFor="password" className="block text-slate-900 dark:text-slate-200 font-bold text-sm mb-1.5">
                 Contraseña
               </label>
               <input
@@ -137,15 +138,15 @@ export default function AuthPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder={mode === 'register' ? 'Mínimo 8 caracteres' : '••••••••'}
-                className="w-full rounded-xl bg-gray-800 border border-gray-700 px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500 transition"
+                className="w-full rounded-xl bg-slate-50 dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-600 shadow-sm shadow-slate-100/80 px-4 py-2.5 text-slate-950 dark:text-white font-semibold placeholder-slate-500 dark:placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition"
               />
-              {mode === 'register' && <p className="text-xs text-gray-500 mt-1.5">Mínimo 8 caracteres.</p>}
+              {mode === 'register' && <p className="text-xs text-slate-600 mt-1.5">Mínimo 8 caracteres.</p>}
             </div>
 
             <button
               type="submit"
               disabled={submitting}
-              className="w-full mt-2 inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:bg-violet-600/50 disabled:cursor-not-allowed text-white font-medium py-3 px-4 transition-colors"
+              className="w-full mt-2 inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 disabled:bg-gradient-to-r from-violet-600 to-indigo-600/50 disabled:cursor-not-allowed text-white font-medium py-3 px-4 transition-colors"
             >
               {submitting && (
                 <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
@@ -154,7 +155,7 @@ export default function AuthPage() {
             </button>
           </form>
 
-          <p className="text-center text-sm text-gray-500 mt-6">
+          <p className="text-center text-sm text-slate-700 dark:text-slate-300 font-medium mt-6">
             {mode === 'login' ? '¿No tienes cuenta? ' : '¿Ya tienes cuenta? '}
             <button
               type="button"
@@ -162,7 +163,7 @@ export default function AuthPage() {
                 setMode(mode === 'login' ? 'register' : 'login')
                 setError(null)
               }}
-              className="text-violet-400 hover:text-violet-300 font-medium"
+              className="text-violet-700 dark:text-violet-400 font-bold hover:underline"
             >
               {mode === 'login' ? 'Regístrate' : 'Inicia sesión'}
             </button>

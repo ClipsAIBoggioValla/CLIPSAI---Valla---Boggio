@@ -31,10 +31,10 @@ function KpiSkeleton() {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
       {Array.from({ length: 4 }).map((_, i) => (
-        <div key={i} className="rounded-2xl bg-gray-900 border border-gray-800 p-5 animate-pulse">
-          <div className="h-3 bg-gray-800 rounded w-1/2 mb-4" />
-          <div className="h-8 bg-gray-800 rounded w-1/3 mb-2" />
-          <div className="h-3 bg-gray-800 rounded w-2/3" />
+        <div key={i} className="rounded-2xl bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 shadow-sm p-5 animate-pulse">
+          <div className="h-3 bg-white dark:bg-slate-800 rounded w-1/2 mb-4" />
+          <div className="h-8 bg-white dark:bg-slate-800 rounded w-1/3 mb-2" />
+          <div className="h-3 bg-white dark:bg-slate-800 rounded w-2/3" />
         </div>
       ))}
     </div>
@@ -82,11 +82,11 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white">
+    <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
       <div className="max-w-6xl mx-auto px-4 py-6 sm:py-8">
         <div className="mb-6 sm:mb-8">
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Dashboard de Métricas</h1>
-          <p className="text-sm text-gray-400 mt-2">
+          <p className="text-sm text-slate-600 mt-2">
             Visualiza el rendimiento de tus videos, clips generados y tiempo ahorrado gracias a la automatización.
           </p>
         </div>
@@ -95,13 +95,13 @@ export default function DashboardPage() {
           <>
             <KpiSkeleton />
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 mt-6">
-              <div className="rounded-2xl bg-gray-900 border border-gray-800 p-6 h-[320px] animate-pulse">
-                <div className="h-4 bg-gray-800 rounded w-1/3 mb-6" />
-                <div className="h-[240px] bg-gray-800 rounded" />
+              <div className="rounded-2xl bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 shadow-sm p-6 h-[320px] animate-pulse">
+                <div className="h-4 bg-white dark:bg-slate-800 rounded w-1/3 mb-6" />
+                <div className="h-[240px] bg-white dark:bg-slate-800 rounded" />
               </div>
-              <div className="rounded-2xl bg-gray-900 border border-gray-800 p-6 h-[320px] animate-pulse">
-                <div className="h-4 bg-gray-800 rounded w-1/3 mb-6" />
-                <div className="h-20 bg-gray-800 rounded" />
+              <div className="rounded-2xl bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 shadow-sm p-6 h-[320px] animate-pulse">
+                <div className="h-4 bg-white dark:bg-slate-800 rounded w-1/3 mb-6" />
+                <div className="h-20 bg-white dark:bg-slate-800 rounded" />
               </div>
             </div>
           </>
@@ -122,40 +122,40 @@ export default function DashboardPage() {
         {data && !loading && !error && (
           <>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="rounded-2xl bg-gray-900 border border-gray-800 p-5">
-                <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">Total Videos Subidos</p>
+              <div className="rounded-2xl bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 shadow-sm p-5">
+                <p className="text-xs font-medium text-slate-600 uppercase tracking-wide">Total Videos Subidos</p>
                 <p className="text-3xl font-bold mt-2">{data.total_videos}</p>
-                <p className="text-xs text-gray-500 mt-1">Videos procesados en tu cuenta</p>
+                <p className="text-xs text-slate-600 mt-1">Videos procesados en tu cuenta</p>
               </div>
 
-              <div className="rounded-2xl bg-gray-900 border border-gray-800 p-5">
-                <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">Total Clips Generados</p>
+              <div className="rounded-2xl bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 shadow-sm p-5">
+                <p className="text-xs font-medium text-slate-600 uppercase tracking-wide">Total Clips Generados</p>
                 <p className="text-3xl font-bold mt-2">{data.total_clips}</p>
-                <p className="text-xs text-gray-500 mt-1">Clips virales extraídos</p>
+                <p className="text-xs text-slate-600 mt-1">Clips virales extraídos</p>
               </div>
 
-              <div className="rounded-2xl bg-gray-900 border border-gray-800 p-5">
-                <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">Promedio de Viralidad</p>
+              <div className="rounded-2xl bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 shadow-sm p-5">
+                <p className="text-xs font-medium text-slate-600 uppercase tracking-wide">Promedio de Viralidad</p>
                 <div className="flex items-center gap-3 mt-2">
                   <p className="text-3xl font-bold">{data.avg_score.toFixed(1)}</p>
                   <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${scoreBadge(data.avg_score)}`}>
                     {data.avg_score >= 71 ? 'Alto' : data.avg_score >= 41 ? 'Medio' : 'Bajo'}
                   </span>
                 </div>
-                <p className="text-xs text-gray-500 mt-1">Score promedio de todos tus clips</p>
+                <p className="text-xs text-slate-600 mt-1">Score promedio de todos tus clips</p>
               </div>
 
-              <div className="rounded-2xl bg-gray-900 border border-gray-800 p-5">
-                <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">Tiempo Ahorrado</p>
+              <div className="rounded-2xl bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 shadow-sm p-5">
+                <p className="text-xs font-medium text-slate-600 uppercase tracking-wide">Tiempo Ahorrado</p>
                 <p className="text-3xl font-bold mt-2">{formatTime(data.estimated_time_saved_minutes)}</p>
-                <p className="text-xs text-gray-500 mt-1">Estimado · {data.total_clips} × 15 min</p>
+                <p className="text-xs text-slate-600 mt-1">Estimado · {data.total_clips} × 15 min</p>
               </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 mt-6">
-              <div className="rounded-2xl bg-gray-900 border border-gray-800 p-5 sm:p-6">
+              <div className="rounded-2xl bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 shadow-sm p-5 sm:p-6">
                 <h2 className="text-sm font-semibold text-white">Distribución por Score</h2>
-                <p className="text-xs text-gray-500 mt-1">Conteo de clips agrupados por rango de viralidad</p>
+                <p className="text-xs text-slate-600 mt-1">Conteo de clips agrupados por rango de viralidad</p>
                 <div className="h-[280px] mt-6">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={chartData} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
@@ -179,29 +179,29 @@ export default function DashboardPage() {
                   </ResponsiveContainer>
                 </div>
                 <div className="flex items-center justify-center gap-4 mt-2">
-                  <span className="inline-flex items-center gap-1.5 text-xs text-gray-400">
+                  <span className="inline-flex items-center gap-1.5 text-xs text-slate-600">
                     <span className="h-2.5 w-2.5 rounded-full bg-red-500" /> 0-40 Bajo
                   </span>
-                  <span className="inline-flex items-center gap-1.5 text-xs text-gray-400">
+                  <span className="inline-flex items-center gap-1.5 text-xs text-slate-600">
                     <span className="h-2.5 w-2.5 rounded-full bg-amber-500" /> 41-70 Medio
                   </span>
-                  <span className="inline-flex items-center gap-1.5 text-xs text-gray-400">
+                  <span className="inline-flex items-center gap-1.5 text-xs text-slate-600">
                     <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> 71-100 Alto
                   </span>
                 </div>
               </div>
 
-              <div className="rounded-2xl bg-gray-900 border border-gray-800 p-5 sm:p-6 flex flex-col">
+              <div className="rounded-2xl bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 shadow-sm p-5 sm:p-6 flex flex-col">
                 <h2 className="text-sm font-semibold text-white">Actividad Reciente</h2>
-                <p className="text-xs text-gray-500 mt-1">Último job de procesamiento</p>
+                <p className="text-xs text-slate-600 mt-1">Último job de procesamiento</p>
 
                 {data.recent_job ? (
-                  <div className="mt-6 rounded-xl bg-gray-800/60 border border-gray-800 p-4 sm:p-5 flex flex-col gap-4">
+                  <div className="mt-6 rounded-xl bg-white dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-800 shadow-sm shadow-slate-100/80 p-4 sm:p-5 flex flex-col gap-4">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="text-xs text-gray-400">Job ID</p>
+                        <p className="text-xs text-slate-600">Job ID</p>
                         <p className="text-sm font-mono text-white truncate">{data.recent_job.id}</p>
-                        <p className="text-xs text-gray-500 mt-1">
+                        <p className="text-xs text-slate-600 mt-1">
                           Creado: {new Date(data.recent_job.created_at).toLocaleString()}
                         </p>
                       </div>
@@ -213,21 +213,21 @@ export default function DashboardPage() {
                     </div>
                     <Link
                       to={`/jobs/${data.recent_job.id}`}
-                      className="inline-flex items-center justify-center rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium py-2.5 px-4 transition"
+                      className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white text-sm font-medium py-2.5 px-4 transition"
                     >
                       Ver Job →
                     </Link>
                   </div>
                 ) : (
-                  <div className="mt-6 flex flex-1 flex-col items-center justify-center rounded-xl bg-gray-800/40 border border-dashed border-gray-700 p-8 text-center">
-                    <div className="h-12 w-12 rounded-full bg-gray-800 flex items-center justify-center text-xl">🎬</div>
+                  <div className="mt-6 flex flex-1 flex-col items-center justify-center rounded-xl bg-white dark:bg-slate-800/40 border border-dashed border-slate-200 dark:border-slate-700 p-8 text-center">
+                    <div className="h-12 w-12 rounded-full bg-white dark:bg-slate-800 flex items-center justify-center text-xl">🎬</div>
                     <p className="text-sm font-medium text-gray-200 mt-4">Aún no hay actividad</p>
-                    <p className="text-xs text-gray-500 mt-1 max-w-[260px]">
+                    <p className="text-xs text-slate-600 mt-1 max-w-[260px]">
                       Sube tu primer video para generar clips y ver métricas aquí.
                     </p>
                     <Link
                       to="/upload"
-                      className="mt-5 inline-flex items-center justify-center rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium py-2.5 px-5 transition"
+                      className="mt-5 inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white text-sm font-medium py-2.5 px-5 transition"
                     >
                       Subir primer video
                     </Link>

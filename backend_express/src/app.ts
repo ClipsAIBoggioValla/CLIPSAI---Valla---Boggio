@@ -1,6 +1,8 @@
 import express from 'express'
 import cors from 'cors'
 import { statsRouter } from './routes/stats.js'
+import { clipsRouter } from './routes/clips.js'
+import { usersRouter } from './routes/users.js'
 
 export function createApp() {
   const app = express()
@@ -26,6 +28,8 @@ export function createApp() {
   app.get('/health', (_req, res) => res.json({ status: 'ok' }))
 
   app.use('/stats', statsRouter)
+  app.use('/clips', clipsRouter)
+  app.use('/users', usersRouter)
 
   return app
 }

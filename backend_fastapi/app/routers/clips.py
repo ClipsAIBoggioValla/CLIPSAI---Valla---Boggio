@@ -1,19 +1,20 @@
-"""Router de Clips — CRUD + descarga (Issue 5)."""
+"""Router de Clips — CRUD + descarga + biblioteca (Issue 5 + Issue 16)."""
 
 from __future__ import annotations
 
+import math
 import os
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Response, status
 from fastapi.responses import FileResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from ..deps import CurrentUser, DbSession
 from ..models import Clip, Video
-from ..schemas import ClipResponse, ClipUpdate
+from ..schemas import ClipListItem, ClipListResponse, ClipResponse, ClipUpdate
 
 router = APIRouter(prefix="/clips", tags=["clips"])
 
@@ -43,30 +44,80 @@ def _assert_ownership(db: DbSession, clip: Clip, current_user) -> None:
 
 @router.get(
     "",
-    response_model=list[ClipResponse],
-    summary="Listar clips del usuario (filtros opcionales)",
+    response_model=ClipListResponse,
+    summary="Listar clips del usuario (biblioteca con búsqueda, filtros y paginación)",
 )
 def list_clips(
     db: DbSession,
     current_user: CurrentUser,
+    q: Optional[str] = Query(default=None, description="Búsqueda por título o transcripción (case-insensitive)"),
+    min_score: Optional[float] = Query(default=None, ge=0, le=100, description="Score mínimo (0-100)"),
+    sort_by: Literal["created_at_desc", "created_at_asc", "score_desc", "score_asc"] = Query(
+        default="created_at_desc", description="Orden de resultados"
+    ),
+    page: int = Query(default=1, ge=1, description="Número de página"),
+    limit: int = Query(default=10, ge=1, le=100, description="Tamaño de página"),
     video_id: Optional[uuid.UUID] = Query(default=None, description="Filtrar por video"),
     status: Optional[str] = Query(default=None, description="Filtrar por status"),
-) -> list[Clip]:
+) -> ClipListResponse:
     from ..models import Job
 
-    q = (
-        select(Clip)
+    base = (
+        select(Clip, Video.transcript.label("video_transcript"))
         .join(Job, Clip.job_id == Job.id)
         .join(Video, Job.video_id == Video.id)
         .where(Video.user_id == current_user.id)
     )
+
+    if q is not None and q.strip() != "":
+        pattern = f"%{q.strip()}%"
+        base = base.where((Clip.title.ilike(pattern)) | (Video.transcript.ilike(pattern)))
+
+    if min_score is not None:
+        base = base.where(Clip.score >= min_score)
+
     if video_id is not None:
-        q = q.where((Clip.video_id == video_id) | (Job.video_id == video_id))
+        base = base.where((Clip.video_id == video_id) | (Job.video_id == video_id))
+
     if status is not None:
-        q = q.where(Clip.status == status)
-    q = q.order_by(Clip.created_at.desc())
-    rows = db.execute(q).scalars().all()
-    return list(rows)
+        base = base.where(Clip.status == status)
+
+    count_stmt = select(func.count()).select_from(base.subquery())
+    total: int = db.scalar(count_stmt) or 0
+    total_pages: int = math.ceil(total / limit) if total > 0 else 0
+
+    if sort_by == "created_at_desc":
+        base = base.order_by(Clip.created_at.desc())
+    elif sort_by == "created_at_asc":
+        base = base.order_by(Clip.created_at.asc())
+    elif sort_by == "score_desc":
+        base = base.order_by(Clip.score.desc().nulls_last(), Clip.created_at.desc())
+    elif sort_by == "score_asc":
+        base = base.order_by(Clip.score.asc().nulls_last(), Clip.created_at.desc())
+
+    base = base.offset((page - 1) * limit).limit(limit)
+
+    rows = db.execute(base).all()
+
+    items: list[ClipListItem] = []
+    for clip, video_transcript in rows:
+        transcript: str | None = None
+        if video_transcript:
+            transcript = str(video_transcript)[:500]
+        items.append(
+            ClipListItem(
+                id=clip.id,
+                job_id=clip.job_id,
+                title=clip.title,
+                score=clip.score,
+                start_time=clip.start_time,
+                end_time=clip.end_time,
+                transcript=transcript,
+                created_at=clip.created_at,
+            )
+        )
+
+    return ClipListResponse(items=items, total=total, page=page, limit=limit, total_pages=total_pages)
 
 
 @router.get(

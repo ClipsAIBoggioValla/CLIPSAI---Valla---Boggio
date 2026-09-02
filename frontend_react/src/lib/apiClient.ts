@@ -71,6 +71,9 @@ export const http = {
   post<T>(path: string, body: BodyInit | null = null, opts?: Omit<RequestOptions, 'method' | 'body'>) {
     return request<T>(path, { ...opts, method: 'POST', body })
   },
+  put<T>(path: string, body: BodyInit | null = null, opts?: Omit<RequestOptions, 'method' | 'body'>) {
+    return request<T>(path, { ...opts, method: 'PUT', body })
+  },
   patch<T>(path: string, body: BodyInit | null = null, opts?: Omit<RequestOptions, 'method' | 'body'>) {
     return request<T>(path, { ...opts, method: 'PATCH', body })
   },
@@ -81,6 +84,14 @@ export const http = {
     return request<T>(path, {
       ...opts,
       method: 'POST',
+      body: JSON.stringify(payload),
+      headers: { 'Content-Type': 'application/json' },
+    })
+  },
+  putJson<T>(path: string, payload: unknown, opts?: Omit<RequestOptions, 'method' | 'body' | 'headers'>) {
+    return request<T>(path, {
+      ...opts,
+      method: 'PUT',
       body: JSON.stringify(payload),
       headers: { 'Content-Type': 'application/json' },
     })
