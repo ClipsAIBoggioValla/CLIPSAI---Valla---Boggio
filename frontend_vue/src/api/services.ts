@@ -1,0 +1,54 @@
+import { apiClient } from '@/api/client'
+import type { AuthToken, AuthUser, JobResponse, UserLogin, UserRegister, VideoUploadResponse } from '@/types/api'
+
+function normalizeVideo(raw: VideoUploadResponse & { filename?: string; title?: string }): VideoUploadResponse {
+  const filename = raw.filename ?? raw.title ?? ''
+  const title = raw.title ?? raw.filename ?? filename
+  return { ...raw, filename, title }
+}
+
+function normalizeJob(raw: JobResponse & { id?: string; job_id?: string; status?: string }): JobResponse {
+  const id = raw.id ?? raw.job_id ?? ''
+  const status = (raw.status ?? 'PENDING').toString().toUpperCase() as JobResponse['status']
+  return { ...raw, id, job_id: raw.job_id ?? id, status } as JobResponse
+}
+
+export const authService = {
+  async login(data: UserLogin): Promise<AuthToken> {
+    const { data: res } = await apiClient.post<AuthToken>('/auth/login', data)
+    return res
+  },
+  async register(data: UserRegister): Promise<AuthUser> {
+    const { data: res } = await apiClient.post<AuthUser>('/auth/registro', data)
+    return res
+  },
+  async me(): Promise<AuthUser> {
+    const { data: res } = await apiClient.get<AuthUser>('/auth/me')
+    return res
+  },
+}
+
+export const videoService = {
+  async upload(videoFile: File, transcriptFile: File): Promise<VideoUploadResponse> {
+    const fd = new FormData()
+    fd.append('video', videoFile, videoFile.name)
+    fd.append('transcription', transcriptFile, transcriptFile.name)
+    const { data: raw } = await apiClient.post<VideoUploadResponse>('/videos', fd)
+    return normalizeVideo(raw as VideoUploadResponse & { filename?: string; title?: string })
+  },
+  async list(): Promise<VideoUploadResponse[]> {
+    const { data: raws } = await apiClient.get<(VideoUploadResponse & { filename?: string; title?: string })[]>('/videos')
+    return raws.map(normalizeVideo)
+  },
+}
+
+export const jobService = {
+  async createJob(videoId: string): Promise<JobResponse> {
+    const { data: raw } = await apiClient.post<JobResponse & { id?: string; job_id?: string }>(`/videos/${videoId}/jobs`)
+    return normalizeJob(raw as JobResponse & { id?: string; job_id?: string })
+  },
+  async getJobStatus(jobId: string): Promise<JobResponse> {
+    const { data: raw } = await apiClient.get<JobResponse & { id?: string; job_id?: string }>(`/jobs/${jobId}`)
+    return normalizeJob(raw as JobResponse & { id?: string; job_id?: string })
+  },
+}
