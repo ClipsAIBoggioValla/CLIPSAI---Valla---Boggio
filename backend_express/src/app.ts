@@ -2,6 +2,7 @@ import express from 'express'
 import cors from 'cors'
 import { statsRouter } from './routes/stats.js'
 import { clipsRouter } from './routes/clips.js'
+import { usersRouter } from './routes/users.js'
 
 export function createApp() {
   const app = express()
@@ -28,6 +29,8 @@ export function createApp() {
 
   app.use('/stats', statsRouter)
   app.use('/clips', clipsRouter)
+  app.use('/users', usersRouter)
+  app.use('/api/users', usersRouter)
 
   return app
 }
