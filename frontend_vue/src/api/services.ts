@@ -49,6 +49,13 @@ export const statsService = {
   },
 }
 
+export const metricsService = {
+  async getMetrics(): Promise<import('@/types/api').MetricsResponse> {
+    const { data } = await apiClient.get<import('@/types/api').MetricsResponse>('/metrics')
+    return data
+  },
+}
+
 export const userService = {
   async getMe(): Promise<import('@/types/api').UserProfile> {
     const base = ((import.meta.env.VITE_API_URL ?? '').trim() || 'http://localhost:8000').replace(/\/$/, '')

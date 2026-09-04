@@ -123,6 +123,22 @@ export interface StatsSummary {
   recent_job: RecentJobSummary | null
 }
 
+export interface RecentActivityItem {
+  date: string
+  jobs: number
+  clips: number
+  minutes_processed: number
+}
+
+export interface MetricsResponse {
+  total_jobs: number
+  total_clips: number
+  total_minutes_processed: number
+  time_saved_hours: number
+  platform_distribution: Record<string, number>
+  recent_activity: RecentActivityItem[]
+}
+
 export interface ClipListItem {
   id: string
   job_id: string

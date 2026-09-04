@@ -1,5 +1,6 @@
 from .clip import ClipBase, ClipListItem, ClipListResponse, ClipResponse, ClipUpdate
 from .job import JobResponse
+from .metrics import MetricsResponse, RecentActivityItem
 from .stats import RecentJobSummary, ScoreDistributionItem, StatsSummaryResponse
 from .token import Token, TokenPayload
 from .usuario import UsuarioCreate, UsuarioLogin, UsuarioRead
@@ -12,6 +13,8 @@ __all__ = [
     "ClipResponse",
     "ClipUpdate",
     "JobResponse",
+    "MetricsResponse",
+    "RecentActivityItem",
     "RecentJobSummary",
     "ScoreDistributionItem",
     "StatsSummaryResponse",
