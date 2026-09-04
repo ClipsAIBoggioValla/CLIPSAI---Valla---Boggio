@@ -99,11 +99,11 @@ async def handle_options_preflight(request, call_next):  # type: ignore[no-untyp
 app.include_router(auth.router)
 app.include_router(videos.router)
 app.include_router(jobs.router)
+app.include_router(export.router)
 app.include_router(clips.router)
 app.include_router(stats.router)
 app.include_router(users.router)
 app.include_router(users.router, prefix="/api")
-app.include_router(export.router)
 
 
 @app.get("/health", tags=["infra"], summary="Healthcheck simple")
