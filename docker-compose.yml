@@ -87,8 +87,8 @@ services:
   # ----------------------------------------------------------------------------
   backend_express:
     build:
-      context: ./backend_express
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend_express/Dockerfile
     container_name: clipsai-backend-express
     restart: unless-stopped
     env_file:

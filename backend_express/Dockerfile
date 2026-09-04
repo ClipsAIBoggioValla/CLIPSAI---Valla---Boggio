@@ -15,17 +15,18 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Instalar dependencias de Node.js
-COPY package*.json ./
+COPY backend_express/package*.json ./
 RUN npm ci --only=production
 
 # Instalar dependencias de Python requeridas por el motor de subproceso
-COPY requirements.txt ./
+# Usamos el de backend_fastapi que tiene las dependencias base
+COPY backend_fastapi/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt --break-system-packages
 
 # Copiar el código del backend Express y los scripts del motor Python
-COPY src ./src
-COPY scripts ./scripts
-COPY ../engine.py ../engine_subprocess.py ./
+COPY backend_express/src ./src
+COPY backend_express/scripts ./scripts
+COPY engine.py engine_subprocess.py main.py audio_analyzer.py whisper_transcriber.py ./
 
 EXPOSE 8001
 
