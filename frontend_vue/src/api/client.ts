@@ -37,6 +37,15 @@ apiClient.interceptors.response.use(
         detail = data.detail.map((e) => `${e.loc.join('.')}: ${e.msg}`).join(' | ')
       else if (typeof error.response.data === 'string' && error.response.data)
         detail = (error.response.data as string).slice(0, 500)
+      if (status === 401 || detail.toLowerCase().includes('not authenticated')) {
+        try {
+          localStorage.removeItem(TOKEN_KEY)
+        } catch {}
+        const path = typeof window !== 'undefined' ? window.location.pathname : ''
+        if (path !== '/login' && path !== '/auth') {
+          import('@/router').then((m) => m.default.push('/login').catch(() => { window.location.href = '/login' })).catch(() => { window.location.href = '/login' })
+        }
+      }
       return Promise.reject(new ApiError(status, detail, data))
     }
     if (error instanceof Error) return Promise.reject(new ApiError(0, error.message))

@@ -1,4 +1,4 @@
-import { http } from '@/lib/apiClient'
+import { http, request } from '@/lib/apiClient'
 import type {
   AuthToken,
   AuthUser,
@@ -63,6 +63,20 @@ export const jobService = {
 export const statsService = {
   getSummary(): Promise<StatsSummary> {
     return http.get<StatsSummary>('/stats/summary')
+  },
+}
+
+export const userService = {
+  getMe(): Promise<import('@/types/api').UserProfile> {
+    const base = ((import.meta as unknown as { env?: Record<string, string> })?.env?.VITE_API_URL ?? '').trim() || 'http://localhost:8000'
+    console.log('[users/me] GET', `${base.replace(/\/$/, '')}/users/me`)
+    return http.get<import('@/types/api').UserProfile>('/users/me')
+  },
+  updateMe(data: { full_name?: string | null; email?: string | null; avatar_url?: string | null; theme_preference?: string | null }): Promise<import('@/types/api').UserProfile> {
+    return request<import('@/types/api').UserProfile>('/users/me', { method: 'PUT', body: JSON.stringify(data), headers: { 'Content-Type': 'application/json' } })
+  },
+  changePassword(data: { current_password: string; new_password: string }): Promise<{ detail: string }> {
+    return http.postJson<{ detail: string }>('/users/me/change-password', data)
   },
 }
 
