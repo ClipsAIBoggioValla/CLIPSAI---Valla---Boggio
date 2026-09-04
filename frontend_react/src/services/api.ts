@@ -86,6 +86,12 @@ export const statsService = {
   },
 }
 
+export const metricsService = {
+  getMetrics(): Promise<import('@/types/api').MetricsResponse> {
+    return http.get<import('@/types/api').MetricsResponse>('/metrics')
+  },
+}
+
 export const userService = {
   getMe(): Promise<import('@/types/api').UserProfile> {
     const base = ((import.meta as unknown as { env?: Record<string, string> })?.env?.VITE_API_URL ?? '').trim() || 'http://localhost:8000'

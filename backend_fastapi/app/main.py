@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .database import Base, engine
-from .routers import auth, clips, export, jobs, stats, users, videos
+from .routers import auth, clips, export, jobs, metrics, stats, users, videos
 
 from .models import Clip, Job, Usuario, Video  # noqa: F401 — registra modelos para create_all
 
@@ -100,6 +100,7 @@ app.include_router(auth.router)
 app.include_router(videos.router)
 app.include_router(jobs.router)
 app.include_router(export.router)
+app.include_router(metrics.router)
 app.include_router(clips.router)
 app.include_router(stats.router)
 app.include_router(users.router)
