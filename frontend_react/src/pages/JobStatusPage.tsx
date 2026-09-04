@@ -1,5 +1,8 @@
+import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useJobPolling } from '@/hooks/useJobPolling'
+import ExportDropdown, { type ExportFormat } from '@/components/ExportDropdown'
+import { exportService } from '@/services/api'
 
 function StatusBadge({ status }: { status: string }) {
   const s = status.toUpperCase()
@@ -34,6 +37,21 @@ function StatusBadge({ status }: { status: string }) {
 export default function JobStatusPage() {
   const { jobId } = useParams<{ jobId: string }>()
   const { job, pollingStatus, error } = useJobPolling(jobId)
+  const [exporting, setExporting] = useState<ExportFormat | null>(null)
+  const [exportError, setExportError] = useState<string | null>(null)
+
+  async function handleExport(format: ExportFormat) {
+    if (!jobId) return
+    setExporting(format)
+    setExportError(null)
+    try {
+      await exportService.exportJob(jobId, format)
+    } catch (e: unknown) {
+      setExportError(e instanceof Error ? e.message : 'Error al exportar')
+    } finally {
+      setExporting(null)
+    }
+  }
 
   if (!jobId) {
     return (
@@ -102,6 +120,15 @@ export default function JobStatusPage() {
                 const clips = job.result_metadata?.clips ?? []
                 return (
                   <div className="space-y-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-xs text-gray-500">Exportar resultados de este job</p>
+                      <ExportDropdown onExport={handleExport} loadingFormat={exporting} disabled={clips.length === 0 && !job.result_metadata} />
+                    </div>
+                    {exportError && (
+                      <div role="alert" className="rounded-lg bg-red-500/10 border border-red-500/30 px-3 py-2">
+                        <p className="text-xs text-red-300">{exportError}</p>
+                      </div>
+                    )}
                     <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/30 p-4 flex gap-3">
                       <span className="h-8 w-8 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-300 shrink-0">
                         ✓
