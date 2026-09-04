@@ -49,6 +49,23 @@ export const statsService = {
   },
 }
 
+export const userService = {
+  async getMe(): Promise<import('@/types/api').UserProfile> {
+    const base = ((import.meta.env.VITE_API_URL ?? '').trim() || 'http://localhost:8000').replace(/\/$/, '')
+    console.log('[users/me] GET', `${base}/users/me`)
+    const { data: res } = await apiClient.get<import('@/types/api').UserProfile>('/users/me')
+    return res
+  },
+  async updateMe(payload: { full_name?: string | null; email?: string | null; avatar_url?: string | null; theme_preference?: string | null }): Promise<import('@/types/api').UserProfile> {
+    const { data: res } = await apiClient.put<import('@/types/api').UserProfile>('/users/me', payload)
+    return res
+  },
+  async changePassword(payload: { current_password: string; new_password: string }): Promise<{ detail: string }> {
+    const { data: res } = await apiClient.post<{ detail: string }>('/users/me/change-password', payload)
+    return res
+  },
+}
+
 export const clipService = {
   async getClips(params?: import('@/types/api').ClipListParams): Promise<import('@/types/api').ClipListResponse> {
     const cleaned: Record<string, string> = {}

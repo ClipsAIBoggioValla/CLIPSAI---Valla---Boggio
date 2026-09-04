@@ -154,6 +154,18 @@ export interface ClipListParams {
   status?: string
 }
 
+export interface UserProfile {
+  id: string
+  email: string
+  full_name: string | null
+  avatar_url?: string | null
+  theme_preference?: string
+  created_at: string
+  updated_at?: string
+}
+
+export type ThemePreference = 'dark' | 'light' | 'system'
+
 export function getJobId(job: JobResponse): string {
   return job.job_id ?? job.id
 }
