@@ -99,3 +99,38 @@ export const jobService = {
     return normalizeJob(raw as JobResponse & { id?: string; job_id?: string })
   },
 }
+
+function triggerBlobDownload(blob: Blob, contentDisposition: string | null, fallbackFilename: string) {
+  let filename = fallbackFilename
+  if (contentDisposition) {
+    const m = contentDisposition.match(/filename="?([^"]+)"?/)
+    if (m) filename = m[1]
+  }
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+export const exportService = {
+  async exportJob(jobId: string, format: 'csv' | 'json'): Promise<void> {
+    const res = await apiClient.get<Blob>(`/jobs/${jobId}/export`, {
+      params: { format },
+      responseType: 'blob',
+    })
+    const cd = (res.headers as Record<string, string>)['content-disposition'] ?? null
+    triggerBlobDownload(res.data as unknown as Blob, cd, `clips_export.${format}`)
+  },
+  async exportClips(format: 'csv' | 'json'): Promise<void> {
+    const res = await apiClient.get<Blob>('/clips/export', {
+      params: { format },
+      responseType: 'blob',
+    })
+    const cd = (res.headers as Record<string, string>)['content-disposition'] ?? null
+    triggerBlobDownload(res.data as unknown as Blob, cd, `clips_export.${format}`)
+  },
+}
