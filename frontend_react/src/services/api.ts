@@ -1,4 +1,4 @@
-import { http, request } from '@/lib/apiClient'
+import { http, request, TOKEN_KEY } from '@/lib/apiClient'
 import type {
   AuthToken,
   AuthUser,
@@ -10,6 +10,26 @@ import type {
   UserRegister,
   VideoUploadResponse,
 } from '@/types/api'
+
+const RAW_BASE: string =
+  ((import.meta as unknown as { env?: Record<string, string> })?.env?.VITE_API_URL ?? '').trim()
+const BASE_URL = (RAW_BASE || 'http://localhost:8000').replace(/\/$/, '')
+
+function triggerBlobDownload(blob: Blob, contentDisposition: string | null, fallbackFilename: string) {
+  let filename = fallbackFilename
+  if (contentDisposition) {
+    const m = contentDisposition.match(/filename="?([^"]+)"?/)
+    if (m) filename = m[1]
+  }
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
 
 function normalizeVideo(raw: VideoUploadResponse & { filename?: string; title?: string }): VideoUploadResponse {
   const filename = raw.filename ?? raw.title ?? ''
@@ -117,5 +137,58 @@ export const clipService = {
       ((import.meta as unknown as { env?: Record<string, string> })?.env?.VITE_API_URL ?? '').trim()
     const base = (raw || 'http://localhost:8000').replace(/\/$/, '')
     return `${base}/clips/${clipId}/descarga`
+  },
+}
+
+export const exportService = {
+  async exportJob(jobId: string, format: 'csv' | 'json'): Promise<void> {
+    const token = (() => {
+      try {
+        return localStorage.getItem(TOKEN_KEY)
+      } catch {
+        return null
+      }
+    })()
+    const res = await fetch(`${BASE_URL}/jobs/${jobId}/export?format=${format}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    })
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`
+      try {
+        const j = await res.json()
+        if (typeof j.detail === 'string') detail = j.detail
+      } catch {
+        const t = await res.text().catch(() => '')
+        if (t) detail = t.slice(0, 500)
+      }
+      throw new Error(detail)
+    }
+    const blob = await res.blob()
+    triggerBlobDownload(blob, res.headers.get('Content-Disposition'), `clips_export.${format}`)
+  },
+  async exportClips(format: 'csv' | 'json'): Promise<void> {
+    const token = (() => {
+      try {
+        return localStorage.getItem(TOKEN_KEY)
+      } catch {
+        return null
+      }
+    })()
+    const res = await fetch(`${BASE_URL}/clips/export?format=${format}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    })
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`
+      try {
+        const j = await res.json()
+        if (typeof j.detail === 'string') detail = j.detail
+      } catch {
+        const t = await res.text().catch(() => '')
+        if (t) detail = t.slice(0, 500)
+      }
+      throw new Error(detail)
+    }
+    const blob = await res.blob()
+    triggerBlobDownload(blob, res.headers.get('Content-Disposition'), `clips_export.${format}`)
   },
 }

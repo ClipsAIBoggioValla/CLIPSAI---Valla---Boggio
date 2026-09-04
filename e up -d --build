@@ -1,0 +1,14 @@
+  feat/backend-clips-crud[m
+  feat/backend-fastapi-auth[m
+  feat/backend-video-upload-jobs[m
+  feat/clip-library[m
+  feat/dashboard-analytics[m
+  feat/frontend-flujo-entrada[m
+  feat/frontend-vue-flujo-entrada[m
+  feat/issue-17[m
+  feat/issue-17-settings-profile[m
+* [32mfeat/issue-18-data-export[m
+  feat/issue-18-export-data[m
+  feat/issue-18-export-data-v2[m
+  infra/db-docker-esquema[m
+  main[m

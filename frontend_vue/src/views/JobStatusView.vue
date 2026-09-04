@@ -1,12 +1,30 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
 import { useJobPolling } from '@/composables/useJobPolling'
+import ExportDropdown from '@/components/ExportDropdown.vue'
+import type { ExportFormat } from '@/components/ExportDropdown.vue'
+import { exportService } from '@/api/services'
 
 const route = useRoute()
 const jobId = computed(() => route.params.jobId as string | undefined)
 const { job, pollingStatus, error } = useJobPolling(() => jobId.value)
 const clips = computed(() => job.value?.result_metadata?.clips ?? [])
+const exporting = ref<ExportFormat | null>(null)
+const exportError = ref<string | null>(null)
+
+async function handleExport(format: ExportFormat) {
+  if (!jobId.value) return
+  exporting.value = format
+  exportError.value = null
+  try {
+    await exportService.exportJob(jobId.value, format)
+  } catch (e: unknown) {
+    exportError.value = e instanceof Error ? e.message : 'Error al exportar'
+  } finally {
+    exporting.value = null
+  }
+}
 </script>
 
 <template>
@@ -48,6 +66,13 @@ const clips = computed(() => job.value?.result_metadata?.clips ?? [])
           </div>
 
           <div v-if="job.status === 'COMPLETED'" class="space-y-4">
+            <div class="flex items-center justify-between gap-3">
+              <p class="text-xs text-gray-500">Exportar resultados de este job</p>
+              <ExportDropdown :loading-format="exporting" :disabled="clips.length === 0 && !job.result_metadata" @export="handleExport" />
+            </div>
+            <div v-if="exportError" role="alert" class="rounded-lg bg-red-500/10 border border-red-500/30 px-3 py-2">
+              <p class="text-xs text-red-300">{{ exportError }}</p>
+            </div>
             <div class="rounded-xl bg-emerald-500/10 border border-emerald-500/30 p-4 flex gap-3">
               <span class="h-8 w-8 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-300 shrink-0">✓</span>
               <div>

@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback } from 'react'
-import { clipService } from '@/services/api'
+import { clipService, exportService } from '@/services/api'
 import type { ClipListItem, ClipListResponse, ClipSortBy } from '@/types/api'
 import { ApiError } from '@/types/api'
+import ExportDropdown, { type ExportFormat } from '@/components/ExportDropdown'
 
 type ViewMode = 'grid' | 'list'
 
@@ -32,6 +33,20 @@ export default function ClipLibraryPage() {
   const [data, setData] = useState<ClipListResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [exporting, setExporting] = useState<ExportFormat | null>(null)
+  const [exportError, setExportError] = useState<string | null>(null)
+
+  async function handleExport(format: ExportFormat) {
+    setExporting(format)
+    setExportError(null)
+    try {
+      await exportService.exportClips(format)
+    } catch (e: unknown) {
+      setExportError(e instanceof Error ? e.message : 'Error al exportar')
+    } finally {
+      setExporting(null)
+    }
+  }
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQ(q), 350)
@@ -81,10 +96,18 @@ export default function ClipLibraryPage() {
   return (
     <div className="min-h-screen bg-gray-950 text-white">
       <div className="max-w-6xl mx-auto px-4 py-6 sm:py-8">
-        <div className="mb-6">
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Biblioteca de Clips</h1>
-          <p className="text-sm text-gray-400 mt-2">Explora, busca y gestiona todos tus clips generados con filtros y paginación.</p>
+        <div className="mb-6 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Biblioteca de Clips</h1>
+            <p className="text-sm text-gray-400 mt-2">Explora, busca y gestiona todos tus clips generados con filtros y paginación.</p>
+          </div>
+          <ExportDropdown onExport={handleExport} loadingFormat={exporting} disabled={loading || !data || data.items.length === 0} />
         </div>
+        {exportError && (
+          <div role="alert" className="mb-4 rounded-xl bg-red-500/10 border border-red-500/30 px-4 py-3">
+            <p className="text-sm text-red-300">{exportError}</p>
+          </div>
+        )}
 
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 sm:p-5 mb-6">
           <div className="flex flex-col gap-4">

@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref, watch, onMounted } from 'vue'
-import { clipService } from '@/api/services'
+import { clipService, exportService } from '@/api/services'
 import type { ClipListResponse, ClipSortBy } from '@/types/api'
 import { ApiError } from '@/types/api'
+import ExportDropdown from '@/components/ExportDropdown.vue'
+import type { ExportFormat } from '@/components/ExportDropdown.vue'
 
 type ViewMode = 'grid' | 'list'
 
@@ -17,6 +19,20 @@ const viewMode = ref<ViewMode>('grid')
 const data = ref<ClipListResponse | null>(null)
 const loading = ref(true)
 const error = ref<string | null>(null)
+const exporting = ref<ExportFormat | null>(null)
+const exportError = ref<string | null>(null)
+
+async function handleExport(format: ExportFormat) {
+  exporting.value = format
+  exportError.value = null
+  try {
+    await exportService.exportClips(format)
+  } catch (e: unknown) {
+    exportError.value = e instanceof Error ? e.message : 'Error al exportar'
+  } finally {
+    exporting.value = null
+  }
+}
 
 let debounceTimer: number | undefined
 watch(q, (v) => {
@@ -81,9 +97,15 @@ function resetFilters() {
 <template>
   <div class="min-h-screen bg-gray-950 text-white">
     <div class="max-w-6xl mx-auto px-4 py-6 sm:py-8">
-      <div class="mb-6">
-        <h1 class="text-2xl sm:text-3xl font-bold tracking-tight">Biblioteca de Clips</h1>
-        <p class="text-sm text-gray-400 mt-2">Explora, busca y gestiona todos tus clips generados con filtros y paginación.</p>
+      <div class="mb-6 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+        <div>
+          <h1 class="text-2xl sm:text-3xl font-bold tracking-tight">Biblioteca de Clips</h1>
+          <p class="text-sm text-gray-400 mt-2">Explora, busca y gestiona todos tus clips generados con filtros y paginación.</p>
+        </div>
+        <ExportDropdown :loading-format="exporting" :disabled="loading || !data || data.items.length === 0" @export="handleExport" />
+      </div>
+      <div v-if="exportError" role="alert" class="mb-4 rounded-xl bg-red-500/10 border border-red-500/30 px-4 py-3">
+        <p class="text-sm text-red-300">{{ exportError }}</p>
       </div>
 
       <div class="bg-gray-900 border border-gray-800 rounded-2xl p-4 sm:p-5 mb-6">
