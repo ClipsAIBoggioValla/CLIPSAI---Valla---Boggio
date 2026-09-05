@@ -1,79 +1,126 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { useRouter } from 'vue-router'
 import Avatar from '@/components/Avatar.vue'
+
+defineProps<{ onToggleDesktop: () => void; onToggleMobile: () => void }>()
 
 const auth = useAuthStore()
 const router = useRouter()
-const open = ref(false)
-const refEl = ref<HTMLDivElement | null>(null)
-const displayName = computed(() => ((auth.user as unknown as { full_name?: string | null })?.full_name ?? null))
-const displayEmail = computed(() => auth.user?.email ?? null)
+const route = useRoute()
+const displayName = computed(() => (auth.user as unknown as { full_name?: string | null })?.full_name ?? null)
+const avatarUrl = computed(() => (auth.user as unknown as { avatar_url?: string | null })?.avatar_url ?? null)
+const firstName = computed(() => {
+  const full = (auth.user as unknown as { full_name?: string | null })?.full_name
+  if (full && full.trim()) return full.trim().split(' ')[0]
+  return auth.user?.email?.split('@')[0] ?? 'Usuario'
+})
+
+const notifOpen = ref(false)
+const quickOpen = ref(false)
+const search = ref((route.query.q as string) ?? '')
+
+const notifRef = ref<HTMLDivElement | null>(null)
+const quickRef = ref<HTMLDivElement | null>(null)
 
 function onDocClick(e: MouseEvent) {
-  if (refEl.value && !refEl.value.contains(e.target as Node)) open.value = false
+  if (notifRef.value && !notifRef.value.contains(e.target as Node)) notifOpen.value = false
+  if (quickRef.value && !quickRef.value.contains(e.target as Node)) quickOpen.value = false
 }
 onMounted(() => document.addEventListener('mousedown', onDocClick))
 onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
 
-function handleLogout() {
-  open.value = false
-  auth.logout()
-  router.replace('/auth')
+watch(
+  () => route.query.q,
+  (q) => {
+    if (route.path === '/clips' || route.path === '/library') {
+      const v = (q as string) ?? ''
+      if (v !== search.value) search.value = v
+    }
+  },
+)
+
+let debounceTimer: number | undefined
+watch(search, (v) => {
+  if (route.path !== '/clips' && route.path !== '/library') return
+  window.clearTimeout(debounceTimer)
+  debounceTimer = window.setTimeout(() => {
+    const trimmed = v.trim()
+    const query: Record<string, string> = { ...(route.query as Record<string, string>) }
+    if (trimmed) query.q = trimmed
+    else delete query.q
+    const currentQ = (route.query.q as string) ?? ''
+    if ((trimmed ?? '') !== (currentQ ?? '')) router.replace({ path: route.path, query })
+  }, 350)
+})
+
+function handleSearch() {
+  const trimmed = search.value.trim()
+  if (trimmed) router.push({ path: '/clips', query: { q: trimmed } })
+  else router.push({ path: '/clips' })
 }
-function goSettings() {
-  open.value = false
-  router.push('/settings')
+
+function toggleFullscreen() {
+  const doc = document as unknown as { fullscreenElement: Element | null; exitFullscreen?: () => Promise<void> }
+  const el = document.documentElement as unknown as { requestFullscreen?: () => Promise<void> }
+  if (doc.fullscreenElement) doc.exitFullscreen?.().catch(() => {})
+  else el.requestFullscreen?.().catch(() => {})
 }
 </script>
 
 <template>
-  <header v-if="auth.isAuthenticated" class="sticky top-0 z-40 bg-gray-900/80 backdrop-blur border-b border-gray-800">
-    <div class="max-w-6xl mx-auto px-4 flex items-center justify-between h-14">
-      <div class="flex items-center gap-6">
-        <span class="text-white font-bold tracking-tight">clipsai</span>
-        <nav class="flex items-center gap-1">
-          <RouterLink
-            to="/dashboard"
-            :class="$route.path === '/dashboard' ? 'bg-violet-600 text-white font-bold px-3 py-2 rounded-lg shadow-sm' : 'text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white font-semibold px-3 py-2 rounded-lg transition-colors'"
-          >
-            Dashboard
-          </RouterLink>
-          <RouterLink
-            to="/clips"
-            :class="$route.path === '/clips' ? 'bg-violet-600 text-white font-bold px-3 py-2 rounded-lg shadow-sm' : 'text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white font-semibold px-3 py-2 rounded-lg transition-colors'"
-          >
-            Biblioteca
-          </RouterLink>
-          <RouterLink
-            to="/upload"
-            :class="$route.path === '/upload' ? 'bg-violet-600 text-white font-bold px-3 py-2 rounded-lg shadow-sm' : 'text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white font-semibold px-3 py-2 rounded-lg transition-colors'"
-          >
-            Subir
-          </RouterLink>
-        </nav>
-      </div>
-      <div ref="refEl" class="relative">
-        <button
-          type="button"
-          class="flex items-center gap-2 rounded-full border-2 border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
-          aria-haspopup="menu"
-          :aria-expanded="open"
-          @click="open = !open"
-        >
-          <Avatar :name="displayName" :email="displayEmail" :size="28" />
-          <span class="hidden sm:block text-xs font-medium text-slate-900 dark:text-white max-w-[160px] truncate">{{ displayEmail }}</span>
-          <span :class="['text-slate-500 transition', open ? 'rotate-180' : '']">▾</span>
+  <header v-if="auth.isAuthenticated" class="navbar-custom">
+    <div class="navbar-left">
+      <button class="btn-desktop-toggle" type="button" aria-label="Minimizar Sidebar" @click="$props.onToggleDesktop">
+        <i class="bi bi-chevron-bar-left" />
+      </button>
+      <button class="sidebar-toggle-btn" type="button" aria-label="Toggle Navigation" @click="$props.onToggleMobile">
+        <i class="bi bi-list" />
+      </button>
+
+      <div ref="quickRef" class="dropdown" style="position: relative">
+        <button class="btn-quick-action" type="button" :aria-expanded="quickOpen" @click="quickOpen = !quickOpen">
+          <i class="bi bi-plus-lg" />
+          <span>Crear</span>
         </button>
-        <div v-if="open" role="menu" class="absolute right-0 mt-2 w-64 origin-top-right rounded-xl border-2 border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg overflow-hidden z-30">
-          <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
-            <p class="text-sm font-bold text-slate-900 dark:text-white truncate flex items-center gap-2"><Avatar :name="displayName" :email="displayEmail" :size="20" /> {{ displayEmail }}</p>
-            <p class="text-xs font-medium text-emerald-600 dark:text-emerald-400 flex items-center gap-1 mt-1"><span class="h-2 w-2 rounded-full bg-emerald-500 inline-block" /> Sesión activa</p>
+        <ul v-if="quickOpen" class="dropdown-menu dropdown-menu-quick-action show" style="display: block; position: absolute; top: 100%; left: 0">
+          <li class="dropdown-header">Crear nuevo</li>
+          <li><a class="dropdown-item" href="#" @click.prevent="quickOpen = false; router.push('/upload')"><i class="bi bi-cloud-arrow-up" /> Subir video</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="navbar-search-wrapper">
+      <input v-model="search" type="text" class="navbar-search-input" placeholder="Buscar clips, videos..." aria-label="Buscar" @keydown.enter.prevent="handleSearch" />
+      <button class="navbar-search-btn" aria-label="Buscar" type="button" @click="handleSearch"><i class="bi bi-search" /></button>
+    </div>
+
+    <div class="navbar-actions">
+      <button class="navbar-action-btn" aria-label="Pantalla completa" type="button" @click="toggleFullscreen">
+        <i class="bi bi-arrows-fullscreen" />
+      </button>
+
+      <div ref="notifRef" class="dropdown" style="position: relative">
+        <button class="navbar-action-btn dropdown-toggle" type="button" :aria-expanded="notifOpen" @click="notifOpen = !notifOpen">
+          <i class="bi bi-bell" />
+          <span class="navbar-action-badge" />
+        </button>
+        <div v-if="notifOpen" class="dropdown-menu dropdown-menu-notification show" style="display: block; position: absolute; right: 0; top: 100%">
+          <div class="notification-header">
+            <h6 class="notification-title">Notificaciones</h6>
           </div>
-          <button type="button" role="menuitem" class="w-full text-left px-4 py-2.5 text-sm font-medium text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-slate-700 transition flex items-center gap-2" @click="goSettings">👤 Mi Perfil / Ajustes</button>
-          <button type="button" role="menuitem" class="w-full text-left px-4 py-2.5 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition flex items-center gap-2 border-t border-slate-200 dark:border-slate-700" @click="handleLogout">↪ Cerrar sesión</button>
+          <div class="p-4 text-center">
+            <div class="h-10 w-10 rounded-full flex items-center justify-center mx-auto mb-3" style="background: rgba(255,255,255,0.08); color: #94a3b8"><i class="bi bi-bell-slash" /></div>
+            <p class="text-sm font-medium" style="color: #f1f5f9">No hay notificaciones por ahora</p>
+            <p class="text-xs mt-1" style="color: #94a3b8">Cuando haya actividad verás aquí tus avisos.</p>
+          </div>
         </div>
+      </div>
+
+      <div class="d-flex align-items-center gap-2" style="margin-left: 0.25rem">
+        <Avatar :name="displayName" :email="auth.user?.email ?? null" :avatar-url="avatarUrl" :size="32" />
+        <span class="d-none d-md-inline" style="color: var(--text-main); font-weight: 700; font-size: 0.85rem">{{ firstName }}</span>
       </div>
     </div>
   </header>

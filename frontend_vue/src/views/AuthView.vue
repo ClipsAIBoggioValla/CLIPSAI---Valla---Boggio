@@ -12,6 +12,7 @@ const mode = ref<Mode>('login')
 const email = ref('')
 const password = ref('')
 const fullName = ref('')
+const showPassword = ref(false)
 const submitting = ref(false)
 const error = ref<string | null>(null)
 
@@ -48,48 +49,113 @@ async function handleSubmit() {
 </script>
 
 <template>
-  <div class="min-h-screen bg-gray-950 flex items-center justify-center p-4">
-    <div class="w-full max-w-md">
-      <div class="text-center mb-8">
-        <h1 class="text-3xl font-bold text-white tracking-tight">clipsai</h1>
-        <p class="text-gray-400 mt-2 text-sm">Genera clips virales desde tus videos — Vue</p>
+  <div class="login-wrapper">
+    <div class="login-bg-shape login-bg-shape-1" />
+    <div class="login-bg-shape login-bg-shape-2" />
+
+    <div class="login-card">
+      <a href="#" class="login-brand" @click.prevent="router.push('/dashboard')">
+        <i class="bi bi-asterisk" />
+        <span>clipsai</span>
+      </a>
+
+      <p class="login-subtitle">{{ mode === 'login' ? 'Inicia sesión para acceder a tu dashboard' : 'Crea tu cuenta para generar clips virales' }}</p>
+
+      <div style="display: flex; background: #0B0F17; border-radius: var(--radius-lg); padding: 4px; border: 1px solid rgba(255,255,255,0.08); margin-bottom: 1.5rem">
+        <button
+          type="button"
+          :style="{
+            flex: 1,
+            padding: '0.6rem',
+            fontSize: '0.85rem',
+            fontWeight: 700,
+            borderRadius: 'var(--radius-md)',
+            border: 'none',
+            cursor: 'pointer',
+            background: mode === 'login' ? '#B4F105' : 'transparent',
+            color: mode === 'login' ? '#080C14' : '#94A3B8',
+            boxShadow: mode === 'login' ? '0 0 12px rgba(180,241,5,0.35)' : 'none',
+          }"
+          @click="mode = 'login'; error = null"
+        >
+          Iniciar Sesión
+        </button>
+        <button
+          type="button"
+          :style="{
+            flex: 1,
+            padding: '0.6rem',
+            fontSize: '0.85rem',
+            fontWeight: 700,
+            borderRadius: 'var(--radius-md)',
+            border: 'none',
+            cursor: 'pointer',
+            background: mode === 'register' ? '#B4F105' : 'transparent',
+            color: mode === 'register' ? '#080C14' : '#94A3B8',
+            boxShadow: mode === 'register' ? '0 0 12px rgba(180,241,5,0.35)' : 'none',
+          }"
+          @click="mode = 'register'; error = null"
+        >
+          Registrarse
+        </button>
       </div>
-      <div class="bg-gray-900 border border-gray-800 rounded-2xl shadow-xl p-6 sm:p-8">
-        <div class="flex bg-gray-800 rounded-xl p-1 mb-6">
-          <button type="button" :class="['flex-1 py-2.5 text-sm font-medium rounded-lg transition-colors', mode === 'login' ? 'bg-white text-gray-900 shadow' : 'text-gray-400 hover:text-white']" @click="mode = 'login'; error = null">Iniciar Sesión</button>
-          <button type="button" :class="['flex-1 py-2.5 text-sm font-medium rounded-lg transition-colors', mode === 'register' ? 'bg-white text-gray-900 shadow' : 'text-gray-400 hover:text-white']" @click="mode = 'register'; error = null">Registrarse</button>
+
+      <div v-if="error" role="alert" class="alert-custom alert-custom-danger">
+        <i class="bi bi-exclamation-triangle-fill alert-custom-icon" />
+        <div class="alert-custom-content">{{ error }}</div>
+      </div>
+
+      <form novalidate @submit.prevent="handleSubmit">
+        <div class="login-form-group">
+          <label for="email" class="login-form-label">Email Address</label>
+          <div class="login-input-group">
+            <i class="bi bi-envelope input-icon" />
+            <input id="email" v-model="email" type="email" autocomplete="email" required placeholder="name@company.com" class="login-input" />
+          </div>
         </div>
 
-        <div v-if="error" role="alert" class="mb-5 rounded-xl bg-red-500/10 border border-red-500/30 px-4 py-3 flex gap-3">
-          <span class="text-red-400 mt-0.5">⚠</span>
-          <p class="text-sm text-red-300 leading-snug">{{ error }}</p>
+        <div v-if="mode === 'register'" class="login-form-group">
+          <label for="fullName" class="login-form-label">Nombre completo <span style="color: var(--text-muted-green); font-weight: 500">(opcional)</span></label>
+          <div class="login-input-group">
+            <i class="bi bi-person input-icon" />
+            <input id="fullName" v-model="fullName" type="text" autocomplete="name" placeholder="Tu nombre" class="login-input" />
+          </div>
         </div>
 
-        <form class="space-y-4" novalidate @submit.prevent="handleSubmit">
-          <div>
-            <label for="email" class="block text-sm font-medium text-gray-300 mb-1.5">Email</label>
-            <input id="email" v-model="email" type="email" autocomplete="email" required placeholder="tu@email.com" class="w-full rounded-xl bg-gray-800 border border-gray-700 px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500 transition" />
+        <div class="login-form-group">
+          <label for="password" class="login-form-label">Contraseña</label>
+          <div class="login-input-group">
+            <i class="bi bi-shield-lock input-icon" />
+            <input
+              id="password"
+              v-model="password"
+              :type="showPassword ? 'text' : 'password'"
+              :autocomplete="mode === 'login' ? 'current-password' : 'new-password'"
+              required
+              :minlength="mode === 'register' ? 8 : 1"
+              :placeholder="mode === 'register' ? 'Mínimo 8 caracteres' : '••••••••'"
+              class="login-input login-input-password"
+            />
+            <button type="button" class="password-toggle-btn" :aria-label="showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'" @click="showPassword = !showPassword">
+              <i :class="showPassword ? 'bi bi-eye-slash' : 'bi bi-eye'" />
+            </button>
           </div>
-          <div v-if="mode === 'register'">
-            <label for="fullName" class="block text-sm font-medium text-gray-300 mb-1.5">Nombre completo <span class="text-gray-500 font-normal">(opcional)</span></label>
-            <input id="fullName" v-model="fullName" type="text" autocomplete="name" placeholder="Tu nombre" class="w-full rounded-xl bg-gray-800 border border-gray-700 px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500 transition" />
-          </div>
-          <div>
-            <label for="password" class="block text-sm font-medium text-gray-300 mb-1.5">Contraseña</label>
-            <input id="password" v-model="password" type="password" :autocomplete="mode === 'login' ? 'current-password' : 'new-password'" required :minlength="mode === 'register' ? 8 : 1" :placeholder="mode === 'register' ? 'Mínimo 8 caracteres' : '••••••••'" class="w-full rounded-xl bg-gray-800 border border-gray-700 px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500 transition" />
-            <p v-if="mode === 'register'" class="text-xs text-gray-500 mt-1.5">Mínimo 8 caracteres.</p>
-          </div>
-          <button type="submit" :disabled="submitting" class="w-full mt-2 inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:bg-violet-600/50 disabled:cursor-not-allowed text-white font-medium py-3 px-4 transition-colors">
-            <span v-if="submitting" class="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-            {{ submitting ? 'Procesando...' : mode === 'login' ? 'Iniciar Sesión' : 'Crear cuenta' }}
-          </button>
-        </form>
+          <p v-if="mode === 'register'" style="font-size: 0.75rem; color: var(--text-muted-green); margin-top: 0.35rem">Mínimo 8 caracteres.</p>
+        </div>
 
-        <p class="text-center text-sm text-gray-500 mt-6">
-          {{ mode === 'login' ? '¿No tienes cuenta? ' : '¿Ya tienes cuenta? ' }}
-          <button type="button" class="text-violet-400 hover:text-violet-300 font-medium" @click="mode = mode === 'login' ? 'register' : 'login'; error = null">{{ mode === 'login' ? 'Regístrate' : 'Inicia sesión' }}</button>
-        </p>
-      </div>
+        <button type="submit" :disabled="submitting" class="btn-login">
+          <span v-if="submitting" class="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+          <span>{{ submitting ? 'Procesando...' : mode === 'login' ? 'Iniciar Sesión' : 'Crear cuenta' }}</span>
+          <i v-if="!submitting" class="bi bi-arrow-right" />
+        </button>
+      </form>
+
+      <p class="login-footer-text" style="margin-top: 1.5rem">
+        {{ mode === 'login' ? '¿No tienes cuenta? ' : '¿Ya tienes cuenta? ' }}
+        <button type="button" @click="mode = mode === 'login' ? 'register' : 'login'; error = null">
+          {{ mode === 'login' ? 'Regístrate' : 'Inicia sesión' }}
+        </button>
+      </p>
     </div>
   </div>
 </template>

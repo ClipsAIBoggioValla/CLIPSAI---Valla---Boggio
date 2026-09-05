@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from 'react'
 import { TOKEN_KEY } from '@/lib/apiClient'
-import { authService } from '@/services/api'
+import { authService, userService } from '@/services/api'
 import type { ApiError, AuthUser, UserLogin, UserRegister } from '@/types/api'
 
 interface AuthState {
@@ -59,13 +59,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return
     }
     setToken(stored)
-    authService
-      .me()
-      .then((me) => setUser(me))
-      .catch(() => {
-        persistToken(null)
-        setUser(null)
-      })
+    userService
+      .getMe()
+      .then((me) => setUser(me as unknown as AuthUser))
+      .catch(() =>
+        authService
+          .me()
+          .then((me) => setUser(me))
+          .catch(() => {
+            persistToken(null)
+            setUser(null)
+          }),
+      )
       .finally(() => setIsLoading(false))
   }, [persistToken])
 
@@ -73,8 +78,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (data: UserLogin) => {
       const tok = await authService.login(data)
       persistToken(tok.access_token)
-      const me = await authService.me()
-      setUser(me)
+      try {
+        const me = await userService.getMe()
+        setUser(me as unknown as AuthUser)
+      } catch {
+        const me = await authService.me()
+        setUser(me)
+      }
     },
     [persistToken],
   )
