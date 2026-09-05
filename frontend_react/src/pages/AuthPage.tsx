@@ -24,6 +24,7 @@ export default function AuthPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [fullName, setFullName] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -48,53 +49,90 @@ export default function AuthPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-white tracking-tight">clipsai</h1>
-          <p className="text-gray-400 mt-2 text-sm">Genera clips virales desde tus videos</p>
+    <div className="login-wrapper">
+      <div className="login-bg-shape login-bg-shape-1" />
+      <div className="login-bg-shape login-bg-shape-2" />
+
+      <div className="login-card">
+        <a href="/dashboard" className="login-brand">
+          <i className="bi bi-asterisk" />
+          <span>clipsai</span>
+        </a>
+
+        <p className="login-subtitle">
+          {mode === 'login' ? 'Inicia sesión para acceder a tu dashboard' : 'Crea tu cuenta para generar clips virales'}
+        </p>
+
+        <div
+          style={{
+            display: 'flex',
+            background: '#0B0F17',
+            borderRadius: 'var(--radius-lg)',
+            padding: '4px',
+            border: '1px solid rgba(255,255,255,0.08)',
+            marginBottom: '1.5rem',
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => {
+              setMode('login')
+              setError(null)
+            }}
+            style={{
+              flex: 1,
+              padding: '0.6rem',
+              fontSize: '0.85rem',
+              fontWeight: 700,
+              borderRadius: 'var(--radius-md)',
+              border: 'none',
+              cursor: 'pointer',
+              background: mode === 'login' ? '#B4F105' : 'transparent',
+              color: mode === 'login' ? '#080C14' : '#94A3B8',
+              boxShadow: mode === 'login' ? '0 0 12px rgba(180,241,5,0.35)' : 'none',
+              transition: 'all 0.2s',
+            }}
+          >
+            Iniciar Sesión
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMode('register')
+              setError(null)
+            }}
+            style={{
+              flex: 1,
+              padding: '0.6rem',
+              fontSize: '0.85rem',
+              fontWeight: 700,
+              borderRadius: 'var(--radius-md)',
+              border: 'none',
+              cursor: 'pointer',
+              background: mode === 'register' ? '#B4F105' : 'transparent',
+              color: mode === 'register' ? '#080C14' : '#94A3B8',
+              boxShadow: mode === 'register' ? '0 0 12px rgba(180,241,5,0.35)' : 'none',
+              transition: 'all 0.2s',
+            }}
+          >
+            Registrarse
+          </button>
         </div>
 
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl shadow-xl p-6 sm:p-8">
-          <div className="flex bg-gray-800 rounded-xl p-1 mb-6">
-            <button
-              type="button"
-              onClick={() => {
-                setMode('login')
-                setError(null)
-              }}
-              className={`flex-1 py-2.5 text-sm font-medium rounded-lg transition-colors ${
-                mode === 'login' ? 'bg-white text-gray-900 shadow' : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              Iniciar Sesión
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setMode('register')
-                setError(null)
-              }}
-              className={`flex-1 py-2.5 text-sm font-medium rounded-lg transition-colors ${
-                mode === 'register' ? 'bg-white text-gray-900 shadow' : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              Registrarse
-            </button>
+        {error && (
+          <div role="alert" className="alert-custom-danger">
+            <i className="bi bi-exclamation-triangle-fill" style={{ fontSize: '1rem', flexShrink: 0, marginTop: '1px' }} />
+            <span>{error}</span>
           </div>
+        )}
 
-          {error && (
-            <div role="alert" className="mb-5 rounded-xl bg-red-500/10 border border-red-500/30 px-4 py-3 flex gap-3">
-              <span className="text-red-400 mt-0.5">⚠</span>
-              <p className="text-sm text-red-300 leading-snug">{error}</p>
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-300 mb-1.5">
-                Email
-              </label>
+        <form onSubmit={handleSubmit} noValidate>
+          <div className="login-form-group">
+            <label htmlFor="email" className="login-form-label">
+              Email Address
+            </label>
+            <div className="login-input-group">
+              <i className="bi bi-envelope input-icon" />
               <input
                 id="email"
                 type="email"
@@ -102,16 +140,19 @@ export default function AuthPage() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="tu@email.com"
-                className="w-full rounded-xl bg-gray-800 border border-gray-700 px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500 transition"
+                placeholder="name@company.com"
+                className="login-input"
               />
             </div>
+          </div>
 
-            {mode === 'register' && (
-              <div>
-                <label htmlFor="fullName" className="block text-sm font-medium text-gray-300 mb-1.5">
-                  Nombre completo <span className="text-gray-500 font-normal">(opcional)</span>
-                </label>
+          {mode === 'register' && (
+            <div className="login-form-group">
+              <label htmlFor="fullName" className="login-form-label">
+                Nombre completo <span style={{ color: 'var(--text-muted-green)', fontWeight: 500 }}>(opcional)</span>
+              </label>
+              <div className="login-input-group">
+                <i className="bi bi-person input-icon" />
                 <input
                   id="fullName"
                   type="text"
@@ -119,55 +160,68 @@ export default function AuthPage() {
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   placeholder="Tu nombre"
-                  className="w-full rounded-xl bg-gray-800 border border-gray-700 px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500 transition"
+                  className="login-input"
                 />
               </div>
-            )}
+            </div>
+          )}
 
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-300 mb-1.5">
-                Contraseña
-              </label>
+          <div className="login-form-group">
+            <label htmlFor="password" className="login-form-label">
+              Contraseña
+            </label>
+            <div className="login-input-group">
+              <i className="bi bi-shield-lock input-icon" />
               <input
                 id="password"
-                type="password"
+                type={showPassword ? 'text' : 'password'}
                 autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
                 required
                 minLength={mode === 'register' ? 8 : 1}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder={mode === 'register' ? 'Mínimo 8 caracteres' : '••••••••'}
-                className="w-full rounded-xl bg-gray-800 border border-gray-700 px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500 transition"
+                className="login-input login-input-password"
               />
-              {mode === 'register' && <p className="text-xs text-gray-500 mt-1.5">Mínimo 8 caracteres.</p>}
+              <button
+                type="button"
+                className="password-toggle-btn"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+              >
+                <i className={showPassword ? 'bi bi-eye-slash' : 'bi bi-eye'} />
+              </button>
             </div>
+            {mode === 'register' && <p style={{ fontSize: '0.75rem', color: 'var(--text-muted-green)', marginTop: '0.35rem' }}>Mínimo 8 caracteres.</p>}
+          </div>
 
-            <button
-              type="submit"
-              disabled={submitting}
-              className="w-full mt-2 inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:bg-violet-600/50 disabled:cursor-not-allowed text-white font-medium py-3 px-4 transition-colors"
-            >
-              {submitting && (
+          <button type="submit" disabled={submitting} className="btn-login">
+            {submitting ? (
+              <>
                 <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-              )}
-              {submitting ? 'Procesando...' : mode === 'login' ? 'Iniciar Sesión' : 'Crear cuenta'}
-            </button>
-          </form>
+                <span>Procesando...</span>
+              </>
+            ) : (
+              <>
+                <span>{mode === 'login' ? 'Iniciar Sesión' : 'Crear cuenta'}</span>
+                <i className="bi bi-arrow-right" />
+              </>
+            )}
+          </button>
+        </form>
 
-          <p className="text-center text-sm text-gray-500 mt-6">
-            {mode === 'login' ? '¿No tienes cuenta? ' : '¿Ya tienes cuenta? '}
-            <button
-              type="button"
-              onClick={() => {
-                setMode(mode === 'login' ? 'register' : 'login')
-                setError(null)
-              }}
-              className="text-violet-400 hover:text-violet-300 font-medium"
-            >
-              {mode === 'login' ? 'Regístrate' : 'Inicia sesión'}
-            </button>
-          </p>
-        </div>
+        <p className="login-footer-text" style={{ marginTop: '1.5rem' }}>
+          {mode === 'login' ? '¿No tienes cuenta? ' : '¿Ya tienes cuenta? '}
+          <button
+            type="button"
+            onClick={() => {
+              setMode(mode === 'login' ? 'register' : 'login')
+              setError(null)
+            }}
+          >
+            {mode === 'login' ? 'Regístrate' : 'Inicia sesión'}
+          </button>
+        </p>
       </div>
     </div>
   )

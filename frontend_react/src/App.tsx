@@ -1,72 +1,40 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import AuthPage from '@/pages/AuthPage'
 import ClipLibraryPage from '@/pages/ClipLibraryPage'
-import LibraryPage from '@/pages/LibraryPage'
 import DashboardPage from '@/pages/DashboardPage'
 import SettingsPage from '@/pages/SettingsPage'
 import UploadPage from '@/pages/UploadPage'
 import JobStatusPage from '@/pages/JobStatusPage'
-import ProtectedRoute from '@/components/ProtectedRoute'
-import Navbar from '@/components/Navbar'
+import Layout from '@/components/Layout'
+import { useAuth } from '@/context/AuthContext'
+
+function ProtectedLayout() {
+  const { isAuthenticated, isLoading } = useAuth()
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bs-body-bg)' }}>
+        <span className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--brand-forest-medium)]/30 border-t-[var(--brand-forest-medium)]" />
+      </div>
+    )
+  }
+  if (!isAuthenticated) return <Navigate to="/auth" replace />
+  return <Layout />
+}
 
 export default function App() {
   return (
-    <>
-      <Navbar />
-      <Routes>
-        <Route path="/auth" element={<AuthPage />} />
-        <Route
-          path="/dashboard"
-          element={
-            <ProtectedRoute>
-              <DashboardPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/clips"
-          element={
-            <ProtectedRoute>
-              <ClipLibraryPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/library"
-          element={
-            <ProtectedRoute>
-              <LibraryPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/settings"
-          element={
-            <ProtectedRoute>
-              <SettingsPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/upload"
-          element={
-            <ProtectedRoute>
-              <UploadPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/jobs/:jobId"
-          element={
-            <ProtectedRoute>
-              <JobStatusPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route path="/login" element={<Navigate to="/auth" replace />} />
+    <Routes>
+      <Route path="/auth" element={<AuthPage />} />
+      <Route path="/login" element={<Navigate to="/auth" replace />} />
+      <Route element={<ProtectedLayout />}>
+        <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/clips" element={<ClipLibraryPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/upload" element={<UploadPage />} />
+        <Route path="/jobs/:jobId" element={<JobStatusPage />} />
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
-      </Routes>
-    </>
+      </Route>
+    </Routes>
   )
 }
