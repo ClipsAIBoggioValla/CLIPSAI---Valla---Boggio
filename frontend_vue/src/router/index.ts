@@ -12,8 +12,9 @@ const router = createRouter({
     { path: '/upload', name: 'upload', component: () => import('@/views/UploadView.vue'), meta: { requiresAuth: true } },
     { path: '/jobs/:jobId', name: 'job', component: () => import('@/views/JobStatusView.vue'), meta: { requiresAuth: true }, props: true },
     { path: '/settings', name: 'settings', component: () => import('@/views/SettingsView.vue'), meta: { requiresAuth: true } },
+    { path: '/404', name: 'notfound', component: () => import('@/views/NotFoundView.vue') },
     { path: '/login', redirect: '/auth' },
-    { path: '/:pathMatch(.*)*', redirect: '/dashboard' },
+    { path: '/:pathMatch(.*)*', redirect: '/404' },
   ],
 })
 

@@ -17,7 +17,7 @@ function formatHours(hours: number): string {
 }
 
 function scoreBadgeClass(score: number): string {
-  if (score >= 71) return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+  if (score >= 71) return 'bg-[rgba(180,241,5,0.14)] text-[#B4F105] border-[rgba(180,241,5,0.3)] shadow-[0_0_12px_rgba(180,241,5,0.15)]'
   if (score >= 41) return 'bg-amber-500/15 text-amber-300 border-amber-500/30'
   return 'bg-red-500/15 text-red-300 border-red-500/30'
 }
@@ -87,90 +87,94 @@ onMounted(fetchAll)
 </script>
 
 <template>
-  <div class="min-h-screen bg-gray-950 text-white">
+  <div class="min-h-screen bg-[#0B0F17] text-white">
     <div class="max-w-6xl mx-auto px-4 py-6 sm:py-8">
       <div class="mb-6 sm:mb-8">
-        <h1 class="text-2xl sm:text-3xl font-bold tracking-tight">Dashboard de Métricas</h1>
-        <p class="text-sm text-gray-400 mt-2">Visualiza el rendimiento de tus videos, clips generados y tiempo ahorrado gracias a la automatización.</p>
+        <div class="inline-flex items-center gap-2 mb-3 px-3 py-1 rounded-full text-xs font-bold bg-[rgba(180,241,5,0.10)] text-[#B4F105] border border-[rgba(180,241,5,0.22)]">
+          <span class="h-1.5 w-1.5 rounded-full bg-[#B4F105] shadow-[0_0_6px_rgba(180,241,5,0.6)] animate-pulse" /> LIVE
+        </div>
+        <h1 class="text-2xl sm:text-3xl font-bold tracking-tight text-[#F1F5F9]">Dashboard de Métricas</h1>
+        <p class="text-sm text-[#94A3B8] mt-2">Visualiza el rendimiento de tus videos, clips generados y tiempo ahorrado gracias a la automatización.</p>
       </div>
 
       <template v-if="loading">
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div v-for="i in 4" :key="i" class="rounded-2xl bg-gray-900 border border-gray-800 p-5 animate-pulse">
-            <div class="h-3 bg-gray-800 rounded w-1/2 mb-4" />
-            <div class="h-8 bg-gray-800 rounded w-1/3 mb-2" />
-            <div class="h-3 bg-gray-800 rounded w-2/3" />
+          <div v-for="i in 4" :key="i" class="rounded-2xl bg-[#121824] border border-[rgba(255,255,255,0.08)] p-5 animate-pulse">
+            <div class="h-3 bg-[rgba(255,255,255,0.06)] rounded w-1/2 mb-4" />
+            <div class="h-8 bg-[rgba(255,255,255,0.06)] rounded w-1/3 mb-2" />
+            <div class="h-3 bg-[rgba(255,255,255,0.04)] rounded w-2/3" />
           </div>
         </div>
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 mt-6">
-          <div class="rounded-2xl bg-gray-900 border border-gray-800 p-6 h-[320px] animate-pulse">
-            <div class="h-4 bg-gray-800 rounded w-1/3 mb-6" />
-            <div class="h-[240px] bg-gray-800 rounded" />
+          <div class="rounded-2xl bg-[#121824] border border-[rgba(255,255,255,0.08)] p-6 h-[320px] animate-pulse">
+            <div class="h-4 bg-[rgba(255,255,255,0.06)] rounded w-1/3 mb-6" />
+            <div class="h-[240px] bg-[rgba(255,255,255,0.04)] rounded" />
           </div>
-          <div class="rounded-2xl bg-gray-900 border border-gray-800 p-6 h-[320px] animate-pulse">
-            <div class="h-4 bg-gray-800 rounded w-1/3 mb-6" />
-            <div class="h-[240px] bg-gray-800 rounded" />
+          <div class="rounded-2xl bg-[#121824] border border-[rgba(255,255,255,0.08)] p-6 h-[320px] animate-pulse">
+            <div class="h-4 bg-[rgba(255,255,255,0.06)] rounded w-1/3 mb-6" />
+            <div class="h-[240px] bg-[rgba(255,255,255,0.04)] rounded" />
           </div>
         </div>
       </template>
 
-      <div v-else-if="error" role="alert" class="rounded-2xl bg-red-500/10 border border-red-500/30 p-6 text-center">
-        <p class="text-sm text-red-300">{{ error }}</p>
-        <button class="mt-4 text-sm font-medium text-white bg-red-600 hover:bg-red-500 rounded-xl px-4 py-2 transition" @click="fetchAll">Reintentar</button>
+      <div v-else-if="error" role="alert" class="alert-custom alert-custom-danger">
+        <i class="bi bi-exclamation-triangle-fill alert-custom-icon" />
+        <div class="alert-custom-content">{{ error }}</div>
+        <button class="btn-custom btn-custom-danger btn-custom-sm" @click="fetchAll">Reintentar</button>
       </div>
 
-      <div v-else-if="metrics && isEmpty" class="rounded-2xl bg-gray-900 border border-dashed border-gray-700 p-10 text-center">
-        <div class="h-12 w-12 rounded-full bg-gray-800 flex items-center justify-center text-xl mx-auto">📊</div>
-        <p class="text-sm font-medium text-gray-200 mt-4">Aún no tienes métricas</p>
-        <p class="text-xs text-gray-500 mt-1 max-w-[300px] mx-auto">Cuando proceses tu primer video verás aquí clips generados, horas ahorradas y actividad de los últimos 7 días.</p>
-        <RouterLink to="/upload" class="mt-5 inline-flex items-center justify-center rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium py-2.5 px-5 transition">Subir primer video</RouterLink>
+      <div v-else-if="metrics && isEmpty" class="rounded-2xl bg-[#121824] border border-dashed border-[rgba(180,241,5,0.18)] p-10 text-center shadow-xl">
+        <div class="h-12 w-12 rounded-full bg-[rgba(180,241,5,0.10)] border border-[rgba(180,241,5,0.22)] flex items-center justify-center text-xl mx-auto text-[#B4F105]">📊</div>
+        <p class="text-sm font-bold text-[#F1F5F9] mt-4">Aún no tienes métricas</p>
+        <p class="text-xs text-[#94A3B8] mt-1 max-w-[300px] mx-auto">Cuando proceses tu primer video verás aquí clips generados, horas ahorradas y actividad de los últimos 7 días.</p>
+        <RouterLink to="/upload" class="btn-custom btn-custom-primary mt-5 shadow-[0_0_20px_rgba(180,241,5,0.3)]"><i class="bi bi-lightning-charge-fill" /> Subir primer video</RouterLink>
       </div>
 
       <template v-else-if="metrics && !isEmpty">
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div class="rounded-2xl bg-gray-900 border border-gray-800 p-5">
-            <p class="text-xs font-medium text-gray-400 uppercase tracking-wide">Total Videos / Jobs</p>
-            <p class="text-3xl font-bold mt-2">{{ metrics.total_jobs }}</p>
-            <p class="text-xs text-gray-500 mt-1">{{ stats ? `${stats.total_videos} videos subidos` : 'Jobs procesados' }}</p>
+          <div class="kpi-card">
+            <div class="flex items-center justify-between"><p class="text-xs font-bold text-[#94A3B8] uppercase tracking-widest">Total Videos / Jobs</p><span class="kpi-accent"><i class="bi bi-film" /></span></div>
+            <p class="text-3xl font-extrabold mt-3 text-white tracking-tight">{{ metrics.total_jobs }}</p>
+            <p class="text-xs text-[#94A3B8] mt-1">{{ stats ? `${stats.total_videos} videos subidos` : 'Jobs procesados' }}</p>
           </div>
-          <div class="rounded-2xl bg-gray-900 border border-gray-800 p-5">
-            <p class="text-xs font-medium text-gray-400 uppercase tracking-wide">Total Clips Generados</p>
-            <p class="text-3xl font-bold mt-2">{{ metrics.total_clips }}</p>
-            <p class="text-xs text-gray-500 mt-1">Clips virales extraídos</p>
+          <div class="kpi-card">
+            <div class="flex items-center justify-between"><p class="text-xs font-bold text-[#94A3B8] uppercase tracking-widest">Total Clips</p><span class="kpi-accent"><i class="bi bi-collection-play" /></span></div>
+            <p class="text-3xl font-extrabold mt-3 text-white tracking-tight">{{ metrics.total_clips }}</p>
+            <p class="text-xs text-[#94A3B8] mt-1">Clips virales extraídos</p>
           </div>
-          <div class="rounded-2xl bg-gray-900 border border-gray-800 p-5">
-            <p class="text-xs font-medium text-gray-400 uppercase tracking-wide">Tiempo Ahorrado</p>
-            <p class="text-3xl font-bold mt-2">{{ formatHours(metrics.time_saved_hours) }}</p>
-            <p class="text-xs text-gray-500 mt-1">Estimado · {{ metrics.total_minutes_processed }} min procesados</p>
+          <div class="kpi-card">
+            <div class="flex items-center justify-between"><p class="text-xs font-bold text-[#94A3B8] uppercase tracking-widest">Tiempo Ahorrado</p><span class="kpi-accent !bg-[rgba(180,241,5,0.14)] !border-[rgba(180,241,5,0.25)] !text-[#B4F105]"><i class="bi bi-lightning-charge" /></span></div>
+            <p class="text-3xl font-extrabold mt-3 text-[#B4F105] tracking-tight" style="text-shadow: 0 0 16px rgba(180,241,5,0.35)">{{ formatHours(metrics.time_saved_hours) }}</p>
+            <p class="text-xs text-[#94A3B8] mt-1">Estimado · {{ metrics.total_minutes_processed }} min procesados</p>
           </div>
-          <div class="rounded-2xl bg-gray-900 border border-gray-800 p-5">
+          <div class="kpi-card">
             <template v-if="stats">
-              <p class="text-xs font-medium text-gray-400 uppercase tracking-wide">Promedio de Viralidad</p>
-              <div class="flex items-center gap-3 mt-2">
-                <p class="text-3xl font-bold">{{ stats.avg_score.toFixed(1) }}</p>
-                <span class="inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold" :class="scoreBadgeClass(stats.avg_score)">{{ scoreLabel(stats.avg_score) }}</span>
+              <p class="text-xs font-bold text-[#94A3B8] uppercase tracking-widest">Promedio Viralidad</p>
+              <div class="flex items-center gap-3 mt-3">
+                <p class="text-3xl font-extrabold text-white tracking-tight">{{ stats.avg_score.toFixed(1) }}</p>
+                <span class="inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-bold" :class="scoreBadgeClass(stats.avg_score)">{{ scoreLabel(stats.avg_score) }}</span>
               </div>
-              <p class="text-xs text-gray-500 mt-1">Score promedio de tus clips</p>
+              <p class="text-xs text-[#94A3B8] mt-1">Score promedio de tus clips</p>
             </template>
             <template v-else>
-              <p class="text-xs font-medium text-gray-400 uppercase tracking-wide">Minutos Procesados</p>
-              <p class="text-3xl font-bold mt-2">{{ metrics.total_minutes_processed }}</p>
-              <p class="text-xs text-gray-500 mt-1">Acumulado total</p>
+              <p class="text-xs font-bold text-[#94A3B8] uppercase tracking-widest">Minutos Procesados</p>
+              <p class="text-3xl font-extrabold mt-3 text-white">{{ metrics.total_minutes_processed }}</p>
+              <p class="text-xs text-[#94A3B8] mt-1">Acumulado total</p>
             </template>
           </div>
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 mt-6">
-          <div class="rounded-2xl bg-gray-900 border border-gray-800 p-5 sm:p-6">
-            <h2 class="text-sm font-semibold text-white">{{ hasPlatformData ? 'Distribución por Plataforma' : 'Distribución por Score' }}</h2>
-            <p class="text-xs text-gray-500 mt-1">{{ hasPlatformData ? 'Clips agrupados por red social objetivo' : 'Conteo de clips agrupados por rango de viralidad' }}</p>
+          <div class="rounded-2xl bg-[#121824] border border-[rgba(255,255,255,0.08)] p-5 sm:p-6 shadow-xl">
+            <h2 class="text-sm font-semibold text-[#F1F5F9]">{{ hasPlatformData ? 'Distribución por Plataforma' : 'Distribución por Score' }}</h2>
+            <p class="text-xs text-[#94A3B8] mt-1">{{ hasPlatformData ? 'Clips agrupados por red social objetivo' : 'Conteo de clips agrupados por rango de viralidad' }}</p>
             <div v-if="hasPlatformData" class="mt-6 space-y-4">
               <div v-for="entry in platformEntries" :key="entry.platform" class="space-y-1.5">
                 <div class="flex items-center justify-between text-xs">
                   <span class="font-medium capitalize" :style="{ color: platformColors[entry.platform] ?? '#9ca3af' }">{{ entry.platform }}</span>
                   <span class="text-gray-400 font-mono">{{ entry.count }} clips</span>
                 </div>
-                <div class="h-8 bg-gray-800 rounded-full overflow-hidden p-1">
+                <div class="h-8 bg-[rgba(255,255,255,0.06)] rounded-full overflow-hidden p-1 border border-[rgba(255,255,255,0.04)]">
                   <div
                     class="h-full rounded-full transition-all duration-700 flex items-center justify-end pr-2"
                     :style="{ width: `${(entry.count / maxPlatform) * 100}%`, backgroundColor: platformColors[entry.platform] ?? '#6366f1', minWidth: entry.count > 0 ? '32px' : '0' }"
@@ -184,9 +188,9 @@ onMounted(fetchAll)
               <div v-for="item in stats?.score_distribution ?? []" :key="item.range" class="space-y-1.5">
                 <div class="flex items-center justify-between text-xs">
                   <span class="font-medium" :style="{ color: barColors[item.label] ?? '#9ca3af' }">{{ item.label }} ({{ item.range }})</span>
-                  <span class="text-gray-400 font-mono">{{ item.count }} clips</span>
+                  <span class="text-[#94A3B8] font-mono">{{ item.count }} clips</span>
                 </div>
-                <div class="h-8 bg-gray-800 rounded-full overflow-hidden p-1">
+                <div class="h-8 bg-[rgba(255,255,255,0.06)] rounded-full overflow-hidden p-1 border border-[rgba(255,255,255,0.04)]">
                   <div
                     class="h-full rounded-full transition-all duration-700 flex items-center justify-end pr-2"
                     :style="{ width: `${(item.count / maxCount) * 100}%`, backgroundColor: barColors[item.label] ?? '#6366f1', minWidth: item.count > 0 ? '32px' : '0' }"
@@ -203,16 +207,16 @@ onMounted(fetchAll)
             </div>
           </div>
 
-          <div class="rounded-2xl bg-gray-900 border border-gray-800 p-5 sm:p-6">
-            <h2 class="text-sm font-semibold text-white">Actividad Reciente</h2>
-            <p class="text-xs text-gray-500 mt-1">Últimos 7 días · jobs, clips y minutos procesados</p>
+          <div class="rounded-2xl bg-[#121824] border border-[rgba(255,255,255,0.08)] p-5 sm:p-6 shadow-xl">
+            <h2 class="text-sm font-semibold text-[#F1F5F9]">Actividad Reciente</h2>
+            <p class="text-xs text-[#94A3B8] mt-1">Últimos 7 días · jobs, clips y minutos procesados</p>
             <div class="mt-6 space-y-3">
               <div v-for="day in metrics.recent_activity" :key="day.date" class="space-y-1.5">
                 <div class="flex items-center justify-between text-xs">
                   <span class="font-mono text-gray-400">{{ day.date.slice(5) }}</span>
                   <span class="text-gray-500">{{ day.jobs }} jobs · {{ day.clips }} clips · {{ day.minutes_processed }} min</span>
                 </div>
-                <div class="h-8 bg-gray-800 rounded-full overflow-hidden p-1 flex gap-1">
+                <div class="h-8 bg-[rgba(255,255,255,0.06)] rounded-full overflow-hidden p-1 flex gap-1 border border-[rgba(255,255,255,0.04)]">
                   <div
                     class="h-full rounded-full bg-violet-500 transition-all flex items-center justify-center"
                     :style="{ width: `${(day.jobs / maxRecent) * 40}%`, minWidth: day.jobs > 0 ? '24px' : '0' }"
