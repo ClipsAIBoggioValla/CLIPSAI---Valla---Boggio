@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken';
 function getSecret() {
-    return process.env.JWT_SECRET ?? 'changeme';
+    return process.env.JWT_SECRET ?? 'dev_secret_key_clipsai_2026_super_secure_local';
 }
 function getAlgorithm() {
     return process.env.JWT_ALGORITHM ?? 'HS256';

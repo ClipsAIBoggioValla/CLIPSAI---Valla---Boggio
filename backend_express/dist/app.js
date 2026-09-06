@@ -4,6 +4,10 @@ import { statsRouter } from './routes/stats.js';
 import { clipsRouter } from './routes/clips.js';
 import { usersRouter } from './routes/users.js';
 import { exportRouter } from './routes/export.js';
+import { metricsRouter } from './routes/metrics.js';
+import { authRouter } from './routes/auth.js';
+import { videosRouter } from './routes/videos.js';
+import { jobsRouter } from './routes/jobs.js';
 export function createApp() {
     const app = express();
     app.use(cors({
@@ -20,8 +24,13 @@ export function createApp() {
         allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
     }));
     app.use(express.json());
+    app.use(express.urlencoded({ extended: true }));
     app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+    app.use('/auth', authRouter);
+    app.use('/videos', videosRouter);
+    app.use('/', jobsRouter);
     app.use('/', exportRouter);
+    app.use('/', metricsRouter);
     app.use('/stats', statsRouter);
     app.use('/clips', clipsRouter);
     app.use('/users', usersRouter);
