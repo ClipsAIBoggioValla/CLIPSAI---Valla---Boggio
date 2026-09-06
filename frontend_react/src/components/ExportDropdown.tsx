@@ -30,24 +30,28 @@ export default function ExportDropdown({ onExport, disabled, loadingFormat }: Ex
   const isLoading = loadingFormat !== null && loadingFormat !== undefined
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="dropdown" style={{ position: 'relative' }}>
       <button
         type="button"
         disabled={disabled || isLoading}
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-2 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:bg-gray-700 disabled:text-gray-400 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2.5 transition shadow-sm"
+        className="btn-custom btn-custom-primary"
+        aria-expanded={open}
       >
         {isLoading ? (
           <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
         ) : (
-          <span>⬇</span>
+          <i className="bi bi-download" />
         )}
         Exportar datos
         <span className={`text-xs transition ${open ? 'rotate-180' : ''}`}>▾</span>
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-40 rounded-xl bg-gray-800 border border-gray-700 shadow-xl overflow-hidden z-20">
+        <div
+          className="dropdown-menu dropdown-menu-custom show"
+          style={{ display: 'block', position: 'absolute', top: '100%', right: 0, zIndex: 1050, marginTop: '0.65rem', minWidth: '180px', backgroundColor: '#FFFFFF' }}
+        >
           <button
             type="button"
             disabled={isLoading}
@@ -55,12 +59,12 @@ export default function ExportDropdown({ onExport, disabled, loadingFormat }: Ex
               setOpen(false)
               await onExport('csv')
             }}
-            className="w-full text-left px-4 py-2.5 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition flex items-center justify-between disabled:opacity-50"
+            className="dropdown-item"
           >
-            .CSV
-            {loadingFormat === 'csv' && <span className="h-3 w-3 animate-spin rounded-full border border-violet-400 border-t-transparent" />}
+            <i className="bi bi-filetype-csv" /> .CSV
+            {loadingFormat === 'csv' && <span className="h-3 w-3 animate-spin rounded-full border border-[var(--brand-forest-medium)]/30 border-t-[var(--brand-forest-medium)] ml-auto" />}
           </button>
-          <div className="h-px bg-gray-700" />
+          <div className="dropdown-divider" />
           <button
             type="button"
             disabled={isLoading}
@@ -68,10 +72,10 @@ export default function ExportDropdown({ onExport, disabled, loadingFormat }: Ex
               setOpen(false)
               await onExport('json')
             }}
-            className="w-full text-left px-4 py-2.5 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition flex items-center justify-between disabled:opacity-50"
+            className="dropdown-item"
           >
-            .JSON
-            {loadingFormat === 'json' && <span className="h-3 w-3 animate-spin rounded-full border border-violet-400 border-t-transparent" />}
+            <i className="bi bi-filetype-json" /> .JSON
+            {loadingFormat === 'json' && <span className="h-3 w-3 animate-spin rounded-full border border-[var(--brand-forest-medium)]/30 border-t-[var(--brand-forest-medium)] ml-auto" />}
           </button>
         </div>
       )}

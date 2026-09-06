@@ -96,79 +96,100 @@ async function handleChangePassword() {
 </script>
 
 <template>
-  <div class="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100">
-    <div class="max-w-4xl mx-auto px-4 py-6 sm:py-8">
-      <div class="flex items-center gap-4 mb-6">
+  <div class="max-w-4xl mx-auto">
+    <div class="page-header" style="margin-bottom: 2rem">
+      <div class="flex items-center gap-4">
+        <span class="inline-flex h-12 w-12 items-center justify-center rounded-xl shrink-0 bg-[#B4F105] text-[#080C14] border border-[rgba(180,241,5,0.3)] shadow-[0_0_16px_rgba(180,241,5,0.35)]"><i class="bi bi-gear" style="font-size: 1.35rem" /></span>
         <Avatar :name="fullName || undefined" :email="email" :size="56" />
         <div>
-          <h1 class="text-2xl sm:text-3xl font-bold tracking-tight">Ajustes</h1>
-          <p class="text-sm text-slate-600 dark:text-slate-400 mt-1">Gestiona tu perfil y preferencias. Sesión activa como {{ email }}</p>
+          <div class="flex flex-wrap items-center gap-3 mb-1">
+            <h1 class="page-title" style="margin-bottom: 0; font-size: 2.35rem; font-weight: 800; letter-spacing: -0.03em; line-height: 1.1; color: #F1F5F9">Ajustes</h1>
+            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-[#B4F105] text-[#080C14] shadow-[0_0_12px_rgba(180,241,5,0.25)]"><i class="bi bi-shield-check" /> Seguro</span>
+          </div>
+          <p class="page-subtitle" style="margin-bottom: 0; font-size: 0.98rem; font-weight: 500; color: #94A3B8; line-height: 1.6">Gestiona tu perfil y preferencias. Sesión activa como {{ email }}</p>
         </div>
       </div>
-
-      <div v-if="loadingProfile" class="flex justify-center py-12"><span class="h-8 w-8 animate-spin rounded-full border-2 border-violet-500/30 border-t-violet-500" /></div>
-
-      <template v-else>
-        <form class="rounded-xl bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 p-6 space-y-4 mb-6" @submit.prevent="handleSaveProfile">
-          <h2 class="text-base font-bold flex items-center gap-2"><Avatar :name="fullName || undefined" :email="email" :size="24" /> Editar Perfil</h2>
-          <div v-if="profileError" role="alert" class="rounded-xl bg-red-500/10 border border-red-500/30 px-4 py-3 text-sm text-red-600 dark:text-red-300">{{ profileError }}</div>
-          <div v-if="profileToast" role="status" class="rounded-xl bg-emerald-500/10 border border-emerald-500/30 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300">{{ profileToast }}</div>
-          <div>
-            <label class="block text-sm font-medium mb-1.5">Nombre de usuario / Nombre completo</label>
-            <input v-model="fullName" placeholder="Tu nombre" class="w-full rounded-xl bg-white dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 px-3 py-2.5 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-violet-500/20" />
-          </div>
-          <div>
-            <label class="block text-sm font-medium mb-1.5">Correo electrónico</label>
-            <input v-model="email" placeholder="email@ejemplo.com" class="w-full rounded-xl bg-white dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 px-3 py-2.5 text-sm font-semibold" />
-          </div>
-          <div>
-            <label class="block text-sm font-medium mb-1.5">Avatar URL</label>
-            <input v-model="avatarUrl" placeholder="https://..." class="w-full rounded-xl bg-white dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 px-3 py-2.5 text-sm font-semibold" />
-          </div>
-          <button type="submit" :disabled="savingProfile" class="inline-flex items-center justify-center rounded-xl bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white font-bold px-6 py-2.5 transition"> {{ savingProfile ? 'Guardando...' : 'Guardar Perfil' }}</button>
-        </form>
-
-        <form class="rounded-xl bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 p-6 space-y-4 mb-6" @submit.prevent="handleChangePassword">
-          <h2 class="text-base font-bold">Seguridad y Contraseña</h2>
-          <div v-if="passwordError" role="alert" class="rounded-xl bg-red-500/10 border border-red-500/30 px-4 py-3 text-sm text-red-600 dark:text-red-300">{{ passwordError }}</div>
-          <div v-if="passwordToast" role="status" class="rounded-xl bg-emerald-500/10 border border-emerald-500/30 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300">{{ passwordToast }}</div>
-          <div>
-            <label class="block text-sm font-medium mb-1.5">Contraseña Actual</label>
-            <input v-model="currentPassword" type="password" class="w-full rounded-xl bg-white dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 px-3 py-2.5 text-sm font-semibold" />
-            <p v-if="passwordError === 'La contraseña actual es incorrecta'" class="text-xs text-red-600 dark:text-red-400 mt-1">La contraseña actual es incorrecta</p>
-          </div>
-          <div>
-            <label class="block text-sm font-medium mb-1.5">Nueva Contraseña</label>
-            <input v-model="newPassword" type="password" placeholder="Mínimo 8 caracteres" class="w-full rounded-xl bg-white dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 px-3 py-2.5 text-sm font-semibold" />
-          </div>
-          <div>
-            <label class="block text-sm font-medium mb-1.5">Confirmar Nueva Contraseña</label>
-            <input v-model="confirmPassword" type="password" class="w-full rounded-xl bg-white dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 px-3 py-2.5 text-sm font-semibold" />
-          </div>
-          <button type="submit" :disabled="savingPassword" class="inline-flex items-center justify-center rounded-xl bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white font-bold px-6 py-2.5 transition">{{ savingPassword ? 'Actualizando...' : 'Cambiar Contraseña' }}</button>
-        </form>
-
-        <form class="rounded-xl bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 p-6 space-y-4" @submit.prevent="handleSavePreferences">
-          <h2 class="text-base font-bold">Preferencias de la app</h2>
-          <div v-if="prefToast" role="status" class="rounded-xl bg-emerald-500/10 border border-emerald-500/30 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300">Ajustes actualizados correctamente</div>
-          <div>
-            <label class="block text-sm font-medium mb-1.5">Tema Claro/Oscuro</label>
-            <select v-model="theme" class="w-full rounded-xl bg-white dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 px-3 py-2.5 text-sm font-semibold">
-              <option value="light">Claro</option>
-              <option value="dark">Oscuro</option>
-              <option value="system">Sistema</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-sm font-medium mb-1.5">Formato preferido de exportación CSV/JSON</label>
-            <select v-model="exportFormat" class="w-full rounded-xl bg-white dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 px-3 py-2.5 text-sm font-semibold">
-              <option value="csv">CSV (.csv)</option>
-              <option value="json">JSON (.json)</option>
-            </select>
-          </div>
-          <button type="submit" class="inline-flex items-center justify-center rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold px-6 py-2.5 transition">Guardar Cambios</button>
-        </form>
-      </template>
     </div>
+
+    <div v-if="loadingProfile" class="flex items-center justify-center" style="min-height: 60vh">
+      <span class="h-8 w-8 animate-spin rounded-full border-2 border-[var(--brand-forest-medium)]/30 border-t-[var(--brand-forest-medium)]" />
+    </div>
+
+    <template v-else>
+      <form class="card-spark mb-4" @submit.prevent="handleSaveProfile">
+        <h2 class="card-title mb-4 flex items-center gap-2"><Avatar :name="fullName || undefined" :email="email" :size="24" /> Editar Perfil</h2>
+        <div v-if="profileError" role="alert" class="alert-custom alert-custom-danger">
+          <i class="bi bi-exclamation-triangle-fill alert-custom-icon" />
+          <div class="alert-custom-content">{{ profileError }}</div>
+        </div>
+        <div v-if="profileToast" role="status" class="alert-custom alert-custom-success">
+          <i class="bi bi-check-circle-fill alert-custom-icon" />
+          <div class="alert-custom-content">{{ profileToast }}</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label-custom">Nombre de usuario / Nombre completo</label>
+          <input v-model="fullName" placeholder="Tu nombre" class="form-control-custom" />
+        </div>
+        <div class="mb-3">
+          <label class="form-label-custom">Correo electrónico</label>
+          <input v-model="email" placeholder="email@ejemplo.com" class="form-control-custom" />
+        </div>
+        <div class="mb-4">
+          <label class="form-label-custom">Avatar URL</label>
+          <input v-model="avatarUrl" placeholder="https://..." class="form-control-custom" />
+        </div>
+        <button type="submit" :disabled="savingProfile" class="btn-custom btn-custom-primary">{{ savingProfile ? 'Guardando...' : 'Guardar Perfil' }}</button>
+      </form>
+
+      <form class="card-spark mb-4" @submit.prevent="handleChangePassword">
+        <h2 class="card-title mb-4">Seguridad y Contraseña</h2>
+        <div v-if="passwordError" role="alert" class="alert-custom alert-custom-danger">
+          <i class="bi bi-exclamation-triangle-fill alert-custom-icon" />
+          <div class="alert-custom-content">{{ passwordError }}</div>
+        </div>
+        <div v-if="passwordToast" role="status" class="alert-custom alert-custom-success">
+          <i class="bi bi-check-circle-fill alert-custom-icon" />
+          <div class="alert-custom-content">{{ passwordToast }}</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label-custom">Contraseña Actual</label>
+          <input v-model="currentPassword" type="password" class="form-control-custom" />
+          <div v-if="passwordError === 'La contraseña actual es incorrecta'" class="form-feedback-custom invalid-custom">La contraseña actual es incorrecta</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label-custom">Nueva Contraseña</label>
+          <input v-model="newPassword" type="password" placeholder="Mínimo 8 caracteres" class="form-control-custom" />
+        </div>
+        <div class="mb-4">
+          <label class="form-label-custom">Confirmar Nueva Contraseña</label>
+          <input v-model="confirmPassword" type="password" class="form-control-custom" />
+        </div>
+        <button type="submit" :disabled="savingPassword" class="btn-custom btn-custom-primary">{{ savingPassword ? 'Actualizando...' : 'Cambiar Contraseña' }}</button>
+      </form>
+
+      <form class="card-spark" @submit.prevent="handleSavePreferences">
+        <h2 class="card-title mb-4">Preferencias de la app</h2>
+        <div v-if="prefToast" role="status" class="alert-custom alert-custom-success">
+          <i class="bi bi-check-circle-fill alert-custom-icon" />
+          <div class="alert-custom-content">Ajustes actualizados correctamente</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label-custom">Tema Claro/Oscuro</label>
+          <select v-model="theme" class="form-select-custom">
+            <option value="light">Claro</option>
+            <option value="dark">Oscuro</option>
+            <option value="system">Sistema</option>
+          </select>
+        </div>
+        <div class="mb-4">
+          <label class="form-label-custom">Formato preferido de exportación CSV/JSON</label>
+          <select v-model="exportFormat" class="form-select-custom">
+            <option value="csv">CSV (.csv)</option>
+            <option value="json">JSON (.json)</option>
+          </select>
+        </div>
+        <button type="submit" class="btn-custom btn-custom-primary">Guardar Cambios</button>
+      </form>
+    </template>
   </div>
 </template>

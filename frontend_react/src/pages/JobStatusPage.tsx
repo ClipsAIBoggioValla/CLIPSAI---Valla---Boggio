@@ -1,222 +1,179 @@
-import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useJobPolling } from '@/hooks/useJobPolling'
-import ExportDropdown, { type ExportFormat } from '@/components/ExportDropdown'
-import { exportService } from '@/services/api'
 
 function StatusBadge({ status }: { status: string }) {
   const s = status.toUpperCase()
   if (s === 'PENDING')
     return (
-      <span className="inline-flex items-center gap-2 rounded-full bg-amber-500/10 border border-amber-500/30 px-3 py-1 text-sm font-medium text-amber-300">
-        <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse" /> En cola...
+      <span className="badge-table pending">
+        <span className="h-2 w-2 rounded-full bg-[var(--sys-orange)] animate-pulse" /> En cola...
       </span>
     )
   if (s === 'PROCESSING')
     return (
-      <span className="inline-flex items-center gap-2 rounded-full bg-sky-500/10 border border-sky-500/30 px-3 py-1 text-sm font-medium text-sky-300">
-        <span className="h-4 w-4 animate-spin rounded-full border-2 border-sky-300/30 border-t-sky-300" />
-        Procesando video y generando clips...
+      <span className="badge-table" style={{ backgroundColor: 'rgba(59,130,246,0.1)', color: '#3b82f6' }}>
+        <span className="h-4 w-4 animate-spin rounded-full border-2 border-[rgba(59,130,246,0.3)] border-t-[var(--sys-orange)]" />
+        Procesando...
       </span>
     )
   if (s === 'COMPLETED')
     return (
-      <span className="inline-flex items-center gap-2 rounded-full bg-emerald-500/10 border border-emerald-500/30 px-3 py-1 text-sm font-medium text-emerald-300">
-        ✓ ¡Procesamiento Completado!
-      </span>
+      <span className="badge-table success">✓ ¡Completado!</span>
     )
   if (s === 'FAILED')
     return (
-      <span className="inline-flex items-center gap-2 rounded-full bg-red-500/10 border border-red-500/30 px-3 py-1 text-sm font-medium text-red-300">
-        ✕ Falló el procesamiento
-      </span>
+      <span className="badge-table failed">✕ Falló</span>
     )
-  return <span className="text-sm text-gray-400">{s}</span>
+  return <span className="badge-table pending">{s}</span>
 }
 
 export default function JobStatusPage() {
   const { jobId } = useParams<{ jobId: string }>()
   const { job, pollingStatus, error } = useJobPolling(jobId)
-  const [exporting, setExporting] = useState<ExportFormat | null>(null)
-  const [exportError, setExportError] = useState<string | null>(null)
-
-  async function handleExport(format: ExportFormat) {
-    if (!jobId) return
-    setExporting(format)
-    setExportError(null)
-    try {
-      await exportService.exportJob(jobId, format)
-    } catch (e: unknown) {
-      setExportError(e instanceof Error ? e.message : 'Error al exportar')
-    } finally {
-      setExporting(null)
-    }
-  }
 
   if (!jobId) {
     return (
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center p-4">
-        <p className="text-red-300">Falta el identificador del job.</p>
+      <div className="flex items-center justify-center p-4" style={{ minHeight: '60vh' }}>
+        <div className="alert-custom alert-custom-danger">
+          <i className="bi bi-exclamation-triangle-fill alert-custom-icon" />
+          <div className="alert-custom-content">Falta el identificador del job.</div>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white">
-      <div className="max-w-2xl mx-auto px-4 py-8 sm:py-12">
-        <Link to="/upload" className="text-sm text-gray-400 hover:text-white inline-flex items-center gap-1 mb-6">
-          ← Volver a subir
-        </Link>
+    <div className="max-w-2xl mx-auto">
+      <Link to="/upload" className="btn-custom btn-custom-light mb-6">
+        <i className="bi bi-arrow-left" /> Volver a subir
+      </Link>
 
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 sm:p-8 shadow-xl">
-          <h1 className="text-xl font-semibold">Estado del procesamiento</h1>
-          <p className="text-sm text-gray-500 mt-1 font-mono break-all">Job ID: {jobId}</p>
+      <div className="card-spark">
+        <h1 className="card-title">Estado del procesamiento</h1>
+        <p className="text-sm font-mono break-all" style={{ color: 'var(--text-muted-green)' }}>
+          Job ID: {jobId}
+        </p>
 
-          {error && (
-            <div role="alert" className="mt-6 rounded-xl bg-red-500/10 border border-red-500/30 px-4 py-3">
-              <p className="text-sm text-red-300">{error}</p>
+        {error && (
+          <div role="alert" className="alert-custom alert-custom-danger mt-6">
+            <i className="bi bi-exclamation-triangle-fill alert-custom-icon" />
+            <div className="alert-custom-content">{error}</div>
+          </div>
+        )}
+
+        {!job && pollingStatus === 'polling' && !error && (
+          <div className="mt-8 flex flex-col items-center gap-3 py-8">
+            <span className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--brand-forest-medium)]/30 border-t-[var(--brand-forest-medium)]" />
+            <p className="text-sm" style={{ color: 'var(--text-muted-green)' }}>
+              Consultando estado...
+            </p>
+          </div>
+        )}
+
+        {job && (
+          <div className="mt-6 space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl px-4 py-4 border" style={{ backgroundColor: 'var(--bs-body-bg)', borderColor: 'var(--border-light)' }}>
+              <span className="text-sm font-bold" style={{ color: 'var(--text-muted-green)' }}>
+                Estado
+              </span>
+              <StatusBadge status={job.status} />
             </div>
-          )}
 
-          {!job && pollingStatus === 'polling' && !error && (
-            <div className="mt-8 flex flex-col items-center gap-3 py-8">
-              <span className="h-8 w-8 animate-spin rounded-full border-2 border-violet-500/30 border-t-violet-500" />
-              <p className="text-sm text-gray-400">Consultando estado...</p>
-            </div>
-          )}
-
-          {job && (
-            <div className="mt-6 space-y-6">
-              <div className="flex flex-wrap items-center justify-between gap-3 bg-gray-800/60 rounded-xl px-4 py-4 border border-gray-800">
-                <span className="text-sm text-gray-400">Estado</span>
-                <StatusBadge status={job.status} />
+            {job.status.toUpperCase() === 'PENDING' && (
+              <div className="alert-custom alert-custom-warning">
+                <i className="bi bi-hourglass-split alert-custom-icon" />
+                <div className="alert-custom-content">
+                  <strong>En cola...</strong> Tu video está esperando a ser procesado. Esto se actualiza solo.
+                </div>
               </div>
+            )}
 
-              {job.status.toUpperCase() === 'PENDING' && (
-                <div className="rounded-xl bg-amber-500/5 border border-amber-500/20 p-4 flex gap-3">
-                  <span className="h-8 w-8 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-300 shrink-0">
-                    ⏳
-                  </span>
-                  <div>
-                    <p className="text-sm font-medium text-amber-200">En cola...</p>
-                    <p className="text-sm text-gray-400 mt-1">Tu video está esperando a ser procesado. Esto se actualiza solo.</p>
-                  </div>
+            {job.status.toUpperCase() === 'PROCESSING' && (
+              <div className="alert-custom alert-custom-info">
+                <i className="bi bi-arrow-repeat alert-custom-icon" style={{ animation: 'spin 1s linear infinite' }} />
+                <div className="alert-custom-content">
+                  <strong>Procesando video y generando clips...</strong> Puede tardar unos minutos. La página se actualiza automáticamente.
                 </div>
-              )}
+              </div>
+            )}
 
-              {job.status.toUpperCase() === 'PROCESSING' && (
-                <div className="rounded-xl bg-sky-500/5 border border-sky-500/20 p-4 flex gap-3">
-                  <span className="h-8 w-8 rounded-full bg-sky-500/20 flex items-center justify-center shrink-0">
-                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-sky-300/30 border-t-sky-300" />
-                  </span>
-                  <div>
-                    <p className="text-sm font-medium text-sky-200">Procesando video y generando clips...</p>
-                    <p className="text-sm text-gray-400 mt-1">Puede tardar unos minutos. La página se actualiza automáticamente.</p>
+            {job.status.toUpperCase() === 'COMPLETED' && (() => {
+              const clips = job.result_metadata?.clips ?? []
+              return (
+                <div className="space-y-4">
+                  <div className="alert-custom alert-custom-success">
+                    <i className="bi bi-check-circle-fill alert-custom-icon" />
+                    <div className="alert-custom-content">
+                      <strong>¡Procesamiento Completado!</strong>{' '}
+                      {clips.length > 0 ? `${clips.length} clip${clips.length !== 1 ? 's' : ''} generado${clips.length !== 1 ? 's' : ''}` : 'Tus clips ya están listos.'}
+                      {job.result_metadata?.engine && <span className="text-xs" style={{ color: 'var(--text-muted-green)' }}> · motor: {job.result_metadata.engine}</span>}
+                    </div>
                   </div>
-                </div>
-              )}
 
-              {job.status.toUpperCase() === 'COMPLETED' && (() => {
-                const clips = job.result_metadata?.clips ?? []
-                return (
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-xs text-gray-500">Exportar resultados de este job</p>
-                      <ExportDropdown onExport={handleExport} loadingFormat={exporting} disabled={clips.length === 0 && !job.result_metadata} />
-                    </div>
-                    {exportError && (
-                      <div role="alert" className="rounded-lg bg-red-500/10 border border-red-500/30 px-3 py-2">
-                        <p className="text-xs text-red-300">{exportError}</p>
-                      </div>
-                    )}
-                    <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/30 p-4 flex gap-3">
-                      <span className="h-8 w-8 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-300 shrink-0">
-                        ✓
-                      </span>
-                      <div>
-                        <p className="text-sm font-medium text-emerald-200">¡Procesamiento Completado!</p>
-                        <p className="text-sm text-gray-400 mt-1">
-                          {clips.length > 0 ? `${clips.length} clip${clips.length !== 1 ? 's' : ''} generado${clips.length !== 1 ? 's' : ''}` : 'Tus clips ya están listos.'}
-                          {job.result_metadata?.engine && (
-                            <span className="ml-2 text-xs text-gray-500">· motor: {job.result_metadata.engine}</span>
-                          )}
-                        </p>
-                      </div>
-                    </div>
-
-                    {clips.length > 0 && (
-                      <div className="grid gap-3 sm:gap-4">
-                        {clips.map((clip, idx) => (
-                          <div
-                            key={`${clip.titulo}-${idx}`}
-                            className="rounded-xl bg-gray-800/80 border border-gray-700 p-4 sm:p-5 flex flex-col gap-3"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <h3 className="text-sm sm:text-base font-semibold text-white leading-snug line-clamp-2">
-                                {clip.titulo}
-                              </h3>
-                              {typeof clip.score === 'number' && (
-                                <span className="shrink-0 inline-flex items-center rounded-full bg-violet-500/15 border border-violet-500/30 px-2.5 py-1 text-xs font-semibold text-violet-300">
-                                  Score {clip.score.toFixed(2)}
-                                </span>
-                              )}
-                            </div>
-
-                            <p className="text-xs sm:text-sm font-mono text-gray-400 bg-gray-900/70 rounded-lg px-3 py-2 border border-gray-800">
-                              Inicio: {clip.inicio} - Fin: {clip.fin}
-                            </p>
-
-                            {clip.transcript_preview && (
-                              <p className="text-sm text-gray-300 leading-relaxed line-clamp-3 bg-gray-900/40 rounded-lg px-3 py-2">
-                                {clip.transcript_preview}
-                              </p>
-                            )}
-
-                            <p className="text-[11px] text-gray-500">
-                              Modo simulado — sin archivo recortado individual, timestamps informativos
-                            </p>
+                  {clips.length > 0 && (
+                    <div className="grid gap-3 sm:gap-4">
+                      {clips.map((clip, idx) => (
+                        <div key={`${clip.titulo}-${idx}`} className="card-spark flex flex-col gap-3" style={{ padding: '1.25rem' }}>
+                          <div className="flex items-start justify-between gap-3">
+                            <h3 className="text-sm font-bold leading-snug line-clamp-2" style={{ color: 'var(--text-main)' }}>
+                              {clip.titulo}
+                            </h3>
+                            {typeof clip.score === 'number' && <span className="badge-table success">Score {clip.score.toFixed(2)}</span>}
                           </div>
-                        ))}
-                      </div>
-                    )}
 
-                    {clips.length === 0 && (
-                      <Link
-                        to={`/clips?job_id=${job.job_id ?? job.id}`}
-                        className="w-full inline-flex items-center justify-center rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium py-3 px-4 transition"
-                      >
-                        Ver clips generados →
-                      </Link>
-                    )}
-                  </div>
-                )
-              })()}
+                          <p className="text-xs font-mono rounded-lg px-3 py-2 border" style={{ color: 'var(--text-muted-green)', backgroundColor: 'var(--bs-body-bg)', borderColor: 'var(--border-light)' }}>
+                            Inicio: {clip.inicio} - Fin: {clip.fin}
+                          </p>
 
-              {job.status.toUpperCase() === 'FAILED' && (
-                <div role="alert" className="rounded-xl bg-red-500/10 border border-red-500/30 p-4">
-                  <p className="text-sm font-medium text-red-300">Error en el procesamiento</p>
-                  <p className="text-sm text-red-300/80 mt-2 break-words">
-                    {job.error_message || 'El job falló sin mensaje detallado. Intenta subir el video nuevamente.'}
-                  </p>
-                  <Link
-                    to="/upload"
-                    className="mt-4 inline-flex rounded-xl bg-gray-800 hover:bg-gray-700 border border-gray-700 text-white text-sm font-medium py-2.5 px-4 transition"
-                  >
-                    Intentar de nuevo
-                  </Link>
+                          {clip.transcript_preview && (
+                            <p className="text-sm leading-relaxed line-clamp-3 rounded-lg px-3 py-2" style={{ color: 'var(--text-main)', backgroundColor: 'var(--bs-body-bg)' }}>
+                              {clip.transcript_preview}
+                            </p>
+                          )}
+
+                          <p className="text-xs" style={{ color: 'var(--text-muted-green)' }}>
+                            Modo simulado — sin archivo recortado individual, timestamps informativos
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {clips.length === 0 && (
+                    <Link to={`/clips?job_id=${job.job_id ?? job.id}`} className="btn-custom btn-custom-primary w-full justify-center">
+                      Ver clips generados <i className="bi bi-arrow-right" />
+                    </Link>
+                  )}
                 </div>
-              )}
+              )
+            })()}
 
-              <div className="pt-2 border-t border-gray-800 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-gray-500">
-                <span>Creado: {new Date(job.created_at).toLocaleString()}</span>
-                <span>Actualizado: {new Date(job.updated_at).toLocaleString()}</span>
+            {job.status.toUpperCase() === 'FAILED' && (
+              <div role="alert" className="alert-custom alert-custom-danger flex-col items-start">
+                <div className="flex gap-3 w-full">
+                  <i className="bi bi-x-circle-fill alert-custom-icon" />
+                  <div className="alert-custom-content">
+                    <strong>Error en el procesamiento</strong>
+                    <p className="mt-1 break-words opacity-80">{job.error_message || 'El job falló sin mensaje detallado. Intenta subir el video nuevamente.'}</p>
+                  </div>
+                </div>
+                <Link to="/upload" className="btn-custom btn-custom-light mt-3">
+                  <i className="bi bi-arrow-repeat" /> Intentar de nuevo
+                </Link>
               </div>
-            </div>
-          )}
-        </div>
+            )}
 
-        <p className="text-center text-xs text-gray-600 mt-6">Se actualiza cada 2 segundos sin recargar la página</p>
+            <div className="pt-2 border-t grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs" style={{ borderColor: 'var(--border-light)', color: 'var(--text-muted-green)' }}>
+              <span>Creado: {new Date(job.created_at).toLocaleString()}</span>
+              <span>Actualizado: {new Date(job.updated_at).toLocaleString()}</span>
+            </div>
+          </div>
+        )}
       </div>
+
+      <p className="text-center text-xs mt-6" style={{ color: 'var(--text-muted-green)' }}>
+        Se actualiza cada 2 segundos sin recargar la página
+      </p>
     </div>
   )
 }
