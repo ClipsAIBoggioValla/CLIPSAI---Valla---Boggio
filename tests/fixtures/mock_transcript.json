@@ -1,0 +1,32 @@
+{
+  "video_id": "00000000-0000-0000-0000-000000000001",
+  "language": "es",
+  "words": [
+    {"word": "Hola", "start": 0.0, "end": 0.32},
+    {"word": "a", "start": 0.32, "end": 0.42},
+    {"word": "todos", "start": 0.42, "end": 0.78},
+    {"word": "hoy", "start": 0.78, "end": 1.05},
+    {"word": "les", "start": 1.05, "end": 1.22},
+    {"word": "traigo", "start": 1.22, "end": 1.58},
+    {"word": "el", "start": 1.58, "end": 1.68},
+    {"word": "dato", "start": 1.68, "end": 1.98},
+    {"word": "que", "start": 1.98, "end": 2.12},
+    {"word": "nadie", "start": 2.12, "end": 2.48},
+    {"word": "te", "start": 2.48, "end": 2.58},
+    {"word": "contó", "start": 2.58, "end": 2.95},
+    {"word": "sobre", "start": 2.95, "end": 3.22},
+    {"word": "River", "start": 3.22, "end": 3.62},
+    {"word": "y", "start": 3.62, "end": 3.72},
+    {"word": "por", "start": 3.72, "end": 3.88},
+    {"word": "qué", "start": 3.88, "end": 4.05},
+    {"word": "Bustos", "start": 4.05, "end": 4.45},
+    {"word": "salió", "start": 4.45, "end": 4.82},
+    {"word": "del", "start": 4.82, "end": 4.95},
+    {"word": "equipo", "start": 4.95, "end": 5.35},
+    {"word": "titular", "start": 5.35, "end": 5.85},
+    {"word": "anoche", "start": 5.85, "end": 6.25},
+    {"word": "increíble", "start": 6.25, "end": 6.85}
+  ],
+  "raw_text": "Hola a todos hoy les traigo el dato que nadie te contó sobre River y por qué Bustos salió del equipo titular anoche increíble",
+  "duration_seconds": 7.0
+}
