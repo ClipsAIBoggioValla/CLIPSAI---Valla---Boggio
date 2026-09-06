@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { TOKEN_KEY } from '@/api/client'
-import { authService } from '@/api/services'
+import { authService, userService } from '@/api/services'
 import type { AuthUser, UserLogin, UserRegister } from '@/types/api'
 
 export const useAuthStore = defineStore('auth', () => {
@@ -35,10 +35,15 @@ export const useAuthStore = defineStore('auth', () => {
     }
     token.value = stored
     try {
-      user.value = await authService.me()
+      const me = await userService.getMe()
+      user.value = me as unknown as AuthUser
     } catch {
-      persist(null)
-      user.value = null
+      try {
+        user.value = await authService.me()
+      } catch {
+        persist(null)
+        user.value = null
+      }
     } finally {
       isLoading.value = false
     }
@@ -47,7 +52,12 @@ export const useAuthStore = defineStore('auth', () => {
   async function login(data: UserLogin) {
     const res = await authService.login(data)
     persist(res.access_token)
-    user.value = await authService.me()
+    try {
+      const me = await userService.getMe()
+      user.value = me as unknown as AuthUser
+    } catch {
+      user.value = await authService.me()
+    }
   }
 
   async function register(data: UserRegister) {
