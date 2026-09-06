@@ -13,6 +13,19 @@ from .routers import auth, clips, export, jobs, metrics, stats, users, videos
 
 from .models import Clip, Job, Usuario, Video  # noqa: F401 — registra modelos para create_all
 
+try:
+    import sys
+    from pathlib import Path as _Path
+
+    _root = _Path(__file__).resolve().parents[2].parent
+    if str(_root) not in sys.path:
+        sys.path.insert(0, str(_root))
+    from backend.api.routes.retrim import router as retrim_router  # type: ignore
+    from backend.api.routes.stream import router as stream_router  # type: ignore
+except Exception:
+    retrim_router = None  # type: ignore
+    stream_router = None  # type: ignore
+
 _settings = get_settings()
 
 
@@ -105,6 +118,10 @@ app.include_router(clips.router)
 app.include_router(stats.router)
 app.include_router(users.router)
 app.include_router(users.router, prefix="/api")
+if 'retrim_router' in globals() and retrim_router is not None:
+    app.include_router(retrim_router)
+if 'stream_router' in globals() and stream_router is not None:
+    app.include_router(stream_router)
 
 
 @app.get("/health", tags=["infra"], summary="Healthcheck simple")
