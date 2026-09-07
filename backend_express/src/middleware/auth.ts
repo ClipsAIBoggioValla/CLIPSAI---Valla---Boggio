@@ -10,7 +10,7 @@ export interface AuthRequest extends Request {
 }
 
 function getSecret(): string {
-  return process.env.JWT_SECRET ?? 'changeme'
+  return process.env.JWT_SECRET ?? 'dev_secret_key_clipsai_2026_super_secure_local'
 }
 
 function getAlgorithm(): jwt.Algorithm {
