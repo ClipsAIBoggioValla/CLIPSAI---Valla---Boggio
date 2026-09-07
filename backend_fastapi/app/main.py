@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .database import Base, engine
-from .routers import auth, clips, export, jobs, metrics, stats, users, videos
+from .routers import auth, clips, export, jobs, metrics, stats, subtitles, users, videos
 
 from .models import Clip, Job, Usuario, Video  # noqa: F401 — registra modelos para create_all
 
@@ -45,6 +45,7 @@ async def lifespan(app: FastAPI):
         conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS tags JSONB;"))
         conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'ready';"))
         conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;"))
+        conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS error_log TEXT;"))
         conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(500);"))
         conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS theme_preference VARCHAR(20) DEFAULT 'dark';"))
         try:
@@ -116,6 +117,7 @@ app.include_router(export.router)
 app.include_router(metrics.router)
 app.include_router(clips.router)
 app.include_router(stats.router)
+app.include_router(subtitles.router)
 app.include_router(users.router)
 app.include_router(users.router, prefix="/api")
 if 'retrim_router' in globals() and retrim_router is not None:
