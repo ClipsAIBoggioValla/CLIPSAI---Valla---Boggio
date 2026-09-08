@@ -150,3 +150,82 @@ def generate_ass_for_clip(
     clip_title: str | None = None,
 ) -> str:
     return write_ass_file(segments, output_path, title=clip_title or "clipsai")
+
+
+def generate_hooked_ass(
+    segments: list[SubtitleSegment],
+    clip_start: float,
+    clip_end: float,
+    hook_start: float,
+    hook_end: float,
+    output_path: str | Path,
+    title: str = "clipsai",
+) -> str:
+    hook_dur = hook_end - hook_start
+    if not (3.0 <= hook_dur <= 6.0):
+        raise ValueError(f"Hook duracion {hook_dur:.1f}s debe ser 3-6s")
+    if not (clip_start <= hook_start < hook_end <= clip_end):
+        raise ValueError(f"Hook [{hook_start},{hook_end}] fuera de clip [{clip_start},{clip_end}]")
+    hook_segs: list[SubtitleSegment] = []
+    clip_segs: list[SubtitleSegment] = []
+    for s in segments:
+        try:
+            st = float(s.get("start", 0))
+            en = float(s.get("end", 0))
+            txt = str(s.get("text", "")).strip()
+            if not txt or en <= st:
+                continue
+            if en < hook_start or st > hook_end:
+                pass
+            else:
+                cs = max(st, hook_start)
+                ce = min(en, hook_end)
+                if ce > cs:
+                    hook_segs.append(SubtitleSegment(start=cs - hook_start, end=ce - hook_start, text=txt))
+            if en < clip_start or st > clip_end:
+                continue
+            cs = max(st, clip_start)
+            ce = min(en, clip_end)
+            if ce > cs:
+                clip_segs.append(SubtitleSegment(start=cs - clip_start + hook_dur, end=ce - clip_start + hook_dur, text=txt))
+        except Exception:
+            continue
+    all_shifted = hook_segs + clip_segs
+    all_shifted.sort(key=lambda x: x["start"])
+    print(f"[ass] hook {len(hook_segs)} segs 0->{hook_dur:.1f}s, clip {len(clip_segs)} segs {hook_dur:.1f}->{hook_dur + (clip_end-clip_start):.1f}s, total {len(all_shifted)}")
+    return write_ass_file(all_shifted, output_path, title=title)
+
+
+def build_hooked_ass_content(
+    segments: list[SubtitleSegment],
+    clip_start: float,
+    clip_end: float,
+    hook_start: float,
+    hook_end: float,
+    title: str = "clipsai",
+) -> str:
+    hook_dur = hook_end - hook_start
+    hook_segs: list[SubtitleSegment] = []
+    clip_segs: list[SubtitleSegment] = []
+    for s in segments:
+        try:
+            st = float(s.get("start", 0))
+            en = float(s.get("end", 0))
+            txt = str(s.get("text", "")).strip()
+            if not txt or en <= st:
+                continue
+            if not (en < hook_start or st > hook_end):
+                cs = max(st, hook_start)
+                ce = min(en, hook_end)
+                if ce > cs:
+                    hook_segs.append(SubtitleSegment(start=cs - hook_start, end=ce - hook_start, text=txt))
+            if en < clip_start or st > clip_end:
+                continue
+            cs = max(st, clip_start)
+            ce = min(en, clip_end)
+            if ce > cs:
+                clip_segs.append(SubtitleSegment(start=cs - clip_start + hook_dur, end=ce - clip_start + hook_dur, text=txt))
+        except Exception:
+            continue
+    all_shifted = sorted(hook_segs + clip_segs, key=lambda x: x["start"])
+    return generate_ass_content(all_shifted, title=title)
