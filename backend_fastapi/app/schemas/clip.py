@@ -29,10 +29,29 @@ class ClipResponse(BaseModel):
     tags: list[Any] | None = None
     storage_path: str | None = None
     status: str
+    published_platform: str | None = None
+    social_post_id: str | None = None
+    social_post_url: str | None = None
+    published_at: datetime | None = None
+    publication_status: str | None = None
+    social_network: str | None = None
     created_at: datetime
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class PublishClipRequest(BaseModel):
+    platform: str = Field(description="tiktok|instagram|youtube|webhook")
+    caption: str | None = Field(default=None, max_length=500)
+    webhook_override_url: str | None = None
+
+
+class PublishClipResponse(BaseModel):
+    detail: str
+    clip_id: uuid.UUID
+    status: str
+    platform: str
 
 
 class ClipListItem(BaseModel):
@@ -43,6 +62,10 @@ class ClipListItem(BaseModel):
     start_time: float
     end_time: float
     transcript: str | None = None
+    status: str | None = None
+    published_platform: str | None = None
+    social_post_url: str | None = None
+    published_at: datetime | None = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

@@ -72,8 +72,29 @@ export interface ClipResponse {
   tags: string[] | null
   storage_path: string | null
   status: string
+  published_platform: string | null
+  social_post_id: string | null
+  social_post_url: string | null
+  published_at: string | null
+  publication_status: string | null
+  social_network: string | null
   created_at: string
   updated_at: string
+}
+
+export type PublishPlatform = 'tiktok' | 'instagram' | 'youtube' | 'webhook'
+
+export interface PublishClipPayload {
+  platform: PublishPlatform
+  caption?: string | null
+  webhook_override_url?: string | null
+}
+
+export interface PublishClipResponse {
+  detail: string
+  clip_id: string
+  status: string
+  platform: string
 }
 
 export interface ClipUpdate {
@@ -149,6 +170,10 @@ export interface ClipListItem {
   start_time: number
   end_time: number
   transcript: string | null
+  status?: string | null
+  published_platform?: string | null
+  social_post_url?: string | null
+  published_at?: string | null
   created_at: string
 }
 

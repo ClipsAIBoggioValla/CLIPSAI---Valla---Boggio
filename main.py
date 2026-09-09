@@ -17,8 +17,12 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
 
+import logging
+
 import requests
 from typing import List, Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 try:
     from audio_analyzer import analizar_audio, guardar_json
@@ -51,6 +55,9 @@ ANTHROPIC_VERSION = os.environ.get("ANTHROPIC_VERSION", "2023-06-01")
 ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages"
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+OPENROUTER_ENDPOINT = os.environ.get("OPENROUTER_ENDPOINT", "https://openrouter.ai/api/v1/chat/completions")
+OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", os.environ.get("OPENAI_MODEL", "anthropic/claude-3.5-sonnet"))
 API_ENDPOINT = os.environ.get("API_ENDPOINT", "https://api.deepseek.com/v1/chat/completions")
 MODEL = os.environ.get("MODEL", "deepseek-chat")
 TIMEOUT = 180
@@ -501,20 +508,34 @@ def llamar_claude(prompt: str) -> str:
 
 
 def llamar_openai_compatible(prompt: str) -> str:
-    """Llama a una API estilo OpenAI (DeepSeek u otra) y devuelve el texto de la respuesta."""
-    if not OPENAI_API_KEY:
-        raise ValueError("Define OPENAI_API_KEY en el archivo .env")
-
+    """Llama a una API estilo OpenAI (DeepSeek/OpenRouter/u otra) y devuelve el texto."""
+    key = OPENAI_API_KEY or OPENROUTER_API_KEY or os.getenv("DEEPSEEK_API_KEY", "")
+    if not key:
+        raise ValueError("Define OPENAI_API_KEY / OPENROUTER_API_KEY / DEEPSEEK_API_KEY en .env")
+    if OPENROUTER_API_KEY:
+        endpoint = OPENROUTER_ENDPOINT
+        model = OPENROUTER_MODEL
+        eff_key = OPENROUTER_API_KEY
+    elif os.getenv("DEEPSEEK_API_KEY", "") and not OPENAI_API_KEY:
+        endpoint = "https://api.deepseek.com/v1/chat/completions"
+        model = os.getenv("MODEL", "deepseek-chat")
+        eff_key = os.getenv("DEEPSEEK_API_KEY", "")
+    else:
+        endpoint = API_ENDPOINT
+        model = MODEL
+        eff_key = OPENAI_API_KEY
     headers = {
-        "Authorization": f"Bearer {OPENAI_API_KEY}",
-        "Content-Type": "application/json"
+        "Authorization": f"Bearer {eff_key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://clipsai.local",
+        "X-Title": "ClipsAI",
     }
     body = {
-        "model": MODEL,
+        "model": model,
         "messages": [{"role": "user", "content": prompt}]
     }
 
-    respuesta = _post_con_retry(API_ENDPOINT, headers, body)
+    respuesta = _post_con_retry(endpoint, headers, body)
     if respuesta.status_code != 200:
         raise ConnectionError(f"Error {respuesta.status_code}: {respuesta.text[:500]}")
 
@@ -526,31 +547,57 @@ def llamar_openai_compatible(prompt: str) -> str:
 
 
 def obtener_clips_ia(transcripcion: str, datos_audio: List[Dict], datos_enriquecidos: Dict = None) -> List[Dict]:
-    """Envía datos a la IA y retorna los clips detectados."""
-    # Validación amigable: verificar que esté configurada al menos una clave de IA
-    # antes del paso [4/6].
+    """Envía datos a la IA y retorna los clips detectados. Fallback robusto con logger."""
     has_anthropic = bool(ANTHROPIC_API_KEY)
     has_openai = bool(os.getenv("OPENAI_API_KEY", ""))
+    has_openrouter = bool(os.getenv("OPENROUTER_API_KEY", ""))
     has_deepseek = bool(os.getenv("DEEPSEEK_API_KEY", ""))
-    
-    if not has_anthropic and not has_openai and not has_deepseek:
+
+    if not has_anthropic and not has_openai and not has_openrouter and not has_deepseek:
         raise ValueError(
             "Falta la clave de API para la inteligencia artificial. "
             "Por favor completa una de estas variables en tu archivo `.env`: "
-            "- ANTHROPIC_API_KEY (para Claude/Anthropic) - ya viene en el .env example"
-            "- OPENAI_API_KEY (para OpenAI/DirectSeek API) - ya viene en el .env example"
-            "- DEEPSEEK_API_KEY (para DeepSeek SDK directo) - ya viene en el .env example"
+            "- ANTHROPIC_API_KEY (para Claude/Anthropic)"
+            "- OPENAI_API_KEY (para OpenAI)"
+            "- OPENROUTER_API_KEY (para OpenRouter)"
+            "- DEEPSEEK_API_KEY (para DeepSeek)"
         )
 
-    proveedor = "Claude (Anthropic)" if ANTHROPIC_API_KEY else "DeepSeek"
+    if ANTHROPIC_API_KEY:
+        proveedor = "Claude (Anthropic)"
+    elif OPENROUTER_API_KEY:
+        proveedor = "OpenRouter"
+    elif OPENAI_API_KEY:
+        proveedor = "OpenAI"
+    else:
+        proveedor = "DeepSeek"
     print(f"[4/6] Analizando con IA ({proveedor})...")
 
     prompt = construir_prompt(transcripcion, datos_audio, datos_enriquecidos)
 
-    if ANTHROPIC_API_KEY:
-        contenido = llamar_claude(prompt)
-    else:
-        contenido = llamar_openai_compatible(prompt)
+    try:
+        if ANTHROPIC_API_KEY:
+            contenido = llamar_claude(prompt)
+        else:
+            contenido = llamar_openai_compatible(prompt)
+    except Exception:
+        logger.exception("Fallo llamada LLM proveedor=%s, intentando fallback alternativo", proveedor)
+        fallback = None
+        if ANTHROPIC_API_KEY:
+            try:
+                fallback = llamar_claude(prompt) if proveedor != "Claude (Anthropic)" else None
+            except Exception:
+                logger.exception("Fallback Anthropic también falló")
+        if fallback is None and (OPENROUTER_API_KEY or OPENAI_API_KEY or has_deepseek):
+            try:
+                contenido = llamar_openai_compatible(prompt)
+                fallback = contenido
+            except Exception:
+                logger.exception("Fallback OpenAI/OpenRouter/DeepSeek falló")
+        if fallback is not None:
+            contenido = fallback
+        else:
+            raise
 
     print(f"      Respuesta IA ({len(contenido)} chars)")
     print(f"      === RESPUESTA COMPLETA ===")

@@ -115,6 +115,10 @@ def list_clips(
                 start_time=clip.start_time,
                 end_time=clip.end_time,
                 transcript=transcript,
+                status=getattr(clip, "status", None),
+                published_platform=getattr(clip, "published_platform", None),
+                social_post_url=getattr(clip, "social_post_url", None),
+                published_at=getattr(clip, "published_at", None),
                 created_at=clip.created_at,
             )
         )

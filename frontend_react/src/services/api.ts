@@ -119,6 +119,9 @@ export const clipService = {
     const qs = Object.keys(cleaned).length ? `?${new URLSearchParams(cleaned).toString()}` : ''
     return http.get<import('@/types/api').ClipListResponse>(`/clips${qs}`)
   },
+  publishClip(clipId: string, data: import('@/types/api').PublishClipPayload): Promise<import('@/types/api').PublishClipResponse> {
+    return http.postJson<import('@/types/api').PublishClipResponse>(`/clips/${clipId}/publicar`, data)
+  },
 
   list(params?: { video_id?: string; status?: string }): Promise<ClipResponse[]> {
     const qs = params

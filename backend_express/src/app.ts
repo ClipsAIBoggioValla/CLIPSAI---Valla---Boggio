@@ -8,6 +8,7 @@ import { metricsRouter } from './routes/metrics.js'
 import { authRouter } from './routes/auth.js'
 import { videosRouter } from './routes/videos.js'
 import { jobsRouter } from './routes/jobs.js'
+import { publishRouter } from './routes/publish.js'
 
 export function createApp() {
   const app = express()
@@ -40,6 +41,7 @@ export function createApp() {
   app.use('/', metricsRouter)
   app.use('/stats', statsRouter)
   app.use('/clips', clipsRouter)
+  app.use('/', publishRouter)
   app.use('/users', usersRouter)
   app.use('/api/users', usersRouter)
 

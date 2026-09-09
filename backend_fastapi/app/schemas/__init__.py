@@ -1,4 +1,4 @@
-from .clip import ClipBase, ClipListItem, ClipListResponse, ClipResponse, ClipUpdate
+from .clip import ClipBase, ClipListItem, ClipListResponse, ClipResponse, ClipUpdate, PublishClipRequest, PublishClipResponse
 from .job import JobResponse
 from .metrics import MetricsResponse, RecentActivityItem
 from .stats import RecentJobSummary, ScoreDistributionItem, StatsSummaryResponse
@@ -12,6 +12,8 @@ __all__ = [
     "ClipListResponse",
     "ClipResponse",
     "ClipUpdate",
+    "PublishClipRequest",
+    "PublishClipResponse",
     "JobResponse",
     "MetricsResponse",
     "RecentActivityItem",

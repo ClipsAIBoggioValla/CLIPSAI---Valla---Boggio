@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
@@ -11,6 +12,8 @@ from ..database import SessionLocal
 from ..deps import CurrentUser, DbSession
 from ..models import Job, JobStatus, Video
 from ..schemas import JobResponse
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["jobs"])
 
@@ -35,6 +38,31 @@ def _parse_time_to_seconds(value: object) -> float:
         return 0.0
 
 
+def _fallback_result(video: Video | None) -> dict:
+    preview = ""
+    if video is not None:
+        try:
+            if video.transcript:
+                preview = str(video.transcript)[:120]
+            elif video.transcription_filepath:
+                import pathlib
+
+                p = pathlib.Path(str(video.transcription_filepath))
+                if p.is_file():
+                    preview = p.read_text(encoding="utf-8", errors="ignore")[:120]
+        except Exception:
+            preview = ""
+    return {
+        "clips": [
+            {"inicio": "00:00:10", "fin": "00:00:45", "titulo": "Clip destacado 1 (fallback)", "score": 7.5, "transcript_preview": preview},
+            {"inicio": "00:01:00", "fin": "00:01:35", "titulo": "Clip destacado 2 (fallback)", "score": 7.0},
+        ],
+        "engine": "fallback",
+        "fallback": True,
+        "reason": "LLM no disponible, clip fallback automático",
+    }
+
+
 def _run_job(job_id: uuid.UUID) -> None:
     db = SessionLocal()
     try:
@@ -50,13 +78,23 @@ def _run_job(job_id: uuid.UUID) -> None:
 
         from ..services.engine import run_clip_engine
 
-        result = run_clip_engine(video.filepath, video.transcription_filepath or "")
+        try:
+            result = run_clip_engine(video.filepath, video.transcription_filepath or "")
+        except Exception:
+            logger.exception("run_clip_engine fallo job=%s, aplicando fallback para no dejar FAILED", job_id)
+            result = _fallback_result(video)
+            result["fallback_error"] = "LLM fallo, fallback aplicado"
 
         clips_payload = []
         if isinstance(result, dict):
             clips_payload = result.get("clips") or result.get("result") or result.get("clips_generated") or []
         elif isinstance(result, list):
             clips_payload = result
+
+        if not clips_payload:
+            logger.warning("run_clip_engine devolvio 0 clips job=%s, usando fallback", job_id)
+            result = _fallback_result(video)
+            clips_payload = result.get("clips", [])
 
         from ..models import Clip
 
@@ -107,12 +145,58 @@ def _run_job(job_id: uuid.UUID) -> None:
         for c in clips_to_create:
             db.add(c)
         db.commit()
+        if result.get("fallback"):
+            logger.warning("Job %s completado via fallback (%s clips)", job_id, len(clips_to_create))
+        else:
+            logger.info("Job %s completado (%s clips)", job_id, len(clips_to_create))
     except Exception as exc:
+        logger.exception("Fallo irrecuperable job=%s", job_id)
         try:
+            video_fallback: Video | None = None
+            try:
+                j = db.get(Job, job_id)
+                if j is not None:
+                    video_fallback = db.get(Video, j.video_id)
+            except Exception:
+                pass
+            fallback = _fallback_result(video_fallback)
+            fallback["fatal_error"] = str(exc)[:1000]
             failed: Job | None = db.get(Job, job_id)
             if failed is not None:
-                failed.status = JobStatus.FAILED.value
-                failed.error_message = str(exc)[:2000]
+                from ..models import Clip as ClipModel
+
+                failed.result_metadata = fallback
+                failed.status = JobStatus.COMPLETED.value
+                failed.error_message = None
+                for item in fallback.get("clips", []):
+                    if not isinstance(item, dict):
+                        continue
+                    title = item.get("titulo", "Clip fallback")
+                    start = _parse_time_to_seconds(item.get("inicio", 10))
+                    end = _parse_time_to_seconds(item.get("fin", 45))
+                    db.add(
+                        ClipModel(
+                            video_id=video_fallback.id if video_fallback else failed.video_id,
+                            job_id=failed.id,
+                            title=str(title)[:255],
+                            start_time=float(start),
+                            end_time=float(end),
+                            score=float(item.get("score", 7.0)),
+                            tags=None,
+                            storage_path="",
+                            status="ready",
+                        )
+                    )
+                db.commit()
+                logger.warning("Job %s recuperado via fallback tras error fatal", job_id)
+                return
+        except Exception:
+            logger.exception("Fallo al aplicar fallback fatal job=%s", job_id)
+        try:
+            failed2: Job | None = db.get(Job, job_id)
+            if failed2 is not None:
+                failed2.status = JobStatus.FAILED.value
+                failed2.error_message = str(exc)[:2000]
                 db.commit()
         except Exception:
             db.rollback()

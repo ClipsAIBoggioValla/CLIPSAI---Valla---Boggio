@@ -2,7 +2,7 @@
 import { ref, watch, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { clipService } from '@/api/services'
-import type { ClipListResponse, ClipSortBy } from '@/types/api'
+import type { ClipListResponse, ClipSortBy, ClipListItem, PublishPlatform } from '@/types/api'
 import { ApiError } from '@/types/api'
 
 type ViewMode = 'grid' | 'list'
@@ -21,6 +21,13 @@ const viewMode = ref<ViewMode>('grid')
 const data = ref<ClipListResponse | null>(null)
 const loading = ref(true)
 const error = ref<string | null>(null)
+
+const publishClip = ref<ClipListItem | null>(null)
+const platform = ref<PublishPlatform>('tiktok')
+const caption = ref('')
+const webhookUrl = ref('')
+const publishing = ref<string | null>(null)
+const toast = ref<string | null>(null)
 
 watch(routeQ, (v) => {
   if (v !== q.value) {
@@ -54,6 +61,12 @@ function scoreBadge(score: number | null) {
   if (score >= 70) return 'score-badge-neon high'
   if (score >= 40) return 'score-badge-neon mid'
   return 'score-badge-neon low'
+}
+
+function publishBadge(status?: string | null) {
+  if (status === 'PUBLISHING' || status === 'publishing') return { label: 'PUBLISHING', cls: 'bg-amber-500/20 text-amber-400 border-amber-500/30 animate-pulse' }
+  if (status === 'PUBLISHED' || status === 'published') return { label: 'PUBLISHED', cls: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' }
+  return null
 }
 
 function formatScore(score: number | null): string {
@@ -100,10 +113,49 @@ function resetFilters() {
   delete query.q
   router.replace({ path: route.path, query })
 }
+
+function openPublish(clip: ClipListItem) {
+  publishClip.value = clip
+  platform.value = 'tiktok'
+  caption.value = clip.title ? `${clip.title} #viral` : '¡Increíble momento! #RiverPlate'
+  webhookUrl.value = ''
+}
+
+async function submitPublish() {
+  if (!publishClip.value) return
+  const clipId = publishClip.value.id
+  const plat = platform.value
+  const cap = caption.value
+  const wh = webhookUrl.value
+  console.log('[publish] submit', { clipId, plat, cap })
+  publishing.value = clipId
+  try {
+    const res = await clipService.publishClip(clipId, {
+      platform: plat,
+      caption: cap || undefined,
+      webhook_override_url: plat === 'webhook' && wh ? wh : undefined,
+    })
+    console.log('[publish] 202', res)
+    toast.value = `Publicación en ${plat} encolada — PUBLISHING`
+    publishClip.value = null
+    if (data.value) {
+      data.value.items = data.value.items.map((c) => c.id === clipId ? { ...c, status: 'PUBLISHING', published_platform: plat } : c)
+    }
+    setTimeout(() => fetchClips(), 2500)
+    setTimeout(() => (toast.value = null), 4000)
+  } catch (e: unknown) {
+    console.error('[publish] error', e)
+    toast.value = e instanceof ApiError ? e.detail : e instanceof Error ? e.message : 'Error al publicar'
+    setTimeout(() => (toast.value = null), 4000)
+  } finally {
+    publishing.value = null
+  }
+}
 </script>
 
 <template>
   <div class="max-w-6xl mx-auto">
+    <div v-if="toast" class="fixed top-4 right-4 z-[9999] bg-[#121824] border border-[#B4F105]/30 text-[#F1F5F9] px-4 py-3 rounded-xl shadow-xl text-sm font-semibold">{{ toast }}</div>
     <div class="page-header" style="margin-bottom: 2rem">
       <div>
         <div class="flex flex-wrap items-center gap-3 mb-4">
@@ -176,7 +228,16 @@ function resetFilters() {
           <p class="text-xs font-mono px-2.5 py-1.5 rounded-full border inline-flex items-center gap-1.5" style="color: #94A3B8; background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.08)"><i class="bi bi-clock" style="font-size: 0.7rem" /> {{ formatRange(clip.start_time, clip.end_time) }} · {{ new Date(clip.created_at).toLocaleDateString() }}</p>
           <p v-if="clip.transcript" class="text-sm line-clamp-3 leading-relaxed rounded-xl px-3 py-2.5 border" style="color: #CBD5E1; background: rgba(255,255,255,0.03); border-color: rgba(255,255,255,0.06)">{{ clip.transcript }}</p>
           <p v-else class="text-xs italic" style="color: #64748B">Sin transcripción disponible</p>
-          <div class="flex items-center gap-1.5 pt-1"><span class="h-1.5 w-1.5 rounded-full bg-[#B4F105] shadow-[0_0_6px_rgba(180,241,5,0.5)]" /><span class="text-[11px] font-semibold tracking-wide uppercase" style="color: #94A3B8">Listo para publicar</span></div>
+          <div class="flex items-center gap-2 flex-wrap pt-1">
+            <span v-if="publishBadge(clip.status)" :class="`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-bold border ${publishBadge(clip.status)!.cls}`">
+              <span v-if="publishBadge(clip.status)!.label==='PUBLISHING'" class="h-2 w-2 rounded-full bg-amber-400 animate-pulse" />{{ publishBadge(clip.status)!.label }}
+            </span>
+            <template v-else><span class="h-1.5 w-1.5 rounded-full bg-[#B4F105] shadow-[0_0_6px_rgba(180,241,5,0.5)]" /><span class="text-[11px] font-semibold tracking-wide uppercase" style="color: #94A3B8">Listo para publicar</span></template>
+            <a v-if="clip.social_post_url" :href="clip.social_post_url" target="_blank" class="text-xs font-bold text-[#B4F105] hover:underline inline-flex items-center gap-1"><i class="bi bi-box-arrow-up-right" /> Ver post</a>
+          </div>
+          <button @click="openPublish(clip)" :disabled="publishing===clip.id || clip.status==='PUBLISHING'" class="w-full mt-2 btn-custom btn-custom-primary !py-2 text-xs font-bold disabled:opacity-50">
+            {{ publishing===clip.id || clip.status==='PUBLISHING' ? 'Publicando…' : clip.status==='PUBLISHED' ? 'Republicar' : 'Publicar' }}
+          </button>
         </div>
       </div>
 
@@ -188,7 +249,8 @@ function resetFilters() {
                 <th>Título</th>
                 <th>Score</th>
                 <th>Inicio - Fin</th>
-                <th>Fecha</th>
+                <th>Estado</th>
+                <th>Acción</th>
               </tr>
             </thead>
             <tbody>
@@ -199,7 +261,12 @@ function resetFilters() {
                 </td>
                 <td><span :class="scoreBadge(clip.score)">{{ formatScore(clip.score) }}</span></td>
                 <td class="font-mono text-xs" style="color: var(--text-muted-green)">{{ formatRange(clip.start_time, clip.end_time) }}</td>
-                <td class="text-xs" style="color: var(--text-muted-green)">{{ new Date(clip.created_at).toLocaleDateString() }}</td>
+                <td>
+                  <span v-if="publishBadge(clip.status)" :class="`inline-flex px-2 py-1 rounded-full text-[11px] font-bold border ${publishBadge(clip.status)!.cls}`">{{ publishBadge(clip.status)!.label }}</span>
+                  <span v-else class="text-xs text-[#94A3B8]">ready</span>
+                  <a v-if="clip.social_post_url" :href="clip.social_post_url" target="_blank" class="ml-2 text-xs text-[#B4F105] hover:underline">Ver</a>
+                </td>
+                <td><button @click="openPublish(clip)" :disabled="publishing===clip.id" class="btn-custom btn-custom-primary btn-custom-sm !text-xs disabled:opacity-50">{{ clip.status==='PUBLISHED' ? 'Republicar' : 'Publicar' }}</button></td>
               </tr>
             </tbody>
           </table>
@@ -215,5 +282,29 @@ function resetFilters() {
         </div>
       </div>
     </template>
+
+    <div v-if="publishClip" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" @click="publishClip=null">
+      <div class="w-full max-w-md bg-[#121824] border border-white/10 rounded-2xl p-6 shadow-2xl" @click.stop>
+        <h3 class="text-lg font-extrabold text-[#F1F5F9] mb-1">Publicar clip</h3>
+        <p class="text-xs text-[#94A3B8] mb-4 line-clamp-2">{{ publishClip.title || 'Clip sin título' }}</p>
+        <label class="block text-xs font-bold text-[#CBD5E1] mb-1">Plataforma</label>
+        <div class="grid grid-cols-2 gap-2 mb-3">
+          <button v-for="p in (['tiktok','instagram','youtube','webhook'] as PublishPlatform[])" :key="p" type="button" @click="platform=p" :class="`px-3 py-2.5 rounded-xl text-xs font-bold border capitalize transition ${platform===p ? 'bg-[#B4F105] text-[#080C14] border-[#B4F105] shadow-[0_0_12px_rgba(180,241,5,0.3)]' : 'bg-[#0B0F17] text-[#94A3B8] border-white/10 hover:border-white/20'}`">
+            {{ p==='youtube' ? 'YouTube Shorts' : p==='instagram' ? 'Instagram Reels' : p }}
+          </button>
+        </div>
+        <label class="block text-xs font-bold text-[#CBD5E1] mb-1">Caption</label>
+        <textarea v-model="caption" rows="3" maxlength="500" placeholder="¡Increíble momento de River! #RiverPlate" class="w-full px-3 py-2 bg-[#0B0F17] border border-white/10 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:border-[#B4F105] resize-none" />
+        <p class="text-[11px] text-[#64748B] text-right mt-1">{{ caption.length }}/500</p>
+        <template v-if="platform==='webhook'">
+          <label class="block text-xs font-bold text-[#CBD5E1] mt-3 mb-1">Webhook URL (opcional, override)</label>
+          <input v-model="webhookUrl" placeholder="https://hooks.example.com/publish" class="w-full px-3 py-2 bg-[#0B0F17] border border-white/10 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:border-[#B4F105]" />
+        </template>
+        <div class="flex gap-2 mt-5">
+          <button @click="publishClip=null" class="flex-1 btn-custom btn-custom-light">Cancelar</button>
+          <button @click="submitPublish" :disabled="publishing!==null" class="flex-1 btn-custom btn-custom-primary font-bold disabled:opacity-50">{{ publishing ? 'Enviando…' : 'Publicar ahora' }}</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
