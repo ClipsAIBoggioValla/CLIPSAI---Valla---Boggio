@@ -143,14 +143,14 @@ CREATE TABLE IF NOT EXISTS clips (
     CONSTRAINT chk_clips_time_range
         CHECK (end_time > start_time AND start_time >= 0),
 
-    -- Valida el dominio de `publication_status`.
+    -- Valida el dominio de `publication_status` (case-insensitive via lower en lifespan).
     CONSTRAINT chk_clips_publication_status
-        CHECK (publication_status IN ('draft', 'scheduled', 'published', 'failed')),
+        CHECK (lower(publication_status) IN ('draft', 'scheduled', 'published', 'failed', 'not_published', 'publishing')),
 
-    -- Valida el dominio de `social_network` (permite NULL).
+    -- Valida el dominio de `social_network` (case-insensitive, permite youtube/instagram alias).
     CONSTRAINT chk_clips_social_network
         CHECK (social_network IS NULL
-               OR social_network IN ('tiktok', 'youtube_shorts', 'instagram_reels'))
+               OR lower(social_network) IN ('tiktok', 'youtube_shorts', 'instagram_reels', 'youtube', 'instagram'))
 );
 
 -- Indice B-Tree en la FK

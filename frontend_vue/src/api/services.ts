@@ -87,6 +87,10 @@ export const clipService = {
     const { data } = await apiClient.get<import('@/types/api').ClipListResponse>(`/clips${qs}`)
     return data
   },
+  async publishClip(clipId: string, data: import('@/types/api').PublishClipPayload): Promise<import('@/types/api').PublishClipResponse> {
+    const { data: res } = await apiClient.post<import('@/types/api').PublishClipResponse>(`/clips/${clipId}/publicar`, data)
+    return res
+  },
   async list(params?: { video_id?: string; status?: string }): Promise<import('@/types/api').ClipResponse[]> {
     const qs = params
       ? `?${new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined) as [string, string][]).toString()}`
