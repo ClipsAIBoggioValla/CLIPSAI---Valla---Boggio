@@ -83,6 +83,7 @@ clipsRouter.get('/', authMiddleware, async (req: AuthRequest, res) => {
       `SELECT
          c.id, c.job_id, c.title, c.score, c.start_time, c.end_time,
          LEFT(v.transcript, 500) AS transcript,
+         c.status, c.published_platform, c.social_post_url, c.published_at,
          c.created_at
        FROM clips c
        JOIN jobs j ON c.job_id = j.id
@@ -101,6 +102,10 @@ clipsRouter.get('/', authMiddleware, async (req: AuthRequest, res) => {
       start_time: Number(r.start_time),
       end_time: Number(r.end_time),
       transcript: (r.transcript as string | null) ?? null,
+      status: (r.status as string | null) ?? null,
+      published_platform: (r.published_platform as string | null) ?? null,
+      social_post_url: (r.social_post_url as string | null) ?? null,
+      published_at: r.published_at ? new Date(r.published_at as string).toISOString() : null,
       created_at: new Date(r.created_at as string).toISOString(),
     }))
 
@@ -146,6 +151,12 @@ clipsRouter.get('/:clipId', authMiddleware, async (req: AuthRequest, res) => {
       tags: row.tags ?? null,
       storage_path: row.file_path as string,
       status: row.status as string,
+      published_platform: (row.published_platform as string | null) ?? null,
+      social_post_id: (row.social_post_id as string | null) ?? null,
+      social_post_url: (row.social_post_url as string | null) ?? null,
+      published_at: row.published_at ? new Date(row.published_at as string).toISOString() : null,
+      publication_status: (row.publication_status as string | null) ?? null,
+      social_network: (row.social_network as string | null) ?? null,
       created_at: new Date(row.created_at as string).toISOString(),
       updated_at: new Date((row.updated_at as string) ?? (row.created_at as string)).toISOString(),
     })

@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { clipService } from '@/services/api'
-import type { ClipListItem, ClipListResponse, ClipSortBy } from '@/types/api'
+import type { ClipListItem, ClipListResponse, ClipSortBy, PublishPlatform } from '@/types/api'
 import { ApiError } from '@/types/api'
 
 type ViewMode = 'grid' | 'list'
@@ -22,6 +22,12 @@ function scoreBadgeClass(score: number | null): string {
   return 'score-badge-neon low'
 }
 
+function publishBadge(status?: string | null) {
+  if (status === 'PUBLISHING' || status === 'publishing') return { label: 'PUBLISHING', cls: 'bg-amber-500/20 text-amber-400 border-amber-500/30 animate-pulse' }
+  if (status === 'PUBLISHED' || status === 'published') return { label: 'PUBLISHED', cls: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' }
+  return null
+}
+
 export default function ClipLibraryPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const urlQ = searchParams.get('q') ?? ''
@@ -35,6 +41,13 @@ export default function ClipLibraryPage() {
   const [data, setData] = useState<ClipListResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  const [publishClip, setPublishClip] = useState<ClipListItem | null>(null)
+  const [platform, setPlatform] = useState<PublishPlatform>('tiktok')
+  const [caption, setCaption] = useState('')
+  const [webhookUrl, setWebhookUrl] = useState('')
+  const [publishing, setPublishing] = useState<string | null>(null)
+  const [toast, setToast] = useState<string | null>(null)
 
   useEffect(() => {
     if (urlQ !== q) setQ(urlQ)
@@ -88,8 +101,46 @@ export default function ClipLibraryPage() {
     setSearchParams(next, { replace: true })
   }
 
+  function openPublish(clip: ClipListItem) {
+    setPublishClip(clip)
+    setPlatform('tiktok')
+    setCaption(clip.title ? `${clip.title} #viral` : '¡Increíble momento! #RiverPlate')
+    setWebhookUrl('')
+  }
+
+  async function submitPublish() {
+    if (!publishClip) return
+    const clipId = publishClip.id
+    const plat = platform
+    const cap = caption
+    const wh = webhookUrl
+    console.log('[publish] submit', { clipId, plat, cap })
+    setPublishing(clipId)
+    try {
+      const res = await clipService.publishClip(clipId, {
+        platform: plat,
+        caption: cap || undefined,
+        webhook_override_url: plat === 'webhook' && wh ? wh : undefined,
+      })
+      console.log('[publish] 202', res)
+      setToast(`Publicación en ${plat} encolada — PUBLISHING`)
+      setPublishClip(null)
+      setData((prev) => prev ? { ...prev, items: prev.items.map((c) => c.id === clipId ? { ...c, status: 'PUBLISHING', published_platform: plat } : c) } : prev)
+      setTimeout(() => fetchClips(), 2500)
+      setTimeout(() => setToast(null), 4000)
+    } catch (e: unknown) {
+      console.error('[publish] error', e)
+      const msg = e instanceof ApiError ? e.detail : e instanceof Error ? e.message : 'Error al publicar'
+      setToast(msg)
+      setTimeout(() => setToast(null), 4000)
+    } finally {
+      setPublishing(null)
+    }
+  }
+
   return (
     <div className="max-w-6xl mx-auto">
+      {toast && <div className="fixed top-4 right-4 z-[9999] bg-[#121824] border border-[#B4F105]/30 text-[#F1F5F9] px-4 py-3 rounded-xl shadow-xl text-sm font-semibold">{toast}</div>}
       <div className="page-header" style={{ marginBottom: '2rem' }}>
         <div>
           <div className="flex flex-wrap items-center gap-3 mb-4">
@@ -216,32 +267,49 @@ export default function ClipLibraryPage() {
         <>
           {viewMode === 'grid' ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {data.items.map((clip) => (
-                <div key={clip.id} className="clip-card" style={{ marginBottom: 0 }}>
-                  <div className="flex items-start justify-between gap-2">
-                    <h3 className="text-sm font-bold line-clamp-2 flex-1" style={{ color: '#F1F5F9' }}>
-                      {clip.title || 'Clip sin título'}
-                    </h3>
-                    <span className={scoreBadgeClass(clip.score)}>{formatScore(clip.score)}</span>
-                  </div>
-                  <p className="text-xs font-mono px-2.5 py-1.5 rounded-full border inline-flex items-center gap-1.5" style={{ color: '#94A3B8', background: 'rgba(255,255,255,0.04)', borderColor: 'rgba(255,255,255,0.08)' }}>
-                    <i className="bi bi-clock" style={{ fontSize: '0.7rem' }} /> {formatTimeRange(clip)} · {new Date(clip.created_at).toLocaleDateString()}
-                  </p>
-                  {clip.transcript ? (
-                    <p className="text-sm line-clamp-3 leading-relaxed rounded-xl px-3 py-2.5 border" style={{ color: '#CBD5E1', background: 'rgba(255,255,255,0.03)', borderColor: 'rgba(255,255,255,0.06)' }}>
-                      {clip.transcript}
+              {data.items.map((clip) => {
+                const pb = publishBadge(clip.status)
+                return (
+                  <div key={clip.id} className="clip-card" style={{ marginBottom: 0 }}>
+                    <div className="flex items-start justify-between gap-2">
+                      <h3 className="text-sm font-bold line-clamp-2 flex-1" style={{ color: '#F1F5F9' }}>
+                        {clip.title || 'Clip sin título'}
+                      </h3>
+                      <span className={scoreBadgeClass(clip.score)}>{formatScore(clip.score)}</span>
+                    </div>
+                    <p className="text-xs font-mono px-2.5 py-1.5 rounded-full border inline-flex items-center gap-1.5" style={{ color: '#94A3B8', background: 'rgba(255,255,255,0.04)', borderColor: 'rgba(255,255,255,0.08)' }}>
+                      <i className="bi bi-clock" style={{ fontSize: '0.7rem' }} /> {formatTimeRange(clip)} · {new Date(clip.created_at).toLocaleDateString()}
                     </p>
-                  ) : (
-                    <p className="text-xs italic" style={{ color: '#64748B' }}>
-                      Sin transcripción disponible
-                    </p>
-                  )}
-                  <div className="flex items-center gap-1.5 pt-1">
-                    <span className="h-1.5 w-1.5 rounded-full bg-[#B4F105] shadow-[0_0_6px_rgba(180,241,5,0.5)]" />
-                    <span className="text-[11px] font-semibold tracking-wide uppercase" style={{ color: '#94A3B8' }}>Listo para publicar</span>
+                    {clip.transcript ? (
+                      <p className="text-sm line-clamp-3 leading-relaxed rounded-xl px-3 py-2.5 border" style={{ color: '#CBD5E1', background: 'rgba(255,255,255,0.03)', borderColor: 'rgba(255,255,255,0.06)' }}>
+                        {clip.transcript}
+                      </p>
+                    ) : (
+                      <p className="text-xs italic" style={{ color: '#64748B' }}>
+                        Sin transcripción disponible
+                      </p>
+                    )}
+                    <div className="flex items-center gap-2 flex-wrap pt-1">
+                      {pb ? (
+                        <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-bold border ${pb.cls}`}>
+                          {pb.label === 'PUBLISHING' && <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse" />}
+                          {pb.label}
+                        </span>
+                      ) : (
+                        <><span className="h-1.5 w-1.5 rounded-full bg-[#B4F105] shadow-[0_0_6px_rgba(180,241,5,0.5)]" /><span className="text-[11px] font-semibold tracking-wide uppercase" style={{ color: '#94A3B8' }}>Listo para publicar</span></>
+                      )}
+                      {clip.social_post_url && (
+                        <a href={clip.social_post_url} target="_blank" rel="noopener noreferrer" className="text-xs font-bold text-[#B4F105] hover:underline inline-flex items-center gap-1">
+                          <i className="bi bi-box-arrow-up-right" /> Ver post
+                        </a>
+                      )}
+                    </div>
+                    <button type="button" onClick={() => openPublish(clip)} disabled={publishing === clip.id || clip.status === 'PUBLISHING'} className="w-full mt-2 btn-custom btn-custom-primary !py-2 text-xs font-bold disabled:opacity-50">
+                      {publishing === clip.id || clip.status === 'PUBLISHING' ? 'Publicando…' : clip.status === 'PUBLISHED' ? 'Republicar' : 'Publicar'}
+                    </button>
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           ) : (
             <div className="table-card-custom">
@@ -252,29 +320,39 @@ export default function ClipLibraryPage() {
                       <th>Título</th>
                       <th>Score</th>
                       <th>Inicio - Fin</th>
-                      <th>Fecha</th>
+                      <th>Estado</th>
+                      <th>Acción</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {data.items.map((clip) => (
-                      <tr key={clip.id}>
-                        <td>
-                          <p className="font-bold line-clamp-1" style={{ color: 'var(--text-main)' }}>
-                            {clip.title || 'Sin título'}
-                          </p>
-                          {clip.transcript && <p className="text-xs line-clamp-1 mt-1" style={{ color: 'var(--text-muted-green)' }}>{clip.transcript}</p>}
-                        </td>
-                        <td>
-                          <span className={scoreBadgeClass(clip.score)}>{formatScore(clip.score)}</span>
-                        </td>
-                        <td className="font-mono text-xs" style={{ color: 'var(--text-muted-green)' }}>
-                          {formatTimeRange(clip)}
-                        </td>
-                        <td className="text-xs" style={{ color: 'var(--text-muted-green)' }}>
-                          {new Date(clip.created_at).toLocaleDateString()}
-                        </td>
-                      </tr>
-                    ))}
+                    {data.items.map((clip) => {
+                      const pb = publishBadge(clip.status)
+                      return (
+                        <tr key={clip.id}>
+                          <td>
+                            <p className="font-bold line-clamp-1" style={{ color: 'var(--text-main)' }}>
+                              {clip.title || 'Sin título'}
+                            </p>
+                            {clip.transcript && <p className="text-xs line-clamp-1 mt-1" style={{ color: 'var(--text-muted-green)' }}>{clip.transcript}</p>}
+                          </td>
+                          <td>
+                            <span className={scoreBadgeClass(clip.score)}>{formatScore(clip.score)}</span>
+                          </td>
+                          <td className="font-mono text-xs" style={{ color: 'var(--text-muted-green)' }}>
+                            {formatTimeRange(clip)}
+                          </td>
+                          <td>
+                            {pb ? <span className={`inline-flex px-2 py-1 rounded-full text-[11px] font-bold border ${pb.cls}`}>{pb.label}</span> : <span className="text-xs text-[#94A3B8]">ready</span>}
+                            {clip.social_post_url && <a href={clip.social_post_url} target="_blank" rel="noopener noreferrer" className="ml-2 text-xs text-[#B4F105] hover:underline">Ver</a>}
+                          </td>
+                          <td>
+                            <button type="button" onClick={() => openPublish(clip)} disabled={publishing === clip.id} className="btn-custom btn-custom-primary btn-custom-sm !text-xs disabled:opacity-50">
+                              {clip.status === 'PUBLISHED' ? 'Republicar' : 'Publicar'}
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -301,6 +379,35 @@ export default function ClipLibraryPage() {
             </div>
           </div>
         </>
+      )}
+
+      {publishClip && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setPublishClip(null)}>
+          <div className="w-full max-w-md bg-[#121824] border border-white/10 rounded-2xl p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-extrabold text-[#F1F5F9] mb-1">Publicar clip</h3>
+            <p className="text-xs text-[#94A3B8] mb-4 line-clamp-2">{publishClip.title || 'Clip sin título'}</p>
+            <label className="block text-xs font-bold text-[#CBD5E1] mb-1">Plataforma</label>
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              {(['tiktok','instagram','youtube','webhook'] as PublishPlatform[]).map((p) => (
+                <button key={p} type="button" onClick={() => setPlatform(p)} className={`px-3 py-2.5 rounded-xl text-xs font-bold border capitalize transition ${platform===p ? 'bg-[#B4F105] text-[#080C14] border-[#B4F105] shadow-[0_0_12px_rgba(180,241,5,0.3)]' : 'bg-[#0B0F17] text-[#94A3B8] border-white/10 hover:border-white/20'}`}>
+                  {p === 'youtube' ? 'YouTube Shorts' : p === 'instagram' ? 'Instagram Reels' : p}
+                </button>
+              ))}
+            </div>
+            <label className="block text-xs font-bold text-[#CBD5E1] mb-1">Caption</label>
+            <textarea value={caption} onChange={(e)=>setCaption(e.target.value)} rows={3} maxLength={500} placeholder="¡Increíble momento de River! #RiverPlate" className="w-full px-3 py-2 bg-[#0B0F17] border border-white/10 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:border-[#B4F105] resize-none" />
+            <p className="text-[11px] text-[#64748B] text-right mt-1">{caption.length}/500</p>
+            {platform==='webhook' && (
+              <><label className="block text-xs font-bold text-[#CBD5E1] mt-3 mb-1">Webhook URL (opcional, override)</label><input value={webhookUrl} onChange={(e)=>setWebhookUrl(e.target.value)} placeholder="https://hooks.example.com/publish" className="w-full px-3 py-2 bg-[#0B0F17] border border-white/10 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:border-[#B4F105]" /></>
+            )}
+            <div className="flex gap-2 mt-5">
+              <button type="button" onClick={()=>setPublishClip(null)} className="flex-1 btn-custom btn-custom-light">Cancelar</button>
+              <button type="button" onClick={submitPublish} disabled={publishing!==null} className="flex-1 btn-custom btn-custom-primary font-bold disabled:opacity-50">
+                {publishing ? 'Enviando…' : 'Publicar ahora'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

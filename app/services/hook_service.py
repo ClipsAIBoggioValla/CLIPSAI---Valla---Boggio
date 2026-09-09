@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import time
@@ -9,6 +10,8 @@ from typing import Any, TypedDict
 
 import requests
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 for _p in (Path(__file__).resolve().parents[3] / ".env", Path(__file__).resolve().parents[2] / ".env"):
     load_dotenv(dotenv_path=_p, override=False)
@@ -36,6 +39,9 @@ ANTHROPIC_VERSION = os.getenv("ANTHROPIC_VERSION", "2023-06-01").strip()
 ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages"
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
+OPENROUTER_ENDPOINT = os.getenv("OPENROUTER_ENDPOINT", "https://openrouter.ai/api/v1/chat/completions").strip()
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", os.getenv("OPENAI_MODEL", "anthropic/claude-3.5-sonnet")).strip()
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "").strip()
 API_ENDPOINT = os.getenv("API_ENDPOINT", "https://api.deepseek.com/v1/chat/completions").strip()
 MODEL = os.getenv("MODEL", "deepseek-chat").strip() or os.getenv("OPENAI_MODEL", "deepseek-chat").strip()
@@ -47,12 +53,14 @@ MAX_RETRIES = 3
 def _get_provider() -> str:
     if ANTHROPIC_API_KEY and ANTHROPIC_API_KEY.startswith("sk-ant"):
         return "anthropic"
-    if OPENAI_API_KEY and OPENAI_API_KEY.startswith("sk-"):
-        return "openai"
-    if DEEPSEEK_API_KEY:
-        return "deepseek"
     if ANTHROPIC_API_KEY:
         return "anthropic"
+    if OPENAI_API_KEY and OPENAI_API_KEY.startswith("sk-"):
+        return "openai"
+    if OPENROUTER_API_KEY:
+        return "openrouter"
+    if DEEPSEEK_API_KEY:
+        return "deepseek"
     return "none"
 
 
@@ -172,15 +180,20 @@ def _call_anthropic(prompt: str) -> str:
 
 
 def _call_openai_compatible(prompt: str) -> str:
-    key = OPENAI_API_KEY or DEEPSEEK_API_KEY
+    key = OPENAI_API_KEY or OPENROUTER_API_KEY or DEEPSEEK_API_KEY
     if not key:
-        raise ValueError("OPENAI_API_KEY / DEEPSEEK_API_KEY no configurada")
-    endpoint = API_ENDPOINT
-    model = MODEL
-    if DEEPSEEK_API_KEY and not OPENAI_API_KEY:
+        raise ValueError("OPENAI_API_KEY / OPENROUTER_API_KEY / DEEPSEEK_API_KEY no configurada")
+    if OPENROUTER_API_KEY:
+        endpoint = OPENROUTER_ENDPOINT
+        model = OPENROUTER_MODEL
+        key = OPENROUTER_API_KEY
+    elif DEEPSEEK_API_KEY and not OPENAI_API_KEY:
         endpoint = "https://api.deepseek.com/v1/chat/completions"
         model = os.getenv("MODEL", "deepseek-chat")
-    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    else:
+        endpoint = API_ENDPOINT
+        model = MODEL
+    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json", "HTTP-Referer": "https://clipsai.local", "X-Title": "ClipsAI"}
     body = {"model": model, "messages": [{"role": "user", "content": prompt}], "temperature": 0.4, "max_tokens": 4096}
     resp = _post_with_retry(endpoint, headers, body)
     if resp.status_code != 200:
@@ -194,11 +207,15 @@ def _call_openai_compatible(prompt: str) -> str:
 
 def _call_llm(prompt: str) -> str:
     provider = _get_provider()
-    if provider == "anthropic":
-        return _call_anthropic(prompt)
-    if provider in ("openai", "deepseek"):
-        return _call_openai_compatible(prompt)
-    raise ValueError("Ninguna API LLM configurada (ANTHROPIC_API_KEY u OPENAI_API_KEY/DEEPSEEK_API_KEY en .env)")
+    try:
+        if provider == "anthropic":
+            return _call_anthropic(prompt)
+        if provider in ("openai", "deepseek", "openrouter"):
+            return _call_openai_compatible(prompt)
+    except Exception:
+        logger.exception("Fallo LLM provider=%s", provider)
+        raise
+    raise ValueError("Ninguna API LLM configurada (ANTHROPIC_API_KEY u OPENAI_API_KEY/OPENROUTER_API_KEY/DEEPSEEK_API_KEY en .env)")
 
 
 def _parse_json_strict(raw: str) -> dict[str, Any]:
@@ -252,18 +269,24 @@ def _validate_clips(data: dict[str, Any]) -> list[HookClip]:
 def detect_hooks(segments: list[dict[str, Any]], duration_hint: float | None = None, mock: bool = False) -> list[HookClip]:
     if mock or _get_provider() == "none":
         return _mock_hooks(segments)
-    transcript_text = _format_transcript(segments)
-    if not transcript_text.strip():
-        raise ValueError("Transcripcion vacia")
-    prompt = _build_hook_prompt(transcript_text, duration_hint)
-    raw = _call_llm(prompt)
-    print(f"[hook] LLM raw {len(raw)} chars")
-    print(raw[:1200])
-    data = _parse_json_strict(raw)
-    clips = _validate_clips(data)
-    if not clips:
-        print(f"[hook] WARN validacion dejo 0 clips, data: {data}")
-    return clips
+    try:
+        transcript_text = _format_transcript(segments)
+        if not transcript_text.strip():
+            raise ValueError("Transcripcion vacia")
+        prompt = _build_hook_prompt(transcript_text, duration_hint)
+        raw = _call_llm(prompt)
+        print(f"[hook] LLM raw {len(raw)} chars")
+        print(raw[:1200])
+        data = _parse_json_strict(raw)
+        clips = _validate_clips(data)
+        if not clips:
+            print(f"[hook] WARN validacion dejo 0 clips, data: {data} — fallback mock")
+            logger.warning("Hook validacion 0 clips, usando fallback mock")
+            return _mock_hooks(segments)
+        return clips
+    except Exception:
+        logger.exception("detect_hooks fallo, fallback a mock")
+        return _mock_hooks(segments)
 
 
 def _mock_hooks(segments: list[dict[str, Any]]) -> list[HookClip]:
