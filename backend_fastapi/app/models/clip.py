@@ -73,6 +73,14 @@ class Clip(Base):
 
     social_network: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
+    published_platform: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+    social_post_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    social_post_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     error_log: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(

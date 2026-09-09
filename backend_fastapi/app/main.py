@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .database import Base, engine
-from .routers import auth, clips, export, jobs, metrics, stats, subtitles, users, videos
+from .routers import auth, clips, export, jobs, metrics, publish, stats, subtitles, users, videos
 
 from .models import Clip, Job, Usuario, Video  # noqa: F401 — registra modelos para create_all
 
@@ -46,6 +46,10 @@ async def lifespan(app: FastAPI):
         conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'ready';"))
         conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;"))
         conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS error_log TEXT;"))
+        conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS published_platform VARCHAR(50);"))
+        conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS social_post_id VARCHAR(255);"))
+        conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS social_post_url TEXT;"))
+        conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ;"))
         conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(500);"))
         conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS theme_preference VARCHAR(20) DEFAULT 'dark';"))
         try:
@@ -62,6 +66,32 @@ async def lifespan(app: FastAPI):
                 "IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='chk_jobs_status') THEN "
                 "ALTER TABLE jobs ADD CONSTRAINT chk_jobs_status "
                 "CHECK (lower(status) IN ('pending','processing','completed','failed')); "
+                "END IF; END $$;"
+            )
+        )
+        try:
+            conn.execute(text("ALTER TABLE clips DROP CONSTRAINT IF EXISTS chk_clips_publication_status;"))
+        except Exception:
+            pass
+        conn.execute(
+            text(
+                "DO $$ BEGIN "
+                "IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='chk_clips_publication_status') THEN "
+                "ALTER TABLE clips ADD CONSTRAINT chk_clips_publication_status "
+                "CHECK (lower(publication_status) IN ('draft','scheduled','published','failed','not_published','publishing')); "
+                "END IF; END $$;"
+            )
+        )
+        try:
+            conn.execute(text("ALTER TABLE clips DROP CONSTRAINT IF EXISTS chk_clips_social_network;"))
+        except Exception:
+            pass
+        conn.execute(
+            text(
+                "DO $$ BEGIN "
+                "IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='chk_clips_social_network') THEN "
+                "ALTER TABLE clips ADD CONSTRAINT chk_clips_social_network "
+                "CHECK (social_network IS NULL OR lower(social_network) IN ('tiktok','youtube_shorts','instagram_reels','youtube','instagram')); "
                 "END IF; END $$;"
             )
         )
@@ -118,6 +148,7 @@ app.include_router(metrics.router)
 app.include_router(clips.router)
 app.include_router(stats.router)
 app.include_router(subtitles.router)
+app.include_router(publish.router)
 app.include_router(users.router)
 app.include_router(users.router, prefix="/api")
 if 'retrim_router' in globals() and retrim_router is not None:
