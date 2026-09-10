@@ -11,7 +11,7 @@ from .config import get_settings
 from .database import Base, engine
 from .routers import auth, clips, export, jobs, metrics, publish, stats, subtitles, users, videos
 
-from .models import Clip, Job, Usuario, Video  # noqa: F401 — registra modelos para create_all
+from .models import Clip, Job, SocialAccount, Usuario, Video  # noqa: F401 — registra modelos para create_all
 
 try:
     import sys
