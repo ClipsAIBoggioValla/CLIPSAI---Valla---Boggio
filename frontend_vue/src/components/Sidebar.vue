@@ -72,6 +72,12 @@ function handleLogout() {
         <div class="sidebar-menu-title">Páginas</div>
         <ul class="sidebar-menu-list">
           <li class="sidebar-menu-item">
+            <RouterLink to="/dashboard/integrations" class="sidebar-menu-link" active-class="active" @click="emit('close')">
+              <i class="bi bi-youtube" />
+              <span>Integraciones</span>
+            </RouterLink>
+          </li>
+          <li class="sidebar-menu-item">
             <RouterLink to="/settings" class="sidebar-menu-link" active-class="active" @click="emit('close')">
               <i class="bi bi-gear" />
               <span>Ajustes</span>

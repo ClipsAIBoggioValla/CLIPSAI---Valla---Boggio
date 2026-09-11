@@ -111,6 +111,21 @@ export default function DashboardPage() {
           </p>
         </div>
 
+        <div className="rounded-2xl bg-[#121824] border border-[rgba(255,255,255,0.08)] p-4 mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className="h-9 w-9 rounded-xl bg-[#FF0000]/10 border border-[#FF0000]/20 flex items-center justify-center text-[#FF0000]">
+              <i className="bi bi-youtube" />
+            </span>
+            <div>
+              <p className="text-sm font-bold text-white">YouTube — OAuth 2.0 (Issue #24)</p>
+              <p className="text-xs text-[#94A3B8]">Prueba el conector: GET /auth/social/youtube/connect</p>
+            </div>
+          </div>
+          <Link to="/dashboard/integrations" className="btn-custom btn-custom-primary flex items-center gap-2 whitespace-nowrap" data-testid="go-integrations">
+            <i className="bi bi-box-arrow-up-right" /> Conectar YouTube
+          </Link>
+        </div>
+
         {loading && (
           <>
             <KpiSkeleton />

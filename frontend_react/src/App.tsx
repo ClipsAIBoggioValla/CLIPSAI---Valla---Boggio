@@ -5,6 +5,7 @@ import DashboardPage from '@/pages/DashboardPage'
 import SettingsPage from '@/pages/SettingsPage'
 import UploadPage from '@/pages/UploadPage'
 import JobStatusPage from '@/pages/JobStatusPage'
+import IntegrationsPage from '@/pages/IntegrationsPage'
 import Layout from '@/components/Layout'
 import { useAuth } from '@/context/AuthContext'
 
@@ -32,6 +33,8 @@ export default function App() {
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/upload" element={<UploadPage />} />
         <Route path="/jobs/:jobId" element={<JobStatusPage />} />
+        <Route path="/dashboard/integrations" element={<IntegrationsPage />} />
+        <Route path="/integrations" element={<Navigate to="/dashboard/integrations" replace />} />
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Route>

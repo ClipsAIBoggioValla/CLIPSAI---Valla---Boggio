@@ -78,6 +78,22 @@ class Settings(BaseSettings):
     jwt_algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
     jwt_expire_minutes: int = Field(default=60, validation_alias="JWT_EXPIRE_MINUTES")
 
+    # ---- Google OAuth (YouTube) ----
+    google_client_id: str = Field(default="", validation_alias="GOOGLE_CLIENT_ID")
+    google_client_secret: str = Field(default="", validation_alias="GOOGLE_CLIENT_SECRET")
+    google_redirect_uri: str = Field(
+        default="https://decorator-excretory-satin.ngrok-free.dev/auth/social/youtube/callback",
+        validation_alias="GOOGLE_REDIRECT_URI",
+    )
+    frontend_redirect_url: str = Field(
+        default="http://localhost:3000",
+        validation_alias="FRONTEND_REDIRECT_URL",
+    )
+    frontend_url: str = Field(
+        default="http://localhost:3000",
+        validation_alias="FRONTEND_URL",
+    )
+
     model_config = SettingsConfigDict(
         # No es estricto con env_file en Docker porque las vars vienen por el servicio.
         # En desarrollo local, python-dotenv ya las cargo arriba.

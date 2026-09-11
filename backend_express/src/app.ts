@@ -31,7 +31,7 @@ export function createApp() {
       optionsSuccessStatus: 200,
     })
   )
-  app.options('*', cors({
+  app.options('/*', cors({
     origin: [
       'https://decorator-excretory-satin.ngrok-free.dev',
       'http://localhost:3000',
@@ -52,6 +52,7 @@ export function createApp() {
   app.get('/health', (_req, res) => res.json({ status: 'ok' }))
 
   app.use('/auth', authRouter)
+  app.use(authRouter)
   app.use('/videos', videosRouter)
   app.use('/', jobsRouter)
   app.use('/', exportRouter)
