@@ -58,7 +58,7 @@ export const metricsService = {
 
 export const userService = {
   async getMe(): Promise<import('@/types/api').UserProfile> {
-    const base = ((import.meta.env.VITE_API_URL ?? '').trim() || 'http://localhost:8000').replace(/\/$/, '')
+    const base = ((import.meta.env.VITE_API_URL ?? '').trim() || 'https://decorator-excretory-satin.ngrok-free.dev').replace(/\/$/, '')
     console.log('[users/me] GET', `${base}/users/me`)
     const { data: res } = await apiClient.get<import('@/types/api').UserProfile>('/users/me')
     return res
