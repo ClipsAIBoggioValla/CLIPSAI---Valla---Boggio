@@ -16,18 +16,35 @@ export function createApp() {
   app.use(
     cors({
       origin: [
+        'https://decorator-excretory-satin.ngrok-free.dev',
         'http://localhost:3000',
         'http://127.0.0.1:3000',
-        'http://localhost:3001',
-        'http://127.0.0.1:3001',
         'http://localhost:5173',
         'http://127.0.0.1:5173',
+        'http://localhost:3001',
+        'http://127.0.0.1:3001',
       ],
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+      allowedHeaders: ['Authorization', 'Content-Type', 'ngrok-skip-browser-warning', 'X-Requested-With', 'Accept', 'Origin'],
+      exposedHeaders: ['*'],
+      optionsSuccessStatus: 200,
     })
   )
+  app.options('*', cors({
+    origin: [
+      'https://decorator-excretory-satin.ngrok-free.dev',
+      'http://localhost:3000',
+      'http://127.0.0.1:3000',
+      'http://localhost:5173',
+      'http://127.0.0.1:5173',
+      'http://localhost:3001',
+      'http://127.0.0.1:3001',
+    ],
+    credentials: true,
+    allowedHeaders: ['Authorization', 'Content-Type', 'ngrok-skip-browser-warning', 'X-Requested-With', 'Accept', 'Origin'],
+    optionsSuccessStatus: 200,
+  }))
 
   app.use(express.json())
   app.use(express.urlencoded({ extended: true }))

@@ -5,15 +5,19 @@ import { ApiError } from '@/types/api'
 export const TOKEN_KEY = 'clipsai_token'
 
 const RAW = (import.meta.env.VITE_API_URL ?? '').trim()
-const BASE_URL = (RAW || 'http://localhost:8000').replace(/\/$/, '')
+const BASE_URL = (RAW || 'https://decorator-excretory-satin.ngrok-free.dev').replace(/\/$/, '')
 
 export const apiClient = axios.create({
   baseURL: BASE_URL,
-  headers: { Accept: 'application/json' },
-  withCredentials: false,
+  headers: { Accept: 'application/json', 'ngrok-skip-browser-warning': 'true' },
+  withCredentials: true,
 })
 
 apiClient.interceptors.request.use((config) => {
+  config.headers.set('ngrok-skip-browser-warning', 'true')
+  if (config.url?.includes('/login') || config.url?.includes('/me') || config.url?.includes('/auth')) {
+    config.withCredentials = true
+  }
   try {
     const tok = localStorage.getItem(TOKEN_KEY)
     if (tok) {
