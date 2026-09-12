@@ -85,6 +85,13 @@ class Settings(BaseSettings):
         default="https://decorator-excretory-satin.ngrok-free.dev/auth/social/youtube/callback",
         validation_alias="GOOGLE_REDIRECT_URI",
     )
+    # ---- Meta OAuth (Instagram Graph API) ----
+    instagram_client_id: str = Field(default="", validation_alias="INSTAGRAM_CLIENT_ID")
+    instagram_client_secret: str = Field(default="", validation_alias="INSTAGRAM_CLIENT_SECRET")
+    instagram_redirect_uri: str = Field(
+        default="https://decorator-excretory-satin.ngrok-free.dev/auth/social/instagram/callback",
+        validation_alias="INSTAGRAM_REDIRECT_URI",
+    )
     frontend_redirect_url: str = Field(
         default="http://localhost:3000",
         validation_alias="FRONTEND_REDIRECT_URL",

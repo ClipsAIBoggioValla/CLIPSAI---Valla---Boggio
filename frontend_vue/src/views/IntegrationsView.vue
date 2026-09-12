@@ -14,20 +14,42 @@ const integration = ref<string | null>(null)
 const status = ref<string | null>(null)
 const errorDetail = ref<string | null>(null)
 
+type SocialEntry = { connected: boolean; username: string | null; expires_at: string | null }
+const social = ref<{ youtube: SocialEntry; instagram: SocialEntry; tiktok: SocialEntry } | null>(null)
+
+async function fetchSocialStatus() {
+  try {
+    const token = (() => {
+      try {
+        return localStorage.getItem('clipsai_token')
+      } catch {
+        return null
+      }
+    })()
+    const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
+    const { data } = await apiClient.get<{ youtube: SocialEntry; instagram: SocialEntry; tiktok: SocialEntry }>('/auth/social/status', { headers })
+    console.log("[DEBUG] Respuesta /auth/social/status:", data)
+    social.value = data
+  } catch {}
+}
+
 function syncQuery() {
   integration.value = route.query.integration as string | null
   status.value = route.query.status as string | null
-  errorDetail.value = route.query.error as string | null
+  errorDetail.value = (route.query.error as string | null) || (route.query.message as string | null)
 }
 
-onMounted(() => {
+onMounted(async () => {
   syncQuery()
+  await fetchSocialStatus()
+  if (status.value === 'success') await fetchSocialStatus()
   if (status.value) {
     setTimeout(() => {
       const q = { ...route.query }
       delete q.integration
       delete q.status
       delete q.error
+      delete (q as Record<string, unknown>).message
       router.replace({ query: q })
       syncQuery()
     }, 5000)
@@ -45,6 +67,38 @@ async function handleConnectYoutube() {
     if (e instanceof ApiError) error.value = e.detail
     else if (e instanceof Error) error.value = e.message
     else error.value = 'Error al conectar con YouTube'
+  } finally {
+    loading.value = false
+  }
+}
+async function handleConnectInstagram() {
+  loading.value = true
+  error.value = null
+  try {
+    const token = (() => {
+      try {
+        return localStorage.getItem('clipsai_token')
+      } catch {
+        return null
+      }
+    })()
+    const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
+    const { data } = await apiClient.get<{ auth_url?: string; url?: string }>('/auth/social/instagram/connect', { headers })
+    const authUrl = (data as { auth_url?: string; url?: string }).auth_url || (data as { auth_url?: string; url?: string }).url
+    console.log("[DEBUG] Auth URL recibida del backend:", authUrl)
+    if (!authUrl) {
+      error.value = 'No se recibió auth_url del backend'
+      return
+    }
+    if (!authUrl.startsWith("https://www.facebook.com/")) {
+      error.value = 'URL de autorización inválida: debe comenzar con https://www.facebook.com/'
+      return
+    }
+    window.location.href = authUrl
+  } catch (e: unknown) {
+    if (e instanceof ApiError) error.value = e.detail
+    else if (e instanceof Error) error.value = e.message
+    else error.value = 'Error al conectar con Instagram'
   } finally {
     loading.value = false
   }
@@ -73,6 +127,14 @@ async function handleConnectYoutube() {
       <i class="bi bi-exclamation-triangle-fill alert-custom-icon" />
       <div class="alert-custom-content"><strong>Error al conectar YouTube</strong> {{ errorDetail ? `— ${errorDetail}` : '' }}. Intenta nuevamente.</div>
     </div>
+    <div v-if="integration === 'instagram' && status === 'success'" role="alert" class="alert-custom alert-custom-success mb-4">
+      <i class="bi bi-check-circle-fill alert-custom-icon" />
+      <div class="alert-custom-content"><strong>Instagram conectado correctamente</strong> — integración <code>instagram</code> vinculada a tu cuenta. Ya puedes publicar Reels en Instagram.</div>
+    </div>
+    <div v-if="integration === 'instagram' && status === 'error'" role="alert" class="alert-custom alert-custom-danger mb-4">
+      <i class="bi bi-exclamation-triangle-fill alert-custom-icon" />
+      <div class="alert-custom-content"><strong>Error al conectar Instagram</strong> {{ errorDetail ? `— ${errorDetail}` : '' }}. Intenta nuevamente.</div>
+    </div>
     <div v-if="error" role="alert" class="alert-custom alert-custom-danger mb-4">
       <i class="bi bi-exclamation-triangle-fill alert-custom-icon" />
       <div class="alert-custom-content">{{ error }}</div>
@@ -84,9 +146,10 @@ async function handleConnectYoutube() {
           <span class="h-10 w-10 rounded-xl bg-[#FF0000]/10 border border-[#FF0000]/20 flex items-center justify-center text-[#FF0000] text-xl"><i class="bi bi-youtube" /></span>
           <div>
             <h3 class="font-bold text-white">YouTube</h3>
-            <p class="text-xs text-[#94A3B8]">Google Data API v3 — upload + readonly</p>
+            <p v-if="social?.youtube.connected && social.youtube.username" class="text-xs font-mono text-emerald-300">@{{ social.youtube.username }}</p>
+            <p v-else class="text-xs text-[#94A3B8]">Google Data API v3 — upload + readonly</p>
           </div>
-          <span v-if="integration === 'youtube' && status === 'success'" class="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/20"><span class="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Conectado</span>
+          <span v-if="social?.youtube.connected || (integration === 'youtube' && status === 'success')" class="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/20"><span class="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Conectado</span>
           <span v-else class="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-white/5 text-[#94A3B8] border border-white/10">No conectado</span>
         </div>
         <p class="text-sm text-[#94A3B8] mb-4">Conecta tu canal para subir clips directamente como Shorts. Scopes: <code class="text-xs bg-white/5 px-1 py-0.5 rounded">youtube.readonly</code> + <code class="text-xs bg-white/5 px-1 py-0.5 rounded">youtube.upload</code></p>
@@ -98,17 +161,24 @@ async function handleConnectYoutube() {
         <p class="text-xs text-[#64748B] mt-2 text-center">GET <code>/auth/social/youtube/connect</code> → redirect Google OAuth (offline + consent)</p>
       </div>
 
-      <div class="card-spark opacity-60">
+      <div class="card-spark">
         <div class="flex items-center gap-3 mb-3">
           <span class="h-10 w-10 rounded-xl bg-[#E1306C]/10 border border-[#E1306C]/20 flex items-center justify-center text-[#E1306C] text-xl"><i class="bi bi-instagram" /></span>
           <div>
             <h3 class="font-bold text-white">Instagram</h3>
-            <p class="text-xs text-[#94A3B8]">Próximamente</p>
+            <p v-if="social?.instagram.connected && social.instagram.username" class="text-xs font-mono text-emerald-300">@{{ social.instagram.username }}</p>
+            <p v-else class="text-xs text-[#94A3B8]">Meta Graph API — instagram_basic + content_publish</p>
           </div>
-          <span class="ml-auto text-xs px-2 py-1 rounded-full bg-white/5 border border-white/10 text-[#64748B]">Pronto</span>
+          <span v-if="social?.instagram.connected || (integration === 'instagram' && status === 'success')" class="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/20"><span class="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Conectado</span>
+          <span v-else class="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-white/5 text-[#94A3B8] border border-white/10">No conectado</span>
         </div>
-        <p class="text-sm text-[#64748B] mb-4">Publicación en Reels — en desarrollo.</p>
-        <button disabled class="btn-custom btn-custom-light w-full opacity-50 cursor-not-allowed">Conectar Instagram</button>
+        <p class="text-sm text-[#94A3B8] mb-4">Conecta tu cuenta para publicar Reels automáticamente. Scopes: <code class="text-xs bg-white/5 px-1 py-0.5 rounded">instagram_basic</code> + <code class="text-xs bg-white/5 px-1 py-0.5 rounded">instagram_content_publish</code> + <code class="text-xs bg-white/5 px-1 py-0.5 rounded">pages_show_list</code></p>
+        <button class="btn-custom w-full flex items-center justify-center gap-2 bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#515BD4] text-white border-0 hover:opacity-90" :disabled="loading" data-testid="connect-instagram-btn" @click="handleConnectInstagram">
+          <span v-if="loading" class="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+          <template v-if="!loading"><i class="bi bi-instagram" /> Conectar Instagram</template>
+          <template v-else>Conectando...</template>
+        </button>
+        <p class="text-xs text-[#64748B] mt-2 text-center">GET <code>/auth/social/instagram/connect</code> → redirect Meta OAuth (long-lived 60 días)</p>
       </div>
     </div>
 
