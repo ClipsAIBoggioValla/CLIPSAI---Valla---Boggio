@@ -1,16 +1,26 @@
 # ==============================================================================
-# clipsai — Infraestructura base (Issue 1)
+# clipsai — Infraestructura unificada (Issue 1 + Orquestación completa)
 # ------------------------------------------------------------------------------
-# Levanta PostgreSQL 15 con:
-#   - Persistencia via volumen nombrado (postgres_data)
-#   - Scripts DDL de inicializacion en ./init-scripts/
-#   - Healthcheck con pg_isready para que otros servicios puedan depender de el
+# Levanta los 6 servicios con un solo comando:
+#   docker compose up -d --build
+#
+# Servicios:
+#   - db                : postgres:15-alpine  :5432
+#   - backend_fastapi   : FastAPI  :8000  (health /health)
+#   - backend_express   : Express  :3001  (health /health)
+#   - frontend_react    : React + Vite  :3000  (hot-reload)
+#   - frontend_vue      : Vue + Vite    :5173  (hot-reload)
+#   - ngrok             : túnel a backend_fastapi:8000 --domain decorador
 #
 # Uso:
-#   1) cp .env.example .env  (y editar valores)
-#   2) docker compose up -d
-#   3) docker compose logs -f db   # ver init scripts corriendo
-#   4) docker compose exec db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+#   cp .env.example .env  # completar JWT_SECRET, GOOGLE_*, NGROK_AUTHTOKEN
+#   docker compose up -d --build
+#   docker compose logs -f            # todos
+#   docker compose logs -f backend_fastapi frontend_react ngrok
+#   docker compose ps                 # 6 healthy
+#   docker compose down               # mantiene postgres_data
+#   docker compose down -v            # borra DB (cuidado)
+#   ngrok inspect -> http://localhost:4040
 # ==============================================================================
 
 services:
@@ -24,19 +34,14 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
-      # Locale y timezone consistentes para timestamps del dominio
       PGTZ: ${POSTGRES_TZ:-UTC}
       TZ: ${POSTGRES_TZ:-UTC}
     ports:
-      # Se expone el puerto configurable en el host, siempre contra el 5432 interno
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      # Persistencia de datos entre `docker compose down` y `up`
       - postgres_data:/var/lib/postgresql/data
-      # Scripts DDL/seed ejecutados UNA sola vez, al inicializar el volumen vacio
       - ./init-scripts:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      # pg_isready se autentica con el usuario/db reales para evitar falsos positivos
       test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\" -h 127.0.0.1 -p 5432"]
       interval: 10s
       timeout: 5s
@@ -46,7 +51,7 @@ services:
       - clipsai-net
 
   # ----------------------------------------------------------------------------
-  # Backend FastAPI (Issue 3 — autenticacion)
+  # Backend FastAPI (Issue 3)
   # ----------------------------------------------------------------------------
   backend_fastapi:
     build:
@@ -107,6 +112,69 @@ services:
       start_period: 15s
     networks:
       - clipsai-net
+
+  # ----------------------------------------------------------------------------
+  # Frontends — desarrollo con hot-reload (Vite)
+  # ----------------------------------------------------------------------------
+  frontend_react:
+    image: node:20-alpine
+    container_name: clipsai-frontend-react
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 3000"
+    env_file:
+      - .env
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+      CHOKIDAR_USEPOLLING: "true"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend_react:/app
+      - /app/node_modules
+    depends_on:
+      backend_fastapi:
+        condition: service_healthy
+    networks:
+      - clipsai-net
+
+  frontend_vue:
+    image: node:20-alpine
+    container_name: clipsai-frontend-vue
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    env_file:
+      - .env
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+      CHOKIDAR_USEPOLLING: "true"
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend_vue:/app
+      - /app/node_modules
+    depends_on:
+      backend_fastapi:
+        condition: service_healthy
+    networks:
+      - clipsai-net
+
+  # ----------------------------------------------------------------------------
+  # Ngrok — túnel a backend_fastapi:8000
+  # ----------------------------------------------------------------------------
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: clipsai-ngrok
+    command: http backend_fastapi:8000 --domain=${NGROK_DOMAIN:-decorator-excretory-satin.ngrok-free.dev}
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
+    depends_on:
+      backend_fastapi:
+        condition: service_healthy
+    ports:
+      - "4040:4040"
+    networks:
+      - clipsai-net
+    restart: unless-stopped
 
 volumes:
   postgres_data:

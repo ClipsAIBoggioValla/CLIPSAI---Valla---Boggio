@@ -5,7 +5,7 @@ export const TOKEN_KEY = 'clipsai_token'
 const RAW_BASE_URL: string =
   ((import.meta as unknown as { env?: Record<string, string> })?.env?.VITE_API_URL ?? '').trim()
 
-const BASE_URL = (RAW_BASE_URL || 'https://decorator-excretory-satin.ngrok-free.dev').replace(/\/$/, '')
+const BASE_URL = (RAW_BASE_URL || 'http://localhost:8000').replace(/\/$/, '')
 
 function getToken(): string | null {
   try {

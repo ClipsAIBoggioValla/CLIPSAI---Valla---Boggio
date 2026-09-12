@@ -69,6 +69,12 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
             <div className="sidebar-menu-title">Páginas</div>
             <ul className="sidebar-menu-list">
               <li className="sidebar-menu-item">
+                <NavLink to="/dashboard/integrations" className={linkCls} onClick={onClose}>
+                  <i className="bi bi-youtube" />
+                  <span>Integraciones</span>
+                </NavLink>
+              </li>
+              <li className="sidebar-menu-item">
                 <NavLink to="/settings" className={linkCls} onClick={onClose}>
                   <i className="bi bi-gear" />
                   <span>Ajustes</span>

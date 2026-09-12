@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .database import Base, engine
-from .routers import auth, clips, export, jobs, metrics, publish, stats, subtitles, users, videos
+from .routers import auth, clips, export, jobs, metrics, publish, social_auth, stats, subtitles, users, videos
 
 from .models import Clip, Job, SocialAccount, Usuario, Video  # noqa: F401 — registra modelos para create_all
 
@@ -110,6 +110,23 @@ app = FastAPI(
     redirect_slashes=False,
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://decorator-excretory-satin.ngrok-free.dev",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+    ],
+    allow_origin_regex=r"https://.*\.ngrok-free\.dev",
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "ngrok-skip-browser-warning", "X-Requested-With", "Accept", "Origin"],
+)
+
 
 @app.middleware("http")
 async def handle_options_preflight(request, call_next):  # type: ignore[no-untyped-def]
@@ -141,25 +158,29 @@ async def handle_options_preflight(request, call_next):  # type: ignore[no-untyp
         return response
     return await call_next(request)
 
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "https://decorator-excretory-satin.ngrok-free.dev",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:3001",
-        "http://127.0.0.1:3001",
-    ],
-    allow_origin_regex=r"https://.*\.ngrok-free\.dev",
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "ngrok-skip-browser-warning", "X-Requested-With", "Accept", "Origin"],
-)
-
 app.include_router(auth.router)
+# Alias compat: si frontend dispara /login sin prefijo /auth (evita 404 preflight)
+from fastapi import APIRouter as _CompatAPIRouter, Depends as _DependsCompat
+
+from .deps import get_db as _get_db_compat
+from .schemas import Token as _TokenCompat, UsuarioCreate as _UsuarioCreateCompat, UsuarioLogin as _UsuarioLoginCompat
+
+_compat_auth = _CompatAPIRouter(tags=["auth-compat"])
+
+@_compat_auth.post("/login", response_model=_TokenCompat, include_in_schema=False)
+def _login_alias(payload: _UsuarioLoginCompat, db=_DependsCompat(_get_db_compat)):  # type: ignore
+    from .routers.auth import login as _auth_login
+
+    return _auth_login(payload, db)
+
+@_compat_auth.post("/registro", response_model=_TokenCompat, include_in_schema=False)
+def _registro_alias(payload: _UsuarioCreateCompat, db=_DependsCompat(_get_db_compat)):  # type: ignore
+    from .routers.auth import registro as _auth_registro
+
+    return _auth_registro(payload, db)
+
+app.include_router(_compat_auth)
+app.include_router(social_auth.router)
 app.include_router(videos.router)
 app.include_router(jobs.router)
 app.include_router(export.router)

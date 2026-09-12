@@ -1,0 +1,25 @@
+{
+  "name": "clipsai-root",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Orquestación unificada ClipsAI — 5 servicios (db, 2 backends, 2 frontends) + ngrok",
+  "scripts": {
+    "dev": "concurrently --kill-others --names \"REACT,VUE,NGROK\" \"npm:dev:react\" \"npm:dev:vue\" \"npm:dev:ngrok\"",
+    "dev:full": "docker compose up -d --build && npm run dev",
+    "dev:docker": "docker compose up -d --build",
+    "dev:docker:logs": "docker compose logs -f",
+    "dev:react": "npm --prefix frontend_react run dev -- --host 0.0.0.0 --port 3000",
+    "dev:vue": "npm --prefix frontend_vue run dev -- --host 0.0.0.0 --port 5173",
+    "dev:ngrok": "ngrok http 8000 --domain=decorator-excretory-satin.ngrok-free.dev",
+    "dev:up": "docker compose up -d db backend_fastapi backend_express",
+    "dev:down": "docker compose down",
+    "dev:ps": "docker compose ps",
+    "install:all": "npm install && npm --prefix frontend_react install && npm --prefix frontend_vue install && npm --prefix backend_express install"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

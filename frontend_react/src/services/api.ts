@@ -13,7 +13,7 @@ import type {
 
 const RAW_BASE: string =
   ((import.meta as unknown as { env?: Record<string, string> })?.env?.VITE_API_URL ?? '').trim()
-const BASE_URL = (RAW_BASE || 'https://decorator-excretory-satin.ngrok-free.dev').replace(/\/$/, '')
+const BASE_URL = (RAW_BASE || 'http://localhost:8000').replace(/\/$/, '')
 
 function triggerBlobDownload(blob: Blob, contentDisposition: string | null, fallbackFilename: string) {
   let filename = fallbackFilename
@@ -94,7 +94,7 @@ export const metricsService = {
 
 export const userService = {
   getMe(): Promise<import('@/types/api').UserProfile> {
-    const base = ((import.meta as unknown as { env?: Record<string, string> })?.env?.VITE_API_URL ?? '').trim() || 'https://decorator-excretory-satin.ngrok-free.dev'
+    const base = ((import.meta as unknown as { env?: Record<string, string> })?.env?.VITE_API_URL ?? '').trim() || 'http://localhost:8000'
     console.log('[users/me] GET', `${base.replace(/\/$/, '')}/users/me`)
     return http.get<import('@/types/api').UserProfile>('/users/me')
   },
@@ -144,7 +144,7 @@ export const clipService = {
   downloadUrl(clipId: string): string {
     const raw: string =
       ((import.meta as unknown as { env?: Record<string, string> })?.env?.VITE_API_URL ?? '').trim()
-    const base = (raw || 'https://decorator-excretory-satin.ngrok-free.dev').replace(/\/$/, '')
+    const base = (raw || 'http://localhost:8000').replace(/\/$/, '')
     return `${base}/clips/${clipId}/descarga`
   },
 }
