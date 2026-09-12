@@ -49,6 +49,11 @@ class SocialAccount(Base):
         nullable=False,
     )
 
+    account_name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
     access_token: Mapped[str] = mapped_column(
         Text,
         nullable=False,

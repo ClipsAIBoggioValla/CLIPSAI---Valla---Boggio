@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import requests
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..models import SocialAccount
+
+logger = logging.getLogger(__name__)
 
 YOUTUBE_SCOPES = [
     "https://www.googleapis.com/auth/youtube.readonly",
@@ -70,6 +73,36 @@ def get_youtube_auth_url(user_id: str) -> str:
     return f"{GOOGLE_AUTH_URL}?{urllib.parse.urlencode(params)}"
 
 
+def _fetch_youtube_username(access_token: str) -> str | None:
+    try:
+        resp = requests.get(
+            "https://www.googleapis.com/youtube/v3/channels",
+            params={"part": "snippet", "mine": "true"},
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10,
+        )
+        try:
+            data = resp.json() if resp.status_code == 200 else {}
+            logger.info("[YOUTUBE API RAW RESPONSE] Channels: %s", data)
+        except Exception:
+            data = {}
+        if resp.status_code == 200:
+            items = data.get("items") or []
+            if items:
+                snippet = items[0].get("snippet") or {}
+                custom = snippet.get("customUrl")
+                if custom and str(custom).strip():
+                    return str(custom).strip()
+                title = snippet.get("title")
+                if title and str(title).strip():
+                    return str(title).strip()
+        if resp.status_code != 200 or not (data.get("items") or []):
+            logger.error("[YOUTUBE API ERROR] No se encontró canal activo")
+    except Exception as e:
+        logger.error("[YOUTUBE API ERROR] No se encontró canal activo: %s", str(e))
+    return None
+
+
 def exchange_code_for_tokens(code: str) -> dict[str, Any]:
     client_id, client_secret, redirect_uri = _get_google_config()
     data = {
@@ -81,7 +114,15 @@ def exchange_code_for_tokens(code: str) -> dict[str, Any]:
     }
     resp = requests.post(GOOGLE_TOKEN_URL, data=data, timeout=15)
     resp.raise_for_status()
-    return resp.json()
+    tokens = resp.json()
+    try:
+        username = _fetch_youtube_username(tokens.get("access_token", ""))
+        if username:
+            tokens["username"] = username
+            logger.info("[YOUTUBE REAL USERNAME] Obtenido: %s", username)
+    except Exception:
+        pass
+    return tokens
 
 
 def save_youtube_tokens(db: Session, user_id: str, tokens: dict[str, Any]) -> SocialAccount:
@@ -108,15 +149,40 @@ def save_youtube_tokens(db: Session, user_id: str, tokens: dict[str, Any]) -> So
         except Exception:
             expires_at = None
 
+    raw_username = tokens.get("username")
+    fetched_username: str | None = None
+    if not raw_username:
+        fetched_username = _fetch_youtube_username(access_token)
+    username_real = str(raw_username or fetched_username or "").strip() or None
+    if username_real:
+        logger.info("[YOUTUBE REAL USERNAME] Obtenido: %s", username_real)
+    else:
+        logger.error("[YOUTUBE API ERROR] No se encontró canal activo")
+
     existing: SocialAccount | None = db.execute(
-        select(SocialAccount).where(SocialAccount.user_id == uid, SocialAccount.platform == "youtube")
+        select(SocialAccount).where(SocialAccount.user_id == uid, func.lower(SocialAccount.platform) == "youtube")
     ).scalar_one_or_none()
+    if existing is None:
+        try:
+            existing = db.query(SocialAccount).filter(SocialAccount.user_id == uid, func.lower(SocialAccount.platform) == "youtube").first()
+        except Exception:
+            existing = None
+
+    platform_account_id = str(tokens.get("id") or tokens.get("user_id") or uid)
+    platform_username = username_real or ""
 
     if existing is not None:
         existing.access_token = access_token
         if refresh_token:
             existing.refresh_token = refresh_token
         existing.token_expires_at = expires_at
+        if username_real:
+            existing.platform_username = platform_username
+            try:
+                setattr(existing, "account_name", platform_username)
+            except Exception:
+                pass
+            existing.platform_account_id = platform_account_id
         existing.updated_at = datetime.now(timezone.utc)
         db.commit()
         db.refresh(existing)
@@ -128,12 +194,16 @@ def save_youtube_tokens(db: Session, user_id: str, tokens: dict[str, Any]) -> So
     account = SocialAccount(
         user_id=uid,
         platform="youtube",
-        platform_account_id=str(uid),
-        platform_username=f"youtube_{str(uid)[:8]}",
+        platform_account_id=platform_account_id,
+        platform_username=platform_username,
         access_token=access_token,
         refresh_token=refresh_token,
         token_expires_at=expires_at,
     )
+    try:
+        setattr(account, "account_name", platform_username)
+    except Exception:
+        pass
     db.add(account)
     db.commit()
     db.refresh(account)

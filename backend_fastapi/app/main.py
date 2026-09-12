@@ -7,9 +7,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+import logging
+
 from .config import get_settings
 from .database import Base, engine
 from .routers import auth, clips, export, jobs, metrics, publish, social_auth, stats, subtitles, users, videos
+
+logger = logging.getLogger(__name__)
 
 from .models import Clip, Job, SocialAccount, Usuario, Video  # noqa: F401 — registra modelos para create_all
 
@@ -52,6 +56,7 @@ async def lifespan(app: FastAPI):
         conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ;"))
         conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(500);"))
         conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS theme_preference VARCHAR(20) DEFAULT 'dark';"))
+        conn.execute(text("ALTER TABLE social_accounts ADD COLUMN IF NOT EXISTS account_name VARCHAR(255);"))
         try:
             conn.execute(text("ALTER TABLE jobs DROP CONSTRAINT IF EXISTS chk_jobs_status;"))
         except Exception:
@@ -180,7 +185,7 @@ def _registro_alias(payload: _UsuarioCreateCompat, db=_DependsCompat(_get_db_com
     return _auth_registro(payload, db)
 
 app.include_router(_compat_auth)
-app.include_router(social_auth.router)
+app.include_router(social_auth.router, prefix="/auth/social", tags=["Social Auth"])
 app.include_router(videos.router)
 app.include_router(jobs.router)
 app.include_router(export.router)
@@ -195,6 +200,12 @@ if 'retrim_router' in globals() and retrim_router is not None:
     app.include_router(retrim_router)
 if 'stream_router' in globals() and stream_router is not None:
     app.include_router(stream_router)
+
+
+@app.on_event("startup")
+async def log_routes():
+    for route in app.routes:
+        logger.info("RUTA REGISTRADA: %s %s", getattr(route, 'methods', None), route.path)
 
 
 @app.get("/health", tags=["infra"], summary="Healthcheck simple")
