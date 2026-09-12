@@ -3,14 +3,41 @@ import { useSearchParams } from 'react-router-dom'
 import { http } from '@/lib/apiClient'
 import { ApiError } from '@/types/api'
 
+type SocialEntry = { connected: boolean; username: string | null; expires_at: string | null }
+type SocialStatus = { youtube: SocialEntry; instagram: SocialEntry; tiktok: SocialEntry }
+
 export default function IntegrationsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const integration = searchParams.get('integration')
   const status = searchParams.get('status')
-  const errorDetail = searchParams.get('error')
+  const errorDetail = searchParams.get('error') || searchParams.get('message')
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [social, setSocial] = useState<SocialStatus | null>(null)
+
+  async function fetchSocialStatus() {
+    try {
+      const token = (() => {
+        try {
+          return localStorage.getItem('clipsai_token')
+        } catch {
+          return null
+        }
+      })()
+      const data = await http.get<SocialStatus>('/auth/social/status', token ? { headers: { Authorization: `Bearer ${token}` } } : undefined)
+      console.log("[DEBUG] Respuesta /auth/social/status:", data)
+      setSocial(data)
+    } catch {}
+  }
+
+  useEffect(() => {
+    fetchSocialStatus()
+  }, [])
+
+  useEffect(() => {
+    if (status === 'success') fetchSocialStatus()
+  }, [status])
 
   useEffect(() => {
     if (status) {
@@ -19,6 +46,7 @@ export default function IntegrationsPage() {
         next.delete('integration')
         next.delete('status')
         next.delete('error')
+        next.delete('message')
         setSearchParams(next, { replace: true })
       }, 5000)
       return () => clearTimeout(t)
@@ -39,6 +67,39 @@ export default function IntegrationsPage() {
       if (e instanceof ApiError) setError(e.detail)
       else if (e instanceof Error) setError(e.message)
       else setError('Error al conectar con YouTube')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleConnectInstagram() {
+    setLoading(true)
+    setError(null)
+    try {
+      const token = (() => {
+        try {
+          return localStorage.getItem('clipsai_token')
+        } catch {
+          return null
+        }
+      })()
+      const headers = token ? { Authorization: `Bearer ${token}` } : undefined
+      const data = await http.get<{ auth_url?: string; url?: string }>('/auth/social/instagram/connect', headers ? { headers } : undefined)
+      const authUrl = (data as { auth_url?: string; url?: string }).auth_url || (data as { auth_url?: string; url?: string }).url
+      console.log("[DEBUG] Auth URL recibida del backend:", authUrl)
+      if (!authUrl) {
+        setError('No se recibió auth_url del backend')
+        return
+      }
+      if (!authUrl.startsWith("https://www.facebook.com/")) {
+        setError('URL de autorización inválida: debe comenzar con https://www.facebook.com/')
+        return
+      }
+      window.location.href = authUrl
+    } catch (e: unknown) {
+      if (e instanceof ApiError) setError(e.detail)
+      else if (e instanceof Error) setError(e.message)
+      else setError('Error al conectar con Instagram')
     } finally {
       setLoading(false)
     }
@@ -78,6 +139,22 @@ export default function IntegrationsPage() {
           </div>
         </div>
       )}
+      {integration === 'instagram' && status === 'success' && (
+        <div role="alert" className="alert-custom alert-custom-success mb-4">
+          <i className="bi bi-check-circle-fill alert-custom-icon" />
+          <div className="alert-custom-content">
+            <strong>Instagram conectado correctamente</strong> — integración <code>instagram</code> vinculada a tu cuenta. Ya puedes publicar Reels en Instagram.
+          </div>
+        </div>
+      )}
+      {integration === 'instagram' && status === 'error' && (
+        <div role="alert" className="alert-custom alert-custom-danger mb-4">
+          <i className="bi bi-exclamation-triangle-fill alert-custom-icon" />
+          <div className="alert-custom-content">
+            <strong>Error al conectar Instagram</strong> {errorDetail ? `— ${errorDetail}` : ''}. Intenta nuevamente.
+          </div>
+        </div>
+      )}
 
       {error && (
         <div role="alert" className="alert-custom alert-custom-danger mb-4">
@@ -94,9 +171,17 @@ export default function IntegrationsPage() {
             </span>
             <div>
               <h3 className="font-bold text-white">YouTube</h3>
-              <p className="text-xs text-[#94A3B8]">Google Data API v3 — upload + readonly</p>
+              {social?.youtube.connected && social.youtube.username ? (
+                <p className="text-xs font-mono text-emerald-300">@{social.youtube.username}</p>
+              ) : (
+                <p className="text-xs text-[#94A3B8]">Google Data API v3 — upload + readonly</p>
+              )}
             </div>
-            {integration === 'youtube' && status === 'success' ? (
+            {social?.youtube.connected ? (
+              <span className="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/20">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Conectado
+              </span>
+            ) : integration === 'youtube' && status === 'success' ? (
               <span className="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/20">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Conectado
               </span>
@@ -130,21 +215,55 @@ export default function IntegrationsPage() {
           </p>
         </div>
 
-        <div className="card-spark opacity-60">
+        <div className="card-spark">
           <div className="flex items-center gap-3 mb-3">
             <span className="h-10 w-10 rounded-xl bg-[#E1306C]/10 border border-[#E1306C]/20 flex items-center justify-center text-[#E1306C] text-xl">
               <i className="bi bi-instagram" />
             </span>
             <div>
               <h3 className="font-bold text-white">Instagram</h3>
-              <p className="text-xs text-[#94A3B8]">Próximamente</p>
+              {social?.instagram.connected && social.instagram.username ? (
+                <p className="text-xs font-mono text-emerald-300">@{social.instagram.username}</p>
+              ) : (
+                <p className="text-xs text-[#94A3B8]">Meta Graph API — instagram_basic + content_publish</p>
+              )}
             </div>
-            <span className="ml-auto text-xs px-2 py-1 rounded-full bg-white/5 border border-white/10 text-[#64748B]">Pronto</span>
+            {social?.instagram.connected ? (
+              <span className="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/20">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Conectado
+              </span>
+            ) : integration === 'instagram' && status === 'success' ? (
+              <span className="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/20">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Conectado
+              </span>
+            ) : (
+              <span className="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-white/5 text-[#94A3B8] border border-white/10">
+                No conectado
+              </span>
+            )}
           </div>
-          <p className="text-sm text-[#64748B] mb-4">Publicación en Reels — en desarrollo.</p>
-          <button disabled className="btn-custom btn-custom-light w-full opacity-50 cursor-not-allowed">
-            Conectar Instagram
+          <p className="text-sm text-[#94A3B8] mb-4">
+            Conecta tu cuenta para publicar Reels automáticamente. Scopes: <code className="text-xs bg-white/5 px-1 py-0.5 rounded">instagram_basic</code> + <code className="text-xs bg-white/5 px-1 py-0.5 rounded">instagram_content_publish</code> + <code className="text-xs bg-white/5 px-1 py-0.5 rounded">pages_show_list</code>
+          </p>
+          <button
+            onClick={handleConnectInstagram}
+            disabled={loading}
+            className="btn-custom w-full flex items-center justify-center gap-2 bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#515BD4] text-white border-0 hover:opacity-90"
+            data-testid="connect-instagram-btn"
+          >
+            {loading ? (
+              <>
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" /> Conectando...
+              </>
+            ) : (
+              <>
+                <i className="bi bi-instagram" /> Conectar Instagram
+              </>
+            )}
           </button>
+          <p className="text-xs text-[#64748B] mt-2 text-center">
+            GET <code>/auth/social/instagram/connect</code> → redirect Meta OAuth (long-lived 60 días)
+          </p>
         </div>
       </div>
 
