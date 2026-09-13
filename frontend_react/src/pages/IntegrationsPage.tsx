@@ -105,6 +105,39 @@ export default function IntegrationsPage() {
     }
   }
 
+  async function handleConnectTiktok() {
+    setLoading(true)
+    setError(null)
+    try {
+      const token = (() => {
+        try {
+          return localStorage.getItem('clipsai_token')
+        } catch {
+          return null
+        }
+      })()
+      const headers = token ? { Authorization: `Bearer ${token}` } : undefined
+      const data = await http.get<{ auth_url?: string; url?: string }>('/auth/social/tiktok/connect', headers ? { headers } : undefined)
+      const authUrl = (data as { auth_url?: string; url?: string }).auth_url || (data as { auth_url?: string; url?: string }).url
+      console.log("[DEBUG] TikTok Auth URL recibida del backend:", authUrl)
+      if (!authUrl) {
+        setError('No se recibió auth_url del backend')
+        return
+      }
+      if (!authUrl.startsWith("https://www.tiktok.com/")) {
+        setError('URL de autorización inválida: debe comenzar con https://www.tiktok.com/')
+        return
+      }
+      window.location.href = authUrl
+    } catch (e: unknown) {
+      if (e instanceof ApiError) setError(e.detail)
+      else if (e instanceof Error) setError(e.message)
+      else setError('Error al conectar con TikTok')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   return (
     <div className="max-w-4xl mx-auto">
       <div className="page-header" style={{ marginBottom: '2rem' }}>
@@ -155,6 +188,22 @@ export default function IntegrationsPage() {
           </div>
         </div>
       )}
+      {integration === 'tiktok' && status === 'success' && (
+        <div role="alert" className="alert-custom alert-custom-success mb-4">
+          <i className="bi bi-check-circle-fill alert-custom-icon" />
+          <div className="alert-custom-content">
+            <strong>TikTok conectado correctamente</strong> — integración <code>tiktok</code> vinculada a tu cuenta. Ya puedes publicar clips en TikTok.
+          </div>
+        </div>
+      )}
+      {integration === 'tiktok' && status === 'error' && (
+        <div role="alert" className="alert-custom alert-custom-danger mb-4">
+          <i className="bi bi-exclamation-triangle-fill alert-custom-icon" />
+          <div className="alert-custom-content">
+            <strong>Error al conectar TikTok</strong> {errorDetail ? `— ${errorDetail}` : ''}. Intenta nuevamente.
+          </div>
+        </div>
+      )}
 
       {error && (
         <div role="alert" className="alert-custom alert-custom-danger mb-4">
@@ -163,7 +212,7 @@ export default function IntegrationsPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="card-spark">
           <div className="flex items-center gap-3 mb-3">
             <span className="h-10 w-10 rounded-xl bg-[#FF0000]/10 border border-[#FF0000]/20 flex items-center justify-center text-[#FF0000] text-xl">
@@ -263,6 +312,57 @@ export default function IntegrationsPage() {
           </button>
           <p className="text-xs text-[#64748B] mt-2 text-center">
             GET <code>/auth/social/instagram/connect</code> → redirect Meta OAuth (long-lived 60 días)
+          </p>
+        </div>
+
+        <div className="card-spark">
+          <div className="flex items-center gap-3 mb-3">
+            <span className="h-10 w-10 rounded-xl bg-black border border-white/20 flex items-center justify-center text-white text-xl">
+              <i className="bi bi-tiktok" />
+            </span>
+            <div>
+              <h3 className="font-bold text-white">TikTok</h3>
+              {social?.tiktok.connected && social.tiktok.username ? (
+                <p className="text-xs font-mono text-emerald-300">@{social.tiktok.username}</p>
+              ) : (
+                <p className="text-xs text-[#94A3B8]">TikTok Content Posting API — video.upload + publish</p>
+              )}
+            </div>
+            {social?.tiktok.connected ? (
+              <span className="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/20">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Conectado
+              </span>
+            ) : integration === 'tiktok' && status === 'success' ? (
+              <span className="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/20">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Conectado
+              </span>
+            ) : (
+              <span className="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-white/5 text-[#94A3B8] border border-white/10">
+                No conectado
+              </span>
+            )}
+          </div>
+          <p className="text-sm text-[#94A3B8] mb-4">
+            Conecta tu cuenta para publicar clips directamente en TikTok. Scopes: <code className="text-xs bg-white/5 px-1 py-0.5 rounded">user.info.basic</code> + <code className="text-xs bg-white/5 px-1 py-0.5 rounded">video.upload</code> + <code className="text-xs bg-white/5 px-1 py-0.5 rounded">video.publish</code>
+          </p>
+          <button
+            onClick={handleConnectTiktok}
+            disabled={loading}
+            className="btn-custom w-full flex items-center justify-center gap-2 bg-black text-white border border-white/20 hover:bg-zinc-900"
+            data-testid="connect-tiktok-btn"
+          >
+            {loading ? (
+              <>
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" /> Conectando...
+              </>
+            ) : (
+              <>
+                <i className="bi bi-tiktok" /> Conectar TikTok
+              </>
+            )}
+          </button>
+          <p className="text-xs text-[#64748B] mt-2 text-center">
+            GET <code>/auth/social/tiktok/connect</code> → redirect TikTok OAuth (video.publish)
           </p>
         </div>
       </div>
