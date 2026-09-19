@@ -118,6 +118,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "https://api.clipsai.xyz",
         "https://decorator-excretory-satin.ngrok-free.dev",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
@@ -126,7 +127,7 @@ app.add_middleware(
         "http://localhost:3001",
         "http://127.0.0.1:3001",
     ],
-    allow_origin_regex=r"https://.*\.ngrok-free\.dev",
+    allow_origin_regex=r"https://.*\.(ngrok-free\.dev|clipsai\.xyz)",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "ngrok-skip-browser-warning", "X-Requested-With", "Accept", "Origin"],
@@ -141,6 +142,7 @@ async def handle_options_preflight(request, call_next):  # type: ignore[no-untyp
         response = Response(status_code=200)
         origin = request.headers.get("origin", "")
         allowed = [
+            "https://api.clipsai.xyz",
             "https://decorator-excretory-satin.ngrok-free.dev",
             "http://localhost:3000",
             "http://127.0.0.1:3000",
@@ -149,12 +151,12 @@ async def handle_options_preflight(request, call_next):  # type: ignore[no-untyp
             "http://localhost:3001",
             "http://127.0.0.1:3001",
         ]
-        if origin in allowed or origin.endswith(".ngrok-free.dev"):
+        if origin in allowed or origin.endswith(".ngrok-free.dev") or origin.endswith(".clipsai.xyz"):
             response.headers["Access-Control-Allow-Origin"] = origin
         elif origin:
             response.headers["Access-Control-Allow-Origin"] = origin
         else:
-            response.headers["Access-Control-Allow-Origin"] = "https://decorator-excretory-satin.ngrok-free.dev"
+            response.headers["Access-Control-Allow-Origin"] = "https://api.clipsai.xyz"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
         response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, ngrok-skip-browser-warning, X-Requested-With, Accept, Origin"
         response.headers["Access-Control-Allow-Credentials"] = "true"
