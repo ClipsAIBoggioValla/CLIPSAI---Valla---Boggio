@@ -73,6 +73,10 @@ services:
       TIKTOK_REDIRECT_URI: ${TIKTOK_REDIRECT_URI}
     ports:
       - "${BACKEND_FASTAPI_PORT:-8000}:8000"
+    volumes:
+      # Montaje sincronizado para que clips generados por worker estén disponibles en /app/storage
+      - ./storage:/app/storage
+      - ./storage:/storage
     depends_on:
       db:
         condition: service_healthy

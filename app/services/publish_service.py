@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import time
 import uuid
@@ -7,9 +8,44 @@ from datetime import datetime, timezone
 
 import requests
 
+logger = logging.getLogger(__name__)
+
 
 def _generate_fake_id() -> str:
     return uuid.uuid4().hex[:12]
+
+
+def _resolve_instagram_business_id(account):
+    token = account.access_token.strip() if account.access_token else ""
+    if not token:
+        raise Exception("El token de acceso está vacío.")
+
+    # 1. Consulta directa a Instagram Graph API
+    url_ig = f"https://graph.instagram.com/v19.0/me?fields=id,username&access_token={token}"
+    res_ig = requests.get(url_ig)
+    print(f"[IG DEBUG] Direct IG me status={res_ig.status_code} body={res_ig.text}")
+    if res_ig.status_code == 200:
+        data_ig = res_ig.json()
+        if "id" in data_ig:
+            return data_ig["id"]
+
+    # 2. Consulta a Facebook Graph API me/accounts
+    url_accounts = f"https://graph.facebook.com/v19.0/me/accounts?access_token={token}"
+    res_pages = requests.get(url_accounts)
+    print(f"[IG DEBUG] FB me/accounts status={res_pages.status_code} body={res_pages.text}")
+    if res_pages.status_code == 200:
+        pages = res_pages.json().get("data", [])
+        for page in pages:
+            page_id = page.get("id")
+            url_page = f"https://graph.facebook.com/v19.0/{page_id}?fields=instagram_business_account&access_token={token}"
+            res_page = requests.get(url_page)
+            print(f"[IG DEBUG] FB page {page_id} status={res_page.status_code} body={res_page.text}")
+            if res_page.status_code == 200:
+                ig_acc = res_page.json().get("instagram_business_account")
+                if ig_acc and "id" in ig_acc:
+                    return ig_acc["id"]
+
+    raise Exception("No se detectó una cuenta de Instagram Business/Creador vinculada a tu página de Facebook.")
 
 
 PLATFORM_URLS = {

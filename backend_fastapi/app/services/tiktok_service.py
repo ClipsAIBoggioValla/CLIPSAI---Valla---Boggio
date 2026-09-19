@@ -18,14 +18,28 @@ from ..models import SocialAccount
 
 logger = logging.getLogger(__name__)
 
+# === AUDITORÍA TIKTOK API v2 - ESTRATEGIA FILE_UPLOAD ===
+# Servicio utiliza API v2 de TikTok: https://open.tiktokapis.com/v2/post/publish/video/init/
+# Estrategia FILE_UPLOAD con video_size/chunk_size/total_chunk_count=1 y PUT a upload_url
+# Fallback MP4: sample_test.mp4 en /app/storage si archivo físico no existe (creado via FFmpeg/descarga)
+# Credenciales consultadas en user_social_accounts WHERE platform='tiktok' vía _get_social_account()
+# Ver publish_service.py:_publish_tiktok y publish_clip_task para flujo completo
+# Scopes requeridos: user.info.basic,video.upload,video.publish
+
 TIKTOK_AUTH_URL = "https://www.tiktok.com/v2/auth/authorize/"
 TIKTOK_TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/"
 TIKTOK_USER_INFO_URL = "https://open.tiktokapis.com/v2/user/info/"
+TIKTOK_PUBLISH_URL = "https://open.tiktokapis.com/v2/post/publish/video/init/"
 
 DEFAULT_REDIRECT_URI = "https://decorator-excretory-satin.ngrok-free.dev/auth/social/tiktok/callback"
 
-raw_scopes = os.getenv("TIKTOK_SCOPES", "user.info.basic,video.upload")
-TIKTOK_SCOPES = ",".join([s.strip() for s in raw_scopes.split(",") if s.strip()])
+raw_scopes = os.getenv("TIKTOK_SCOPES", "user.info.basic,video.upload,video.publish")
+_scopes_list = [s.strip() for s in raw_scopes.split(",") if s.strip()]
+# Asegurar los tres scopes obligatorios separados por coma
+for _req in ["user.info.basic", "video.upload", "video.publish"]:
+    if _req not in _scopes_list:
+        _scopes_list.append(_req)
+TIKTOK_SCOPES = ",".join(_scopes_list)
 
 TIKTOK_CLIENT_KEY = os.getenv("TIKTOK_CLIENT_KEY", "").strip()
 TIKTOK_CLIENT_SECRET = os.getenv("TIKTOK_CLIENT_SECRET", "").strip()

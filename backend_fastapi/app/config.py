@@ -85,6 +85,13 @@ class Settings(BaseSettings):
         default="https://decorator-excretory-satin.ngrok-free.dev/auth/social/youtube/callback",
         validation_alias="GOOGLE_REDIRECT_URI",
     )
+    # ---- TikTok OAuth ----
+    tiktok_client_key: str = Field(default="", validation_alias="TIKTOK_CLIENT_KEY")
+    tiktok_client_secret: str = Field(default="", validation_alias="TIKTOK_CLIENT_SECRET")
+    tiktok_redirect_uri: str = Field(
+        default="https://decorator-excretory-satin.ngrok-free.dev/auth/social/tiktok/callback",
+        validation_alias="TIKTOK_REDIRECT_URI",
+    )
     # ---- Meta OAuth (Instagram Graph API) ----
     instagram_client_id: str = Field(default="", validation_alias="INSTAGRAM_CLIENT_ID")
     instagram_client_secret: str = Field(default="", validation_alias="INSTAGRAM_CLIENT_SECRET")
@@ -92,6 +99,9 @@ class Settings(BaseSettings):
         default="https://decorator-excretory-satin.ngrok-free.dev/auth/social/instagram/callback",
         validation_alias="INSTAGRAM_REDIRECT_URI",
     )
+    # ---- Facebook OAuth (Meta Graph API - alias para Instagram) ----
+    facebook_client_id: str = Field(default="", validation_alias="FACEBOOK_CLIENT_ID")
+    facebook_client_secret: str = Field(default="", validation_alias="FACEBOOK_CLIENT_SECRET")
     frontend_redirect_url: str = Field(
         default="http://localhost:3000",
         validation_alias="FRONTEND_REDIRECT_URL",
