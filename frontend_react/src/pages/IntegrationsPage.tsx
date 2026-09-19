@@ -138,6 +138,21 @@ export default function IntegrationsPage() {
     }
   }
 
+  async function handleDisconnect(platform: string) {
+    setLoading(true)
+    setError(null)
+    try {
+      await http.delete(`/auth/social/${platform}`)
+      await fetchSocialStatus()
+    } catch (e: unknown) {
+      if (e instanceof ApiError) setError(e.detail)
+      else if (e instanceof Error) setError(e.message)
+      else setError(`Error al desconectar ${platform}`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   return (
     <div className="max-w-4xl mx-auto">
       <div className="page-header" style={{ marginBottom: '2rem' }}>
@@ -243,22 +258,41 @@ export default function IntegrationsPage() {
           <p className="text-sm text-[#94A3B8] mb-4">
             Conecta tu canal para subir clips directamente como Shorts. Scopes: <code className="text-xs bg-white/5 px-1 py-0.5 rounded">youtube.readonly</code> + <code className="text-xs bg-white/5 px-1 py-0.5 rounded">youtube.upload</code>
           </p>
-          <button
-            onClick={handleConnectYoutube}
-            disabled={loading}
-            className="btn-custom btn-custom-primary w-full flex items-center justify-center gap-2"
-            data-testid="connect-youtube-btn"
-          >
-            {loading ? (
-              <>
-                <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#080C14]/30 border-t-[#080C14]" /> Conectando...
-              </>
-            ) : (
-              <>
-                <i className="bi bi-box-arrow-up-right" /> Conectar YouTube
-              </>
-            )}
-          </button>
+          {social?.youtube.connected ? (
+            <button
+              onClick={() => handleDisconnect('youtube')}
+              disabled={loading}
+              className="btn-custom w-full flex items-center justify-center gap-2 bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20"
+              data-testid="disconnect-youtube-btn"
+            >
+              {loading ? (
+                <>
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-red-400/30 border-t-red-400" /> Desconectando...
+                </>
+              ) : (
+                <>
+                  <i className="bi bi-box-arrow-right" /> Desconectar
+                </>
+              )}
+            </button>
+          ) : (
+            <button
+              onClick={handleConnectYoutube}
+              disabled={loading}
+              className="btn-custom btn-custom-primary w-full flex items-center justify-center gap-2"
+              data-testid="connect-youtube-btn"
+            >
+              {loading ? (
+                <>
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#080C14]/30 border-t-[#080C14]" /> Conectando...
+                </>
+              ) : (
+                <>
+                  <i className="bi bi-box-arrow-up-right" /> Conectar YouTube
+                </>
+              )}
+            </button>
+          )}
           <p className="text-xs text-[#64748B] mt-2 text-center">
             GET <code>/auth/social/youtube/connect</code> → redirect Google OAuth (offline + consent)
           </p>
@@ -294,22 +328,41 @@ export default function IntegrationsPage() {
           <p className="text-sm text-[#94A3B8] mb-4">
             Conecta tu cuenta para publicar Reels automáticamente. Scopes: <code className="text-xs bg-white/5 px-1 py-0.5 rounded">instagram_basic</code> + <code className="text-xs bg-white/5 px-1 py-0.5 rounded">instagram_content_publish</code> + <code className="text-xs bg-white/5 px-1 py-0.5 rounded">pages_show_list</code>
           </p>
-          <button
-            onClick={handleConnectInstagram}
-            disabled={loading}
-            className="btn-custom w-full flex items-center justify-center gap-2 bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#515BD4] text-white border-0 hover:opacity-90"
-            data-testid="connect-instagram-btn"
-          >
-            {loading ? (
-              <>
-                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" /> Conectando...
-              </>
-            ) : (
-              <>
-                <i className="bi bi-instagram" /> Conectar Instagram
-              </>
-            )}
-          </button>
+          {social?.instagram.connected ? (
+            <button
+              onClick={() => handleDisconnect('instagram')}
+              disabled={loading}
+              className="btn-custom w-full flex items-center justify-center gap-2 bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20"
+              data-testid="disconnect-instagram-btn"
+            >
+              {loading ? (
+                <>
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-red-400/30 border-t-red-400" /> Desconectando...
+                </>
+              ) : (
+                <>
+                  <i className="bi bi-box-arrow-right" /> Desconectar
+                </>
+              )}
+            </button>
+          ) : (
+            <button
+              onClick={handleConnectInstagram}
+              disabled={loading}
+              className="btn-custom w-full flex items-center justify-center gap-2 bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#515BD4] text-white border-0 hover:opacity-90"
+              data-testid="connect-instagram-btn"
+            >
+              {loading ? (
+                <>
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" /> Conectando...
+                </>
+              ) : (
+                <>
+                  <i className="bi bi-instagram" /> Conectar Instagram
+                </>
+              )}
+            </button>
+          )}
           <p className="text-xs text-[#64748B] mt-2 text-center">
             GET <code>/auth/social/instagram/connect</code> → redirect Meta OAuth (long-lived 60 días)
           </p>
@@ -345,22 +398,41 @@ export default function IntegrationsPage() {
           <p className="text-sm text-[#94A3B8] mb-4">
             Conecta tu cuenta para publicar clips directamente en TikTok. Scopes: <code className="text-xs bg-white/5 px-1 py-0.5 rounded">user.info.basic</code> + <code className="text-xs bg-white/5 px-1 py-0.5 rounded">video.upload</code> + <code className="text-xs bg-white/5 px-1 py-0.5 rounded">video.publish</code>
           </p>
-          <button
-            onClick={handleConnectTiktok}
-            disabled={loading}
-            className="btn-custom w-full flex items-center justify-center gap-2 bg-black text-white border border-white/20 hover:bg-zinc-900"
-            data-testid="connect-tiktok-btn"
-          >
-            {loading ? (
-              <>
-                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" /> Conectando...
-              </>
-            ) : (
-              <>
-                <i className="bi bi-tiktok" /> Conectar TikTok
-              </>
-            )}
-          </button>
+          {social?.tiktok.connected ? (
+            <button
+              onClick={() => handleDisconnect('tiktok')}
+              disabled={loading}
+              className="btn-custom w-full flex items-center justify-center gap-2 bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20"
+              data-testid="disconnect-tiktok-btn"
+            >
+              {loading ? (
+                <>
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-red-400/30 border-t-red-400" /> Desconectando...
+                </>
+              ) : (
+                <>
+                  <i className="bi bi-box-arrow-right" /> Desconectar
+                </>
+              )}
+            </button>
+          ) : (
+            <button
+              onClick={handleConnectTiktok}
+              disabled={loading}
+              className="btn-custom w-full flex items-center justify-center gap-2 bg-black text-white border border-white/20 hover:bg-zinc-900"
+              data-testid="connect-tiktok-btn"
+            >
+              {loading ? (
+                <>
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" /> Conectando...
+                </>
+              ) : (
+                <>
+                  <i className="bi bi-tiktok" /> Conectar TikTok
+                </>
+              )}
+            </button>
+          )}
           <p className="text-xs text-[#64748B] mt-2 text-center">
             GET <code>/auth/social/tiktok/connect</code> → redirect TikTok OAuth (video.publish)
           </p>

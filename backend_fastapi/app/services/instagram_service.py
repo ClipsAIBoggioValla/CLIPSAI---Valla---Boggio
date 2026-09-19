@@ -22,6 +22,7 @@ INSTAGRAM_SCOPES = [
     "instagram_content_publish",
     "pages_show_list",
     "pages_read_engagement",
+    "business_management",
 ]
 
 META_AUTH_URL = "https://www.facebook.com/v18.0/dialog/oauth"
@@ -69,12 +70,14 @@ def get_instagram_auth_url(user_id: str) -> str:
     if not client_id:
         raise ValueError("INSTAGRAM_CLIENT_ID / META_APP_ID no está configurado en el archivo .env del backend")
     state = _encode_state(str(user_id))
+    # SCOPES requeridos para publicación de Reels y lectura de páginas
     params = {
         "client_id": client_id,
         "redirect_uri": redirect_uri,
-        "scope": "instagram_basic,instagram_content_publish,pages_show_list,pages_read_engagement",
+        "scope": ",".join(INSTAGRAM_SCOPES),
         "response_type": "code",
         "state": state or "",
+        "auth_type": "rerequest",
     }
     return f"https://www.facebook.com/v18.0/dialog/oauth?{urllib.parse.urlencode(params)}"
 
@@ -245,6 +248,27 @@ def save_instagram_tokens(db: Session, user_id: str, tokens: dict[str, Any]) -> 
     platform_account_name = final_username
     logger.info("[INSTAGRAM DISPLAY NAME SAVED]: %s", final_username)
     logger.info("[FINAL INSTAGRAM USERNAME SAVED] %s", final_username)
+
+    # DEBUG: verificar scopes concedidos antes de guardar token
+    try:
+        dbg_client_id, dbg_client_secret, _ = _get_instagram_config()
+        if dbg_client_id and dbg_client_secret and access_token:
+            app_token = f"{dbg_client_id}|{dbg_client_secret}"
+            dbg_url = f"https://graph.facebook.com/debug_token?input_token={access_token}&access_token={app_token}"
+            dbg_resp = requests.get(dbg_url, timeout=10)
+            logger.info("[IG DEBUG] debug_token status=%s body=%s", dbg_resp.status_code, dbg_resp.text)
+            print(f"[IG DEBUG] debug_token status={dbg_resp.status_code} body={dbg_resp.text}")
+            if dbg_resp.status_code == 200:
+                try:
+                    dbg_data = dbg_resp.json()
+                    scopes = dbg_data.get("data", {}).get("scopes", [])
+                    logger.info("[IG DEBUG] scopes concedidos: %s", scopes)
+                    print(f"[IG DEBUG] scopes concedidos: {scopes}")
+                except Exception:
+                    pass
+    except Exception as e:
+        logger.warning(f"[IG DEBUG] debug_token failed: {e}")
+        print(f"[IG DEBUG] debug_token failed: {e}")
 
     existing: SocialAccount | None = db.execute(
         select(SocialAccount).where(SocialAccount.user_id == uid, func.lower(SocialAccount.platform) == "instagram")
