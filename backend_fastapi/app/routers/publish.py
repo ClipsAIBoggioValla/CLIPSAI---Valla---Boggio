@@ -63,16 +63,28 @@ def publish_clip(
     clip = _get_clip_or_404(db, clip_id)
     _assert_ownership(db, clip, current_user)
 
-    from ..services.publish_service import publish_clip_task
-
-    background_tasks.add_task(publish_clip_task, clip.id, platform, payload.caption, payload.webhook_override_url)
-
-    clip.status = "PUBLISHING"
     try:
-        clip.published_platform = platform
-        clip.publication_status = "PUBLISHING"
-    except Exception:
-        pass
-    db.commit()
+        from ..services.publish_service import publish_clip_task
 
-    return PublishClipResponse(detail="Publicación encolada", clip_id=clip.id, status="PUBLISHING", platform=platform)
+        background_tasks.add_task(publish_clip_task, clip.id, platform, payload.caption, payload.webhook_override_url, str(current_user.id))
+
+        clip.status = "PUBLISHING"
+        try:
+            clip.published_platform = platform
+            clip.publication_status = "PUBLISHING"
+        except Exception:
+            pass
+        db.commit()
+
+        return PublishClipResponse(detail="Publicación encolada", clip_id=clip.id, status="PUBLISHING", platform=platform)
+    except Exception as e:
+        try:
+            clip.status = "FAILED"
+            db.add(clip)
+            db.commit()
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+        raise HTTPException(status_code=500, detail=str(e))

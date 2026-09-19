@@ -104,6 +104,83 @@ def _get_frontend_base() -> str:
     return base.rstrip("/")
 
 
+@router.delete("/{platform}", summary="Desconectar cuenta social")
+def disconnect_social(
+    platform: str,
+    current_user: CurrentUser,
+    db: DbSession,
+):
+    from fastapi import HTTPException
+
+    from ..models import SocialAccount
+
+    platform_norm = platform.strip().lower()
+    allowed = {"tiktok", "youtube", "instagram"}
+    if platform_norm not in allowed:
+        raise HTTPException(status_code=400, detail=f"Plataforma no válida: {platform}")
+
+    # Elimina fila correspondiente en user_social_accounts / social_accounts
+    account = None
+    try:
+        account = db.query(SocialAccount).filter(
+            SocialAccount.user_id == current_user.id,
+            func.lower(SocialAccount.platform) == platform_norm,
+        ).first()
+    except Exception:
+        account = None
+
+    if account is None:
+        # Intenta fallback a tabla legacy user_social_accounts
+        try:
+            from sqlalchemy import text
+
+            row = db.execute(
+                text("SELECT id FROM user_social_accounts WHERE user_id = :uid AND lower(platform) = :plat LIMIT 1"),
+                {"uid": str(current_user.id), "plat": platform_norm},
+            ).mappings().first()
+            if row:
+                db.execute(
+                    text("DELETE FROM user_social_accounts WHERE user_id = :uid AND lower(platform) = :plat"),
+                    {"uid": str(current_user.id), "plat": platform_norm},
+                )
+                db.commit()
+                return {"message": f"Cuenta de {platform_norm} desconectada exitosamente"}
+        except Exception:
+            pass
+        # Si no existe, igual retorna éxito idempotente
+        return {"message": f"Cuenta de {platform_norm} desconectada exitosamente"}
+
+    try:
+        db.delete(account)
+        db.commit()
+    except Exception:
+        try:
+            from sqlalchemy import text
+
+            db.execute(
+                text("DELETE FROM social_accounts WHERE user_id = :uid AND lower(platform) = :plat"),
+                {"uid": str(current_user.id), "plat": platform_norm},
+            )
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(status_code=500, detail=str(e))
+
+    # Limpieza adicional en tabla legacy si existe
+    try:
+        from sqlalchemy import text
+
+        db.execute(
+            text("DELETE FROM user_social_accounts WHERE user_id = :uid AND lower(platform) = :plat"),
+            {"uid": str(current_user.id), "plat": platform_norm},
+        )
+        db.commit()
+    except Exception:
+        pass
+
+    return {"message": f"Cuenta de {platform_norm} desconectada exitosamente"}
+
+
 @router.get("/youtube/connect", summary="Obtener URL de autorización OAuth2 de YouTube")
 def youtube_connect(current_user: CurrentUser):
     auth_url = yt_get_youtube_auth_url(str(current_user.id))
