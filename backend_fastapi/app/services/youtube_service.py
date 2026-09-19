@@ -24,13 +24,19 @@ YOUTUBE_SCOPES = [
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 
-DEFAULT_REDIRECT_URI = "https://decorator-excretory-satin.ngrok-free.dev/auth/social/youtube/callback"
+DEFAULT_REDIRECT_URI = "https://api.clipsai.xyz/auth/social/youtube/callback"
 
 
 def _get_google_config() -> tuple[str, str, str]:
     client_id = os.getenv("GOOGLE_CLIENT_ID", "").strip()
     client_secret = os.getenv("GOOGLE_CLIENT_SECRET", "").strip()
-    redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", DEFAULT_REDIRECT_URI).strip() or DEFAULT_REDIRECT_URI
+    # Usa PUBLIC_BACKEND_URL como base si GOOGLE_REDIRECT_URI no está configurado o es temporal
+    public_base = os.getenv("PUBLIC_BACKEND_URL", "https://api.clipsai.xyz").strip().rstrip("/")
+    default_uri = f"{public_base}/auth/social/youtube/callback"
+    redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", default_uri).strip() or default_uri
+    # Forzar api.clipsai.xyz si aún contiene URL temporal antigua
+    if "decorator" in redirect_uri or "guns-camps" in redirect_uri or "ngrok" in redirect_uri or "trycloudflare" in redirect_uri:
+        redirect_uri = default_uri
     return client_id, client_secret, redirect_uri
 
 

@@ -70,7 +70,10 @@ services:
       TZ: ${POSTGRES_TZ:-UTC}
       TIKTOK_CLIENT_KEY: ${TIKTOK_CLIENT_KEY}
       TIKTOK_CLIENT_SECRET: ${TIKTOK_CLIENT_SECRET}
-      TIKTOK_REDIRECT_URI: ${TIKTOK_REDIRECT_URI}
+      TIKTOK_REDIRECT_URI: ${TIKTOK_REDIRECT_URI:-https://api.clipsai.xyz/auth/social/tiktok/callback}
+      PUBLIC_BACKEND_URL: ${PUBLIC_BACKEND_URL:-https://api.clipsai.xyz}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-https://api.clipsai.xyz/auth/social/youtube/callback}
+      INSTAGRAM_REDIRECT_URI: ${INSTAGRAM_REDIRECT_URI:-https://api.clipsai.xyz/auth/social/instagram/callback}
     ports:
       - "${BACKEND_FASTAPI_PORT:-8000}:8000"
     volumes:
@@ -168,10 +171,12 @@ services:
   # ----------------------------------------------------------------------------
   # Ngrok — túnel a backend_fastapi:8000
   # ----------------------------------------------------------------------------
+  # Cloudflare Tunnel permanente expone backend_fastapi en https://api.clipsai.xyz
+  # Ngrok legacy (mantener para desarrollo local, ahora usa dominio permanente)
   ngrok:
     image: ngrok/ngrok:latest
     container_name: clipsai-ngrok
-    command: http backend_fastapi:8000 --domain=${NGROK_DOMAIN:-decorator-excretory-satin.ngrok-free.dev}
+    command: http backend_fastapi:8000 --domain=${NGROK_DOMAIN:-api.clipsai.xyz}
     environment:
       NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
     depends_on:
