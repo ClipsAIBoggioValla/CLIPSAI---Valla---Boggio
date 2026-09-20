@@ -29,7 +29,7 @@ META_AUTH_URL = "https://www.facebook.com/v18.0/dialog/oauth"
 META_TOKEN_URL = "https://graph.facebook.com/v18.0/oauth/access_token"
 META_LONG_LIVED_URL = "https://graph.facebook.com/oauth/access_token"
 
-DEFAULT_REDIRECT_URI = "https://decorator-excretory-satin.ngrok-free.dev/auth/social/instagram/callback"
+DEFAULT_REDIRECT_URI = "https://api.clipsai.xyz/auth/social/instagram/callback"
 
 
 def _get_instagram_config() -> tuple[str, str, str]:
@@ -37,7 +37,11 @@ def _get_instagram_config() -> tuple[str, str, str]:
     client_id = client_id.strip()
     client_secret = os.getenv("INSTAGRAM_CLIENT_SECRET") or os.getenv("META_APP_SECRET") or os.getenv("FB_CLIENT_SECRET") or ""
     client_secret = client_secret.strip()
-    redirect_uri = os.getenv("INSTAGRAM_REDIRECT_URI", DEFAULT_REDIRECT_URI).strip() or DEFAULT_REDIRECT_URI
+    public_base = os.getenv("PUBLIC_BACKEND_URL", "https://api.clipsai.xyz").strip().rstrip("/")
+    default_uri = f"{public_base}/auth/social/instagram/callback"
+    redirect_uri = os.getenv("INSTAGRAM_REDIRECT_URI", default_uri).strip() or default_uri
+    if "decorator" in redirect_uri or "guns-camps" in redirect_uri or "ngrok" in redirect_uri or "trycloudflare" in redirect_uri:
+        redirect_uri = default_uri
     return client_id, client_secret, redirect_uri
 
 

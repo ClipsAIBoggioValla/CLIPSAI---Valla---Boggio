@@ -43,17 +43,23 @@ def _generate_fake_id() -> str:
 
 
 def _get_ngrok_domain() -> str:
+    # Prioriza PUBLIC_BACKEND_URL (permanente Cloudflare) como base para URLs públicas
+    public_url = os.getenv("PUBLIC_BACKEND_URL", "").strip()
+    if public_url:
+        domain = public_url.replace("https://", "").replace("http://", "").strip().strip("/")
+        if domain:
+            return domain
+    # Si PUBLIC_BACKEND_URL no está seteada, usar BACKEND_URL/API_BASE_URL
+    backend = os.getenv("BACKEND_URL", "").strip() or os.getenv("API_BASE_URL", "").strip() or os.getenv("PUBLIC_BACKEND_URL", "").strip()
+    if backend:
+        domain = backend.replace("https://", "").replace("http://", "").strip().strip("/")
+        if domain and "decorator" not in domain and "guns-camps" not in domain and "ngrok" not in domain:
+            return domain
     domain = os.getenv("NGROK_DOMAIN", "").strip()
-    if not domain:
-        backend = os.getenv("BACKEND_URL", "").strip() or os.getenv("API_BASE_URL", "").strip()
-        if backend:
-            domain = backend.replace("https://", "").replace("http://", "").strip().strip("/")
-    if not domain:
-        domain = os.getenv("NGROK_DOMAIN", "decorator-excretory-satin.ngrok-free.dev").strip()
-    if not domain:
-        domain = "decorator-excretory-satin.ngrok-free.dev"
-    domain = domain.replace("https://", "").replace("http://", "").strip().strip("/")
-    return domain
+    if domain and "decorator" not in domain:
+        return domain.replace("https://", "").replace("http://", "").strip().strip("/")
+    # Fallback permanente
+    return "api.clipsai.xyz"
 
 
 def _get_public_video_url(clip: Clip) -> str:
@@ -66,8 +72,8 @@ def _get_public_video_url(clip: Clip) -> str:
             file_part = f"/{fname}"
     public_url = f"https://{domain}/clips/{clip_id}/descarga"
     alt_url = f"https://{domain}/storage/clips/{clip_id}.mp4"
-    # Prefer alt_url for pull-based APIs if domain supports it; use descarga as fallback
-    # Both are HTTPS publicly accessible via NGROK_DOMAIN host exposed
+    # Prefer alt_url para APIs pull si el dominio lo soporta; descarga como fallback
+    # Ambas son HTTPS públicas vía PUBLIC_BACKEND_URL (https://api.clipsai.xyz)
     return public_url
 
 

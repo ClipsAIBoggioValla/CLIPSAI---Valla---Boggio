@@ -31,7 +31,7 @@ TIKTOK_TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/"
 TIKTOK_USER_INFO_URL = "https://open.tiktokapis.com/v2/user/info/"
 TIKTOK_PUBLISH_URL = "https://open.tiktokapis.com/v2/post/publish/video/init/"
 
-DEFAULT_REDIRECT_URI = "https://decorator-excretory-satin.ngrok-free.dev/auth/social/tiktok/callback"
+DEFAULT_REDIRECT_URI = "https://api.clipsai.xyz/auth/social/tiktok/callback"
 
 raw_scopes = os.getenv("TIKTOK_SCOPES", "user.info.basic,video.upload,video.publish")
 _scopes_list = [s.strip() for s in raw_scopes.split(",") if s.strip()]
@@ -53,12 +53,11 @@ def _get_tiktok_config() -> tuple[str, str, str]:
     client_secret = os.getenv("TIKTOK_CLIENT_SECRET", "").strip() if os.getenv("TIKTOK_CLIENT_SECRET") else ""
     if not client_secret:
         client_secret = (TIKTOK_CLIENT_SECRET or "").strip() if TIKTOK_CLIENT_SECRET else ""
-    redirect_uri = os.getenv("TIKTOK_REDIRECT_URI", DEFAULT_REDIRECT_URI).strip() or DEFAULT_REDIRECT_URI
-    if TIKTOK_REDIRECT_URI and TIKTOK_REDIRECT_URI.strip():
-        redirect_uri = TIKTOK_REDIRECT_URI.strip()
-        env_uri = os.getenv("TIKTOK_REDIRECT_URI", "").strip()
-        if env_uri:
-            redirect_uri = env_uri
+    public_base = os.getenv("PUBLIC_BACKEND_URL", "https://api.clipsai.xyz").strip().rstrip("/")
+    default_uri = f"{public_base}/auth/social/tiktok/callback"
+    redirect_uri = os.getenv("TIKTOK_REDIRECT_URI", default_uri).strip() or default_uri
+    if "decorator" in redirect_uri or "guns-camps" in redirect_uri or "ngrok" in redirect_uri or "trycloudflare" in redirect_uri:
+        redirect_uri = default_uri
     return client_key, client_secret, redirect_uri
 
 
