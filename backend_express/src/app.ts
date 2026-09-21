@@ -1,5 +1,7 @@
 import express from 'express'
 import cors from 'cors'
+import swaggerUi from 'swagger-ui-express'
+import { swaggerSpec, swaggerUiOptions } from './docs/swagger.js'
 import { statsRouter } from './routes/stats.js'
 import { clipsRouter } from './routes/clips.js'
 import { usersRouter } from './routes/users.js'
@@ -49,6 +51,29 @@ export function createApp() {
   app.use(express.json())
   app.use(express.urlencoded({ extended: true }))
 
+  // Swagger UI — Issue #30 paridad FastAPI /docs
+  app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, swaggerUiOptions))
+  app.get('/openapi.json', (_req, res) => res.json(swaggerSpec))
+
+  /**
+   * @openapi
+   * /health:
+   *   get:
+   *     tags: [infra]
+   *     summary: Healthcheck simple
+   *     description: Verifica que el servicio Express esté operativo. Usado por docker healthcheck y por el frontend para validar paridad con FastAPI.
+   *     responses:
+   *       200:
+   *         description: Servicio operativo
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 status:
+   *                   type: string
+   *                   example: ok
+   */
   app.get('/health', (_req, res) => res.json({ status: 'ok' }))
 
   app.use('/auth', authRouter)
