@@ -159,7 +159,11 @@ export const exportService = {
       }
     })()
     const res = await fetch(`${BASE_URL}/jobs/${jobId}/export?format=${format}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      credentials: 'include',
+      headers: {
+        'ngrok-skip-browser-warning': 'true',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      } as HeadersInit,
     })
     if (!res.ok) {
       let detail = `HTTP ${res.status}`
@@ -184,7 +188,11 @@ export const exportService = {
       }
     })()
     const res = await fetch(`${BASE_URL}/clips/export?format=${format}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      credentials: 'include',
+      headers: {
+        'ngrok-skip-browser-warning': 'true',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      } as HeadersInit,
     })
     if (!res.ok) {
       let detail = `HTTP ${res.status}`

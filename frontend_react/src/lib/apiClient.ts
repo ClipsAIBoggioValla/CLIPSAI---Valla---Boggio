@@ -18,6 +18,7 @@ function getToken(): string | null {
 function buildHeaders(extra?: HeadersInit, includeAuth = true): Headers {
   const h = new Headers(extra)
   if (!h.has('Accept')) h.set('Accept', 'application/json')
+  h.set('ngrok-skip-browser-warning', 'true')
   if (includeAuth) {
     const tok = getToken()
     if (tok) h.set('Authorization', `Bearer ${tok}`)
@@ -52,10 +53,12 @@ interface RequestOptions {
 export async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, headers, noAuth = false } = opts
   const finalHeaders = buildHeaders(headers, !noAuth)
+  const useCredentials = path.includes('/login') || path.includes('/me') || path.includes('/auth')
   const res = await fetch(`${BASE_URL}${path}`, {
     method,
     headers: finalHeaders,
     body: body ?? null,
+    credentials: useCredentials ? 'include' : 'include',
   })
   if (!res.ok) throw await parseError(res)
   if (res.status === 204) return undefined as unknown as T
