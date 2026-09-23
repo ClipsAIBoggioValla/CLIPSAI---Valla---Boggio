@@ -1,16 +1,22 @@
 # ==============================================================================
-# clipsai — Infraestructura base (Issue 1)
+# clipsai — Infraestructura base completa (Issues 1, 13)
 # ------------------------------------------------------------------------------
 # Levanta PostgreSQL 15 con:
 #   - Persistencia via volumen nombrado (postgres_data)
 #   - Scripts DDL de inicializacion en ./init-scripts/
 #   - Healthcheck con pg_isready para que otros servicios puedan depender de el
 #
+# Servicios:
+#   db                    -> PostgreSQL
+#   backend_fastapi     -> FastAPI (Issue 3)
+#   backend_express     -> Express (Issue 15)
+#   frontend_react      -> React (Issue 7)
+#   frontend_vue        -> Vue (Issue 9)
+#
 # Uso:
-#   1) cp .env.example .env  (y editar valores)
+#   1) cp .env.example .env  (y editar valores reales, rotar keys)
 #   2) docker compose up -d
 #   3) docker compose logs -f db   # ver init scripts corriendo
-#   4) docker compose exec db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 # ==============================================================================
 
 services:
@@ -46,7 +52,7 @@ services:
       - clipsai-net
 
   # ----------------------------------------------------------------------------
-  # Backend FastAPI (Issue 3 — autenticacion)
+  # Backend FastAPI (Issue 3 — autenticacion + videos/jobs/clips)
   # ----------------------------------------------------------------------------
   backend_fastapi:
     build:
@@ -77,6 +83,9 @@ services:
     networks:
       - clipsai-net
 
+  # ----------------------------------------------------------------------------
+  # Backend Express (Issue 15 — paridad completa con FastAPI)
+  # ----------------------------------------------------------------------------
   backend_express:
     build:
       context: ./backend_express
@@ -105,6 +114,44 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+    networks:
+      - clipsai-net
+
+  # ----------------------------------------------------------------------------
+  # Frontend React (Issue 7 — auth, upload y seguimiento de Jobs)
+  # ----------------------------------------------------------------------------
+  frontend_react:
+    build:
+      context: ./frontend_react
+      dockerfile: Dockerfile
+    container_name: clipsai-frontend-react
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      backend_fastapi:
+        condition: service_healthy
+      backend_express:
+        condition: service_healthy
+    networks:
+      - clipsai-net
+
+  # ----------------------------------------------------------------------------
+  # Frontend Vue (Issue 9 — paridad completa con React)
+  # ----------------------------------------------------------------------------
+  frontend_vue:
+    build:
+      context: ./frontend_vue
+      dockerfile: Dockerfile
+    container_name: clipsai-frontend-vue
+    restart: unless-stopped
+    ports:
+      - "3002:80"
+    depends_on:
+      backend_fastapi:
+        condition: service_healthy
+      backend_express:
+        condition: service_healthy
     networks:
       - clipsai-net
 
