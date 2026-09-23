@@ -70,6 +70,14 @@ class Settings(BaseSettings):
 
     def model_post_init(self, __context):  # type: ignore[override]
         object.__setattr__(self, "database_url", _resolve_db_host(self.database_url))
+        # Forzar que callbacks usen PUBLIC_BACKEND_URL como base si aún contienen URLs temporales antiguas
+        base = self.public_backend_url.rstrip("/") if self.public_backend_url else "https://api.clipsai.xyz"
+        if "decorator" in self.google_redirect_uri or "guns-camps" in self.google_redirect_uri or "ngrok" in self.google_redirect_uri:
+            object.__setattr__(self, "google_redirect_uri", f"{base}/auth/social/youtube/callback")
+        if "decorator" in self.tiktok_redirect_uri or "guns-camps" in self.tiktok_redirect_uri or "ngrok" in self.tiktok_redirect_uri:
+            object.__setattr__(self, "tiktok_redirect_uri", f"{base}/auth/social/tiktok/callback")
+        if "decorator" in self.instagram_redirect_uri or "guns-camps" in self.instagram_redirect_uri or "ngrok" in self.instagram_redirect_uri:
+            object.__setattr__(self, "instagram_redirect_uri", f"{base}/auth/social/instagram/callback")
 
     # ---- JWT ----
     jwt_secret: str = Field(
@@ -79,6 +87,44 @@ class Settings(BaseSettings):
     )
     jwt_algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
     jwt_expire_minutes: int = Field(default=60, validation_alias="JWT_EXPIRE_MINUTES")
+
+    # ---- Backend público permanente ----
+    public_backend_url: str = Field(
+        default="https://api.clipsai.xyz",
+        validation_alias="PUBLIC_BACKEND_URL",
+    )
+    # ---- Google OAuth (YouTube) ----
+    google_client_id: str = Field(default="", validation_alias="GOOGLE_CLIENT_ID")
+    google_client_secret: str = Field(default="", validation_alias="GOOGLE_CLIENT_SECRET")
+    google_redirect_uri: str = Field(
+        default="https://api.clipsai.xyz/auth/social/youtube/callback",
+        validation_alias="GOOGLE_REDIRECT_URI",
+    )
+    # ---- TikTok OAuth ----
+    tiktok_client_key: str = Field(default="", validation_alias="TIKTOK_CLIENT_KEY")
+    tiktok_client_secret: str = Field(default="", validation_alias="TIKTOK_CLIENT_SECRET")
+    tiktok_redirect_uri: str = Field(
+        default="https://api.clipsai.xyz/auth/social/tiktok/callback",
+        validation_alias="TIKTOK_REDIRECT_URI",
+    )
+    # ---- Meta OAuth (Instagram Graph API) ----
+    instagram_client_id: str = Field(default="", validation_alias="INSTAGRAM_CLIENT_ID")
+    instagram_client_secret: str = Field(default="", validation_alias="INSTAGRAM_CLIENT_SECRET")
+    instagram_redirect_uri: str = Field(
+        default="https://api.clipsai.xyz/auth/social/instagram/callback",
+        validation_alias="INSTAGRAM_REDIRECT_URI",
+    )
+    # ---- Facebook OAuth (Meta Graph API - alias para Instagram) ----
+    facebook_client_id: str = Field(default="", validation_alias="FACEBOOK_CLIENT_ID")
+    facebook_client_secret: str = Field(default="", validation_alias="FACEBOOK_CLIENT_SECRET")
+    frontend_redirect_url: str = Field(
+        default="http://localhost:3000",
+        validation_alias="FRONTEND_REDIRECT_URL",
+    )
+    frontend_url: str = Field(
+        default="http://localhost:3000",
+        validation_alias="FRONTEND_URL",
+    )
 
     model_config = SettingsConfigDict(
         # No es estricto con env_file en Docker porque las vars vienen por el servicio.

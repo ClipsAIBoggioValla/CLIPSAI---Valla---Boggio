@@ -11,10 +11,11 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    host: "0.0.0.0",
     proxy: {
-      // Proxy API calls in dev to avoid CORS issues
+      // Proxy API calls in dev to avoid CORS issues (usa ngrok para webhooks externos)
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'https://decorator-excretory-satin.ngrok-free.dev',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },

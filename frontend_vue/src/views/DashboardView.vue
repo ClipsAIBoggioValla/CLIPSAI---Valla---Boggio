@@ -97,6 +97,17 @@ onMounted(fetchAll)
         <p class="text-sm text-[#94A3B8] mt-2">Visualiza el rendimiento de tus videos, clips generados y tiempo ahorrado gracias a la automatización.</p>
       </div>
 
+      <div class="rounded-2xl bg-[#121824] border border-[rgba(255,255,255,0.08)] p-4 mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+          <span class="h-9 w-9 rounded-xl bg-[#FF0000]/10 border border-[#FF0000]/20 flex items-center justify-center text-[#FF0000]"><i class="bi bi-youtube" /></span>
+          <div>
+            <p class="text-sm font-bold text-white">YouTube — OAuth 2.0 (Issue #24)</p>
+            <p class="text-xs text-[#94A3B8]">Prueba el conector: GET /auth/social/youtube/connect</p>
+          </div>
+        </div>
+        <RouterLink to="/dashboard/integrations" class="btn-custom btn-custom-primary flex items-center gap-2 whitespace-nowrap" data-testid="go-integrations"><i class="bi bi-box-arrow-up-right" /> Conectar YouTube</RouterLink>
+      </div>
+
       <template v-if="loading">
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div v-for="i in 4" :key="i" class="rounded-2xl bg-[#121824] border border-[rgba(255,255,255,0.08)] p-5 animate-pulse">

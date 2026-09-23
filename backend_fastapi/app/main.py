@@ -7,11 +7,15 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+import logging
+
 from .config import get_settings
 from .database import Base, engine
-from .routers import auth, clips, export, jobs, metrics, publish, stats, subtitles, users, videos
+from .routers import auth, clips, export, jobs, metrics, publish, social_auth, stats, subtitles, users, videos
 
-from .models import Clip, Job, Usuario, Video  # noqa: F401 — registra modelos para create_all
+logger = logging.getLogger(__name__)
+
+from .models import Clip, Job, SocialAccount, Usuario, Video  # noqa: F401 — registra modelos para create_all
 
 try:
     import sys
@@ -52,6 +56,7 @@ async def lifespan(app: FastAPI):
         conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ;"))
         conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(500);"))
         conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS theme_preference VARCHAR(20) DEFAULT 'dark';"))
+        conn.execute(text("ALTER TABLE social_accounts ADD COLUMN IF NOT EXISTS account_name VARCHAR(255);"))
         try:
             conn.execute(text("ALTER TABLE jobs DROP CONSTRAINT IF EXISTS chk_jobs_status;"))
         except Exception:
@@ -113,16 +118,19 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "https://api.clipsai.xyz",
+        "https://decorator-excretory-satin.ngrok-free.dev",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
-        "http://localhost:3001",
-        "http://127.0.0.1:3001",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
     ],
+    allow_origin_regex=r"https://.*\.(ngrok-free\.dev|clipsai\.xyz)",
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "ngrok-skip-browser-warning", "X-Requested-With", "Accept", "Origin"],
 )
 
 
@@ -132,15 +140,54 @@ async def handle_options_preflight(request, call_next):  # type: ignore[no-untyp
         from fastapi.responses import Response
 
         response = Response(status_code=200)
-        origin = request.headers.get("origin", "*")
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Methods"] = "POST, GET, OPTIONS, PUT, DELETE, PATCH"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
+        origin = request.headers.get("origin", "")
+        allowed = [
+            "https://api.clipsai.xyz",
+            "https://decorator-excretory-satin.ngrok-free.dev",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:3001",
+            "http://127.0.0.1:3001",
+        ]
+        if origin in allowed or origin.endswith(".ngrok-free.dev") or origin.endswith(".clipsai.xyz"):
+            response.headers["Access-Control-Allow-Origin"] = origin
+        elif origin:
+            response.headers["Access-Control-Allow-Origin"] = origin
+        else:
+            response.headers["Access-Control-Allow-Origin"] = "https://api.clipsai.xyz"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, ngrok-skip-browser-warning, X-Requested-With, Accept, Origin"
         response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Expose-Headers"] = "*"
+        response.headers["Vary"] = "Origin"
         return response
     return await call_next(request)
 
 app.include_router(auth.router)
+# Alias compat: si frontend dispara /login sin prefijo /auth (evita 404 preflight)
+from fastapi import APIRouter as _CompatAPIRouter, Depends as _DependsCompat
+
+from .deps import get_db as _get_db_compat
+from .schemas import Token as _TokenCompat, UsuarioCreate as _UsuarioCreateCompat, UsuarioLogin as _UsuarioLoginCompat
+
+_compat_auth = _CompatAPIRouter(tags=["auth-compat"])
+
+@_compat_auth.post("/login", response_model=_TokenCompat, include_in_schema=False)
+def _login_alias(payload: _UsuarioLoginCompat, db=_DependsCompat(_get_db_compat)):  # type: ignore
+    from .routers.auth import login as _auth_login
+
+    return _auth_login(payload, db)
+
+@_compat_auth.post("/registro", response_model=_TokenCompat, include_in_schema=False)
+def _registro_alias(payload: _UsuarioCreateCompat, db=_DependsCompat(_get_db_compat)):  # type: ignore
+    from .routers.auth import registro as _auth_registro
+
+    return _auth_registro(payload, db)
+
+app.include_router(_compat_auth)
+app.include_router(social_auth.router, prefix="/auth/social", tags=["Social Auth"])
 app.include_router(videos.router)
 app.include_router(jobs.router)
 app.include_router(export.router)
@@ -155,6 +202,12 @@ if 'retrim_router' in globals() and retrim_router is not None:
     app.include_router(retrim_router)
 if 'stream_router' in globals() and stream_router is not None:
     app.include_router(stream_router)
+
+
+@app.on_event("startup")
+async def log_routes():
+    for route in app.routes:
+        logger.info("RUTA REGISTRADA: %s %s", getattr(route, 'methods', None), route.path)
 
 
 @app.get("/health", tags=["infra"], summary="Healthcheck simple")

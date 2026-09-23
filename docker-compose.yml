@@ -1,10 +1,16 @@
 # ==============================================================================
-# clipsai — Infraestructura base completa (Issues 1, 13)
+# clipsai — Infraestructura unificada (Issue 1 + Orquestación completa)
 # ------------------------------------------------------------------------------
-# Levanta PostgreSQL 15 con:
-#   - Persistencia via volumen nombrado (postgres_data)
-#   - Scripts DDL de inicializacion en ./init-scripts/
-#   - Healthcheck con pg_isready para que otros servicios puedan depender de el
+# Levanta los 6 servicios con un solo comando:
+#   docker compose up -d --build
+#
+# Servicios:
+#   - db                : postgres:15-alpine  :5432
+#   - backend_fastapi   : FastAPI  :8000  (health /health)
+#   - backend_express   : Express  :3001  (health /health)
+#   - frontend_react    : React + Vite  :3000  (hot-reload)
+#   - frontend_vue      : Vue + Vite    :5173  (hot-reload)
+#   - ngrok             : túnel a backend_fastapi:8000 --domain decorador
 #
 # Servicios:
 #   db                    -> PostgreSQL
@@ -14,9 +20,14 @@
 #   frontend_vue        -> Vue (Issue 9)
 #
 # Uso:
-#   1) cp .env.example .env  (y editar valores reales, rotar keys)
-#   2) docker compose up -d
-#   3) docker compose logs -f db   # ver init scripts corriendo
+#   cp .env.example .env  # completar JWT_SECRET, GOOGLE_*, NGROK_AUTHTOKEN
+#   docker compose up -d --build
+#   docker compose logs -f            # todos
+#   docker compose logs -f backend_fastapi frontend_react ngrok
+#   docker compose ps                 # 6 healthy
+#   docker compose down               # mantiene postgres_data
+#   docker compose down -v            # borra DB (cuidado)
+#   ngrok inspect -> http://localhost:4040
 # ==============================================================================
 
 services:
@@ -30,19 +41,14 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
-      # Locale y timezone consistentes para timestamps del dominio
       PGTZ: ${POSTGRES_TZ:-UTC}
       TZ: ${POSTGRES_TZ:-UTC}
     ports:
-      # Se expone el puerto configurable en el host, siempre contra el 5432 interno
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      # Persistencia de datos entre `docker compose down` y `up`
       - postgres_data:/var/lib/postgresql/data
-      # Scripts DDL/seed ejecutados UNA sola vez, al inicializar el volumen vacio
       - ./init-scripts:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      # pg_isready se autentica con el usuario/db reales para evitar falsos positivos
       test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\" -h 127.0.0.1 -p 5432"]
       interval: 10s
       timeout: 5s
@@ -52,7 +58,7 @@ services:
       - clipsai-net
 
   # ----------------------------------------------------------------------------
-  # Backend FastAPI (Issue 3 — autenticacion + videos/jobs/clips)
+  # Backend FastAPI (Issue 3)
   # ----------------------------------------------------------------------------
   backend_fastapi:
     build:
@@ -69,8 +75,18 @@ services:
       JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-60}
       APP_ENV: ${APP_ENV:-development}
       TZ: ${POSTGRES_TZ:-UTC}
+      TIKTOK_CLIENT_KEY: ${TIKTOK_CLIENT_KEY}
+      TIKTOK_CLIENT_SECRET: ${TIKTOK_CLIENT_SECRET}
+      TIKTOK_REDIRECT_URI: ${TIKTOK_REDIRECT_URI:-https://api.clipsai.xyz/auth/social/tiktok/callback}
+      PUBLIC_BACKEND_URL: ${PUBLIC_BACKEND_URL:-https://api.clipsai.xyz}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-https://api.clipsai.xyz/auth/social/youtube/callback}
+      INSTAGRAM_REDIRECT_URI: ${INSTAGRAM_REDIRECT_URI:-https://api.clipsai.xyz/auth/social/instagram/callback}
     ports:
       - "${BACKEND_FASTAPI_PORT:-8000}:8000"
+    volumes:
+      # Montaje sincronizado para que clips generados por worker estén disponibles en /app/storage
+      - ./storage:/app/storage
+      - ./storage:/storage
     depends_on:
       db:
         condition: service_healthy
@@ -118,42 +134,69 @@ services:
       - clipsai-net
 
   # ----------------------------------------------------------------------------
-  # Frontend React (Issue 7 — auth, upload y seguimiento de Jobs)
+  # Frontends — desarrollo con hot-reload (Vite)
   # ----------------------------------------------------------------------------
   frontend_react:
-    build:
-      context: ./frontend_react
-      dockerfile: Dockerfile
+    image: node:20-alpine
     container_name: clipsai-frontend-react
-    restart: unless-stopped
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 3000"
+    env_file:
+      - .env
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+      CHOKIDAR_USEPOLLING: "true"
     ports:
-      - "3000:80"
+      - "3000:3000"
+    volumes:
+      - ./frontend_react:/app
+      - /app/node_modules
     depends_on:
       backend_fastapi:
         condition: service_healthy
-      backend_express:
+    networks:
+      - clipsai-net
+
+  frontend_vue:
+    image: node:20-alpine
+    container_name: clipsai-frontend-vue
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    env_file:
+      - .env
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+      CHOKIDAR_USEPOLLING: "true"
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend_vue:/app
+      - /app/node_modules
+    depends_on:
+      backend_fastapi:
         condition: service_healthy
     networks:
       - clipsai-net
 
   # ----------------------------------------------------------------------------
-  # Frontend Vue (Issue 9 — paridad completa con React)
+  # Ngrok — túnel a backend_fastapi:8000
   # ----------------------------------------------------------------------------
-  frontend_vue:
-    build:
-      context: ./frontend_vue
-      dockerfile: Dockerfile
-    container_name: clipsai-frontend-vue
-    restart: unless-stopped
-    ports:
-      - "3002:80"
+  # Cloudflare Tunnel permanente expone backend_fastapi en https://api.clipsai.xyz
+  # Ngrok legacy (mantener para desarrollo local, ahora usa dominio permanente)
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: clipsai-ngrok
+    command: http backend_fastapi:8000 --domain=${NGROK_DOMAIN:-api.clipsai.xyz}
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
     depends_on:
       backend_fastapi:
         condition: service_healthy
-      backend_express:
-        condition: service_healthy
+    ports:
+      - "4040:4040"
     networks:
       - clipsai-net
+    restart: unless-stopped
 
 volumes:
   postgres_data:
