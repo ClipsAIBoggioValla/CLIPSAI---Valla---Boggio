@@ -109,6 +109,12 @@ const swaggerDefinition = {
           end_time: { type: 'number' },
           transcript: { type: 'string', nullable: true },
           status: { type: 'string', nullable: true, example: 'ready' },
+          file_path: { type: 'string', nullable: true, example: '/app/storage/clips/abc.mp4' },
+          stream_url: { type: 'string', example: '/clips/abc/descarga' },
+          duration: { type: 'number', nullable: true, example: 17.5 },
+          has_ass: { type: 'boolean', example: true },
+          has_hook: { type: 'boolean', example: true },
+          tags: { type: 'object', nullable: true },
           created_at: { type: 'string', format: 'date-time' },
         },
       },
@@ -126,15 +132,28 @@ const swaggerDefinition = {
         type: 'object',
         properties: {
           id: { type: 'string', format: 'uuid' },
+          video_id: { type: 'string', format: 'uuid', nullable: true },
           job_id: { type: 'string', format: 'uuid' },
           title: { type: 'string', nullable: true },
           score: { type: 'number', nullable: true },
           start_time: { type: 'number' },
           end_time: { type: 'number' },
           status: { type: 'string' },
+          tags: { type: 'object', nullable: true },
+          storage_path: { type: 'string', nullable: true },
+          file_path: { type: 'string', nullable: true },
+          stream_url: { type: 'string', nullable: true },
+          duration: { type: 'number', nullable: true },
+          has_ass: { type: 'boolean' },
+          has_hook: { type: 'boolean' },
           published_platform: { type: 'string', nullable: true },
+          social_post_id: { type: 'string', nullable: true },
           social_post_url: { type: 'string', nullable: true },
+          published_at: { type: 'string', format: 'date-time', nullable: true },
+          publication_status: { type: 'string', nullable: true },
+          social_network: { type: 'string', nullable: true },
           created_at: { type: 'string', format: 'date-time' },
+          updated_at: { type: 'string', format: 'date-time' },
         },
       },
       StatsSummaryResponse: {
@@ -288,6 +307,7 @@ const swaggerDefinition = {
           { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 10 } },
           { name: 'video_id', in: 'query', schema: { type: 'string', format: 'uuid' } },
+          { name: 'job_id', in: 'query', schema: { type: 'string', format: 'uuid' }, description: 'Filtrar por job (Issue #36)' },
           { name: 'status', in: 'query', schema: { type: 'string' } },
         ],
         responses: { '200': { description: 'Paginado', content: { 'application/json': { schema: { $ref: '#/components/schemas/ClipListResponse' } } } } },
@@ -334,6 +354,53 @@ const swaggerDefinition = {
         parameters: [{ name: 'clipId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
         requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/PublishClipRequest' } } } },
         responses: { '202': { description: 'Encolado PUBLISHING' }, '422': { description: 'platform inválida' } },
+      },
+    },
+    '/clips/{clipId}/publish-stream': {
+      get: {
+        tags: ['publish'],
+        summary: 'SSE stream estado publicación (PUBLISHING → PUBLISHED/FAILED) — Issue #31',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'clipId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          '200': {
+            description: 'text/event-stream',
+            content: {
+              'text/event-stream': {
+                schema: {
+                  type: 'string',
+                  example: 'data: {"clip_id":"uuid","status":"PUBLISHING","publication_status":"PUBLISHING"}\n\nevent: done\ndata: {}\n\n',
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/clips/{clipId}/re-render': {
+      post: {
+        tags: ['clips'],
+        summary: 'Re-renderizar clip con ASS/Hook — Issue #36',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'clipId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  enable_ass: { type: 'boolean', default: true, description: 'Quemar subtítulos ASS' },
+                  enable_hook: { type: 'boolean', default: true, description: 'Anteponer hook teaser' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '202': { description: 'Re-render encolado PROCESSING', content: { 'application/json': { schema: { type: 'object', properties: { detail: { type: 'string' }, clip_id: { type: 'string', format: 'uuid' }, status: { type: 'string', example: 'PROCESSING' } } } } } },
+          '409': { description: 'Clip ya en procesamiento' },
+        },
       },
     },
     '/jobs/{jobId}/export': {

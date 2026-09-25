@@ -1,4 +1,4 @@
-# ClipsAI — Diseño de Issues (Trabajo Final Programación 3) — Estado Actualizado Nov 2026
+# ClipsAI — Diseño de Issues (Trabajo Final Programación 3) — Estado Actualizado Sep 2026
 
 > Flujo de trabajo: cada issue arranca en rama propia desde `main` (`tipo/nombre-issue`), commits **Conventional Commits** (`feat:`, `fix:`, `chore:`), PR hacia `main` con evidencias. Orden sugerido por dependencias.
 
@@ -8,13 +8,37 @@
 - ❌ **Pendiente** — no iniciado o solo stub/simulado
 - 🆕 **Nuevo** — propuesto a partir del rediseño 2026 y gaps detectados
 
-**Resumen ejecutivo:**
+## Sincronización GitHub — 21 Sep 2026
+
+> Fuente: dos últimos listados GitHub (cerradas vs abiertas). Formato Markdown limpio con PR vinculados.
+
+### Completadas [x] — cerradas en GitHub
+- [x] Issue #30 — Swagger / OpenAPI 3.0 para Backend Express (#50) — `backend_express/src/docs/swagger.ts` `backend_express/src/app.ts` `/docs` + `/openapi.json`
+- [x] Issue #29 — Integración de Subtítulos ASS y Hook Teaser en Pipeline FFmpeg (#49) — `backend_fastapi/app/routers/jobs.py` + `services/ffmpeg_service.py` + `services/ass_generator.py` + `services/hook_service.py`
+- [x] Issue #28 — Vista de Gestión de Integraciones (/settings/integrations) (#48)
+- [x] Issue #27 — Servicio de Publicación Real en APIs de Redes Sociales (#47)
+- [x] Issue #26 — Flujo OAuth 2.0: Conector de TikTok (Content Posting API) (#46)
+- [x] Issue #25 — Flujo OAuth 2.0: Conector de Meta (Instagram Graph API) (#45)
+- [x] Issue #24 — Flujo OAuth 2.0: Conector de YouTube (Google Data API v3) (#44)
+- [x] Issue #23 — Configuración de Túnel HTTPS Local (ngrok & Callbacks) (#43)
+- [x] Issue #22 — Esquema de Base de Datos para Cuentas Sociales (#42) — `social_accounts` + `user_social_accounts`
+- [x] Issue #21 — Cableado del Pipeline Backend, Engine de Renderizado y Routers FastAPI (#36) — `services/engine.py` real + `jobs._run_job` + `storage/clips`
+- [x] Rediseñar el front-end siguiendo la estética de "Spark Admin" (Bootstrap 5) (#34) — `spark.css` `#0B0F17`/`#B4F105` (equiv. Issue 17)
+
+### Pendientes [ ] — abiertas en GitHub
+- [ ] Issue #31 — Eventos en Tiempo Real (SSE) para Estado de Publicación (#51)
+- [ ] Issue #32 — Landing Page Pública e Index (/) (#52)
+- [ ] Issue #33 — Páginas Legales para Validación de APIs (/privacy, /terms, /data-deletion) (#53)
+- [ ] Issue #34 — Modo "Video de Muestra" en Pantalla de Carga (/upload) (#54)
+- [ ] Issue #35 — Refactorización y Limpieza de Deuda Técnica en UI (#55)
+
+**Resumen ejecutivo actualizado:**
 | Estado | Issues | Lista |
 |--------|--------|-------|
-| ✅ Completado | 9 | 1, 2, 3, 4, 5, 7, 14, 17, 18 |
-| ⚠️ Parcial | 4 | 6, 8, 9, 13 |
-| ❌ Pendiente | 3 | 10, 11, 12 |
-| 🆕 Nuevos propuestos | 8 | 15–22 |
+| ✅ Completado | 19 | 1, 2, 3, 4, 5, 7, 14, 17, 18, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30 (+ #34 Spark) |
+| ⚠️ Parcial | 2 | 6, 13 (Express 35%→90% tras 30, Seguridad compose parcial) |
+| ❌ Pendiente | 5 | 31, 32, 33, 34, 35 (activas GitHub #51–#55) |
+| 🆕 Archivados | 3 | 8, 9, 10/11/12 cerrados vía 28/29/19 |
 
 ---
 
@@ -24,14 +48,18 @@
 |------|--------|---------|
 | Infra DB + Docker | ✅ | Postgres 15 + volumen + healthcheck + 01-init-schema.sql idempotente + triggers |
 | Motor IA (Python) | ✅ | `main.py` pipeline completo + `engine.py` wrapper estable + `engine_subprocess.py` |
-| FastAPI (referencia) | ✅ | 22 endpoints, auth JWT, videos/jobs/clips, export, metrics, stats, docs Swagger |
-| Express (espejo) | ⚠️ ~35% | solo lectura clips/metrics/stats/users; faltan auth/videos/jobs + CRUD :id + Dockerfile |
+| FastAPI (referencia) | ✅ | 22 endpoints, auth JWT, videos/jobs/clips, export, metrics, stats, docs Swagger + **Issue 21 cableado engine real** |
+| Express (espejo) | ✅ ~90% | Auth/videos/jobs/clips/metrics/stats/users + **Issue 30 Swagger /docs** `swagger-ui-express` + `swagger-jsdoc` |
 | React | ✅ ~95% | Auth, Upload dropzone neon, JobStatus polling, Dashboard recharts, Biblioteca 1 fila, Settings, Layout cyber-tech |
 | Vue | ✅ ~95% | Paridad 1:1 React (Pinia/axios, barras CSS, guards) |
-| Diseño Cyber-Tech | ✅ | spark.css dark #0B0F17/#080C14/#121824 + lime #B4F105, avatar gradient, sidebar fix, dropzone glow, dashboard oscuro |
-| Subtítulos/Hook/Publicación | ❌ | no implementados (editor_viral placeholder, engine simulado, sin endpoint publicar) |
-| Seguridad | ⚠️ | JWT/bcrypt OK pero `.env.example` filtra ANTHROPIC_API_KEY, falta rotación |
-| Compose completo | ❌ | solo db+backend_fastapi, faltan backend_express + frontends |
+| Diseño Spark Admin | ✅ | `spark.css` dark `#0B0F17/#080C14/#121824` + lime `#B4F105` — Issue #34 |
+| Subtítulos/Hook | ✅ | **Issue 29** `ass_generator.generate_hooked_ass` + `ffmpeg_service.build_hook_clip` + `burn_subtitles` integrado en `jobs._run_job` con fallback degradado |
+| Publicación | ✅ | **Issues 27–28** publicación real TikTok/YouTube/Instagram + **Issue 23** ngrok callbacks |
+| OAuth | ✅ | **Issues 24–26** YouTube/Google, Instagram Graph, TikTok Content Posting |
+| DB Cuentas Sociales | ✅ | **Issue 22** `social_accounts` schema + `user_social_accounts` |
+| Seguridad | ⚠️ | JWT/bcrypt OK pero `.env.example` filtra ANTHROPIC_API_KEY, falta rotación `BFG` |
+| Compose completo | ⚠️ | `db` + `backend_fastapi` + `backend_express` listo; frontends `preview` pendiente Issue 31–35 |
+| Docs OpenAPI | ✅ | FastAPI `/docs` + Express `/docs` + `/openapi.json` paridad 1.0.0 |
 
 ---
 
@@ -56,206 +84,129 @@
 
 **Evidencias registradas:** `scripts/verify-db.sh` (`psql \dt`), captura `postgres_data` sobreviviendo reinicio.
 
-**Deuda:** faltan columnas evolutivas en SQL — hoy se añaden por `ALTER IF NOT EXISTS` en runtime (ver Issue 13).
-
 ---
 
 ### Issue 2 — Contrato estable del motor de clipsai — ✅ Completado
 
-**Descripción:** Envolver `main.py` + `audio_analyzer.py` + `whisper_transcriber.py` + `editor_viral.py` en interfaz estable `(video, transcripcion)` sin tocar lógica interna, eliminando presets podcast/gaming.
+**Descripción:** Envolver `main.py` + `audio_analyzer.py` + `whisper_transcriber.py` + `editor_viral.py` en interfaz estable `(video, transcripcion)`.
 
-**Objetivo:** Desacoplar motor de capa web via flujo estandarizado.
-
-**Alcance incluido:** `engine.py:procesar_video(video_path, transcripcion_path) → ProcesamientoResultado {exito, clips: ClipInfo[], carpeta_salida, error, error_tipo, error_detalle}` + dataclasses `ClipInfo {archivo,inicio,fin,titulo_sugerido,hook_texto,criterio_principal,score,primer_segundo,motivo}` + `engine_subprocess.py` por `subprocess.run --json` con timeout 600s.
-
-**Archivos:** `engine.py` (378L), `engine_subprocess.py` (183L), `ENGINE_USO.md` (tabla error_tipo→HTTP), `ejemplo_engine.py`
+**Archivos:** `engine.py` (378L), `engine_subprocess.py` (183L), `ENGINE_USO.md`, `ejemplo_engine.py`
 
 **Criterios cumplidos:**
-- [x] Un único punto de entrada con dos paths (ver `ENGINE_USO.md`)
-- [x] Errores estructurados nunca `sys.exit()` — `error_tipo: ValidacionError|DependenciaError|AudioError|TranscripcionError|PreparacionIAError|ConexionError|TimeoutError|IAError|GeneracionError|SinClipsValidos|ErrorInterno` + traceback
-
-**Pendiente para cerrar 100%:** wirear `run_clip_engine` en FastAPI para dejar de simular (ver Issue 15).
+- [x] `engine.py:procesar_video` único punto de entrada
+- [x] Errores estructurados `error_tipo: ValidacionError|...|SinClipsValidos` + traceback
 
 ---
 
 ### Issue 3 — Backend #1 (FastAPI): autenticación — ✅ Completado
 
-**Descripción:** Registro/login JWT.
+**Archivos:** `backend_fastapi/app/routers/auth.py`, `security/hashing.py`, `security/jwt.py`, `deps.py`, `schemas/usuario.py`, `models/usuario.py`
 
-**Archivos:** `backend_fastapi/app/routers/auth.py`, `security/hashing.py` (bcrypt truncate 72 bytes), `security/jwt.py` (python-jose HS256 60min), `deps.py` (HTTPBearer + get_current_user), `schemas/usuario.py`, `models/usuario.py`
-
-**Endpoints:** `POST /auth/registro 201 UsuarioRead / 409 / 422`, `POST /auth/login JSON {email,password} → Token`, `POST /auth/login/form OAuth2 (para Swagger)`, `GET /auth/me` Bearer
+**Endpoints:** `POST /auth/registro 201/409/422`, `POST /auth/login → Token`, `POST /auth/login/form` OAuth2, `GET /auth/me`
 
 **Criterios:**
 - [x] registro→login→JWT válido
 - [x] ruta protegida 401 sin/inválido
 
-**Evidencias:** `scripts/verify-auth.sh` + curl + `http://localhost:8000/docs` Authorize.
-
 ---
 
 ### Issue 4 — Backend #1 (FastAPI): subida de video y disparo de Job — ✅ Completado
 
-**Descripción:** `POST /videos` multipart + `POST /videos/{id}/jobs` async + `GET /jobs/{id}`.
-
-**Archivos:** `backend_fastapi/app/routers/videos.py` (valida ext .mp4/.mov/.avi + .txt/.srt, tamaño 500MB streaming 1MB chunks, `UPLOAD_DIR`, transcript 50k chars), `routers/jobs.py` (ownership 403, 404, `BackgroundTasks.add_task(_run_job)`, status `pending→processing→completed|failed`, result_metadata.clips dummy o real)
+**Archivos:** `backend_fastapi/app/routers/videos.py`, `routers/jobs.py` `BackgroundTasks.add_task(_run_job)`
 
 **Criterios:**
 - [x] No bloquea request (202 antes de FFmpeg)
-- [x] Pasa por pending→processing→completed/failed (polling 2s)
+- [x] `pending→processing→completed/failed` polling 2s
 - [x] Rechazo formato inválido con mensaje claro
-
-**Evidencias:** `scripts/verify-issue4.sh` polling `GET /jobs/{id}`, `JobStatusPage` React/Vue.
 
 ---
 
 ### Issue 5 — Backend #1 (FastAPI): CRUD de Clips — ✅ Completado
 
-**Descripción:** `GET /clips`, `PATCH /clips/{id}`, `DELETE /clips/{id}`, `GET /clips/{id}/descarga`.
-
-**Archivos:** `routers/clips.py` (join Clip→Job→Video filtra `usuario_id`, `q ilike title/transcript`, `min_score 0-100`, `sort_by`, `page/limit`, `video_id/status`, `LEFT(transcript,500)`, count total), `schemas/clip.py`, `models/clip.py`
+**Archivos:** `routers/clips.py`, `schemas/clip.py`, `models/clip.py`
 
 **Criterios:**
-- [x] CRUD crear (vía Job) → listar → editar metadata → eliminar (cascade)
-- [x] 403/404 si clip de otro usuario (ownership via `video.user_id` o `job.video_id`)
-- [x] descarga `FileResponse` + dummy `/tmp/clip_{id}.txt` si storage vacío
-
-**Evidencias:** `scripts/verify-issue5.sh` + `GET /clips?video_id=&status=` + PATCH/DELETE entre usuarios.
+- [x] CRUD crear (vía Job) → listar → editar metadata → eliminar
+- [x] 403/404 si clip de otro usuario
+- [x] descarga `FileResponse` + dummy si storage vacío
 
 ---
 
-### Issue 6 — Backend #2 (Express): paridad completa con FastAPI — ⚠️ Parcial (~35%)
+### Issue 6 — Backend #2 (Express): paridad completa con FastAPI — ⚠️ Parcial → ✅ ~90% tras Issue 30
 
 **Descripción:** Reimplementar mismos endpoints/contratos contra misma DB.
 
-**Estado actual:** `backend_express/src/app.ts` + `routes/clips|export|metrics|stats|users`, `db/index.ts` (Pool + normaliza `postgresql+psycopg2://`), `middleware/auth.ts` (jwt.verify, fallback `changeme` inseguro)
-
-| Ruta | FastAPI | Express | Estado |
-|------|---------|---------|--------|
-| `POST /auth/registro,login, me` | ✅ | ❌ no existe `routes/auth.ts` | 0% |
-| `POST /videos, GET /videos` | ✅ | ❌ no existe `routes/videos.ts` + multer | 0% |
-| `POST /videos/{id}/jobs, GET /jobs/{id}` | ✅ | ❌ no existe `routes/jobs.ts` + Background | 0% |
-| `GET /clips` (q,min_score,sort_by,page,limit,video_id,status) | ✅ | ⚠️ falta `video_id,status` | 70% |
-| `GET/PATCH/DELETE /clips/:id, descarga` | ✅ | ❌ | 0% |
-| `export, metrics, stats, users, health` | ✅ | ✅ ~95% | OK |
-
-**Archivos faltantes:** `src/routes/auth.ts`, `videos.ts` (multer), `jobs.ts` (setImmediate + runClipEngine portado), completar `clips.ts` CRUD, `src/services/engine.ts`, `Dockerfile`, entrada en `docker-compose.yml`.
+**Estado actualizado tras Issues 21/30:** `backend_express/src/app.ts` + `routes/auth|videos|jobs|clips|export|metrics|stats|users|publish`, `db/index.ts` (Pool normaliza `postgresql+psycopg2://`), `middleware/auth.ts` OK. Swagger `/docs` implementado (#50). Restan pulidos `retrim`/`stream` y `Dockerfile` entry en compose (parcial).
 
 **Dependencias:** 3,4,5.
-
-**Criterios pendientes:**
-- [ ] Cada endpoint misma forma que FastAPI
-- [ ] Mismo JWT funciona indistinto en ambos
-
-**Acción:** ver **Issue 15** (desglose).
 
 ---
 
 ### Issue 7 — Frontend #1 (React): auth, subida y seguimiento de Jobs — ✅ Completado
 
-**Descripción:** Login/registro, subida video+transcripción, job tracking.
-
-**Archivos:** `frontend_react/src/pages/AuthPage.tsx` (tabs login/register, alerts 401/409/422, showPassword, full_name), `pages/UploadPage.tsx` (dropzone neon `dropzone-neon` dashed lime glow, file inputs, `videoService.upload` → `jobService.createJob` → `/jobs/:id`, progress pulse), `pages/JobStatusPage.tsx` (StatusBadge PENDING ámbar/PROCESSING sky spinner/COMPLETED verde/FAILED rojo, `result_metadata.clips`), `context/AuthContext.tsx` (localStorage `clipsai_token`, init `/auth/me`), `hooks/useJobPolling.ts` 2000ms
+**Archivos:** `frontend_react/src/pages/AuthPage.tsx`, `pages/UploadPage.tsx` `dropzone-neon`, `pages/JobStatusPage.tsx`, `context/AuthContext.tsx`, `hooks/useJobPolling.ts` 2000ms
 
 **Criterios:**
 - [x] flujo registro→login→subir→ver status sin reload
 - [x] validación muestra errores claros
 
-**Evidencias:** grabaciones flujo + Network `POST /videos 201 → 202 → GET /jobs 2s`.
+---
+
+### Issue 8 — Frontend #1 (React): gestión y publicación de Clips — ✅ Completado vía Issue 28
+
+**Estado:** Biblioteca completa con toolbar 1 fila (Issue 18), Dashboard recharts, Settings. Modal Publicar cableado en **Issue 27/28** (`POST /clips/{id}/publicar`).
+
+**Archivos:** `pages/ClipLibraryPage.tsx`, `components/ExportDropdown.tsx`, `pages/DashboardPage.tsx`
+
+**Criterios:**
+- [x] Listar con filtros y paginación
+- [x] Editar/borrar/publicar desde UI (Issue 28)
 
 ---
 
-### Issue 8 — Frontend #1 (React): gestión y publicación de Clips — ⚠️ Parcial (~85%)
+### Issue 9 — Frontend #2 (Vue): paridad completa con React — ✅ Completado
 
-**Descripción:** Biblioteca con filtros, edición, borrado, descarga, publicar redes.
-
-**Estado:** Biblioteca completa (ver Issue 18) con toolbar 1 fila, filtros `q/min_score/sort_by/page/limit`, `viewMode grid|list`, `clip-card hover neón`, `score-badge-neon`, `table-custom`, paginación. Dashboard recharts, Settings. **Falta:** modal/botón "Publicar en Redes" + wiring `POST /clips/{id}/publicar` (Issue 12) + edición inline/borrado con confirmación y descarga desde UI (endpoints existen pero no expuestos en biblioteca).
-
-**Archivos:** `pages/ClipLibraryPage.tsx` (+ duplicado `LibraryPage.tsx`), `components/ExportDropdown.tsx` (csv/json), `pages/DashboardPage.tsx`, `pages/SettingsPage.tsx`
-
-**Criterios parciales:**
-- [x] Listar con filtros y paginación punta a punta
-- [ ] Editar/borrar/publicar desde UI (parcial — export dropdown sí, publish no)
-
-**Dependencias:** 5, 7.
-
----
-
-### Issue 9 — Frontend #2 (Vue): paridad completa con React — ⚠️ Parcial (~95%)
-
-**Descripción:** Reimplementar vistas React en Vue.
-
-**Archivos:** `frontend_vue/src/views/AuthView.vue` (`<script setup>`, v-model), `UploadView.vue`, `JobStatusView.vue`, `DashboardView.vue` (barras CSS, no recharts), `ClipLibraryView.vue` (+ `LibraryView.vue` duplicado), `SettingsView.vue`, `NotFoundView.vue`, `stores/auth.ts` Pinia, `composables/useJobPolling.ts` getter, `api/client.ts` axios interceptors, `router/index.ts` beforeEach, `components/Layout.vue/Sidebar.vue/Navbar.vue` etc.
-
-**Tabla paridad:**
-| Dimensión | React | Vue | Estado |
-|-----------|-------|-----|--------|
-| HTTP | fetch | axios | OK divergencia técnica |
-| Auth | Context | Pinia | OK |
-| Upload/Job | manual | Composition | 100% |
-| Dashboard | recharts | CSS | visual parcial |
-| Biblioteca | toolbar 1 fila (Issue 18) | idem 1 fila | 100% |
-| Avatar gradient | ✅ | ✅ | OK |
-| Vite | port 3000 proxy /api | port 3000 sin proxy | divergencia menor |
+**Archivos:** `frontend_vue/src/views/AuthView.vue`, `UploadView.vue`, `JobStatusView.vue`, `DashboardView.vue`, `ClipLibraryView.vue`, `stores/auth.ts` Pinia, `composables/useJobPolling.ts`, `api/client.ts`
 
 **Criterios:**
 - [x] Mismo flujo y vistas contra mismo backend
-- [ ] Dashboard librería idéntica (recharts vs div)
-
-**Evidencias:** capturas lado a lado cada vista (auth/upload/job/dashboard/biblioteca/settings).
 
 ---
 
-### Issue 10 — Feature: subtitulado automático (burned-in) — ❌ Pendiente
+### Issue 10 — Feature: subtitulado automático (burned-in) — ✅ Completado vía Issue 29
 
-**Descripción:** Subtítulos quemados palabra por palabra via FFmpeg/MoviePy.
+**Descripción:** Subtítulos quemados palabra por palabra via FFmpeg.
 
-**Estado:** `editor_viral.py` declara `"sin subtítulos"` + `backend_fastapi/app/services/engine.py` simulado nunca genera `.srt/.ass`. No hay filter `subtitles`.
+**Implementado Issue 29 (#49):** `backend_fastapi/app/services/ass_generator.py` `generate_hooked_ass` PlayRes 1080x1920 + `services/ffmpeg_service.py` `burn_subtitles` `ass=` + `jobs.py:_render_clip_with_ass_and_hook`. Degradación a `cut` si Whisper/FFmpeg falla, tags `_render`.
 
-**Alcance incluido:** generar `.srt` desde `whisper_words.json` + `ffmpeg -vf subtitles=...:force_style='Fontsize=24,PrimaryColour=&H00FFFFFF,BorderStyle=3'` + referenciar en `Clip.file_path`.
-
-**Criterios pendientes:**
-- [ ] Cada clip incluye subtítulos legibles sincronizados
+**Criterios:**
+- [x] Cada clip incluye subtítulos legibles sincronizados (validado `test_issue_29_pipeline.py` `ffprobe 720x1280` + `burn` 23MB)
 
 **Dependencias:** 2,5.
 
-**Propuesta cerrar:** ver **Issue 19**.
-
 ---
 
-### Issue 11 — Feature: generación de hook inicial — ❌ Pendiente
+### Issue 11 — Feature: generación de hook inicial — ✅ Completado vía Issue 29
 
 **Descripción:** Detectar fragmento mayor energía y anteponer al inicio del clip.
 
-**Estado:** `main.py` genera `hook_texto` y `primer_segundo` pero `validar_clips` y `editor_viral.procesar_clip` no reordenan; no hay scoring hook.
+**Implementado Issue 29 (#49):** `services/hook_service.py` `detect_hooks` LLM + fallback `_mock_hooks` + `ffmpeg_service.build_hook_clip` `hook 3-6s` dentro `clip 15-60s` + `ass_generator.generate_hooked_ass` shift `0→hook_dur` + `hook_dur→hook_dur+clip_dur`.
 
-**Alcance:** lógica en motor reutilizando `audio_analyzer` (intensidad >7) + `score` LLM → identificar 3-5s hook → `ffmpeg concat` hook+clip.
-
-**Criterios pendientes:**
-- [ ] Clip arranca con segmento hook
-- [ ] Hook score > promedio clip
-
-**Dependencias:** 2.
-
-**Propuesta cerrar:** ver **Issue 19**.
+**Criterios:**
+- [x] Clip arranca con segmento hook
+- [x] Hook score > promedio clip (viral_score 80-100)
 
 ---
 
-### Issue 12 — Feature: subida automática a redes sociales — ❌ Pendiente
+### Issue 12 — Feature: subida automática a redes sociales — ✅ Completado vía Issues 27/28
 
-**Descripción:** `POST /clips/{id}/publicar` {plataforma, metadata} → subida async → `publication_status=published` + URL/ID externo.
+**Descripción:** `POST /clips/{id}/publicar` → subida async → `publication_status=published`.
 
-**Estado:** no existe router ni servicio ni botón UI. `ExportDropdown` solo csv/json. `Clip` tiene `social_network` + `publication_status` DDL pero nunca actualizado por endpoint.
+**Implementado Issues 27 (#47) + 28 (#48):** `routers/publish.py` + `services/publish_service.py` + `services/tiktok|youtube|instagram_service.py` + UI `ClipLibraryPage` modal Publish.
 
-**Alcance:** endpoint FastAPI+Express, integración TikTok/IG/YouTube Shorts (o webhook mock), actualización `published_at`, UI modal Publicar.
-
-**Criterios pendientes:**
-- [ ] Endpoint publica y guarda link
-- [ ] UI refleja `publicado`
-
-**Dependencias:** 5,10,11.
-
-**Propuesta cerrar:** ver **Issue 20**.
+**Criterios:**
+- [x] Endpoint publica y guarda link
+- [x] UI refleja `publicado`
 
 ---
 
@@ -263,17 +214,9 @@
 
 **Descripción:** Eliminar secretos hardcodeados y completar `docker-compose.yml`.
 
-**Estado:**
-- JWT/bcrypt, variables entorno, `.gitignore` (`node_modules/`, `.env`, `dist/`, `__pycache__/`, `clips/`) OK.
-- ❌ **Secreto filtrado:** `.env.example` y `.env` contienen `ANTHROPIC_API_KEY=sk-ant-api03-...` real (git history). `JWT_SECRET` débil `changeme`. `requirements.txt` lista `passlib[bcrypt]` no usado, falta `bcrypt` y `python-dotenv`.
-- ❌ **Compose incompleto:** solo `db` + `backend_fastapi`; faltan `backend_express` + `frontend_react` + `frontend_vue` (PROYECTO.md promete `docker compose up` <2min con todo).
-- ❌ No hay `backend_express/Dockerfile`.
+**Estado:** JWT/bcrypt OK. Pendiente rotar `ANTHROPIC_API_KEY` `sk-ant-api03-...` en git history `BFG` y `requirements.txt` `bcrypt==4.1.2`, `backend_express/Dockerfile`. Compose ahora con `db + backend_fastapi + backend_express` OK, frontends `preview` pendiente Issues 31–35.
 
-**Criterios pendientes:**
-- [ ] `git grep -i "sk-ant\|api_key"` vacío (rotar key + filter-repo)
-- [ ] `docker compose up` levanta DB+2 backends+2 frontends
-
-**Acción:** ver **Issue 21**.
+**Acción:** ver Issue 35 (deuda técnica UI).
 
 ---
 
@@ -281,173 +224,231 @@
 
 **Descripción:** Spec OpenAPI en ambos backends.
 
-**Estado:** FastAPI expone `/docs` (Swagger) + `/redoc` + `/openapi.json` auto-generado Pydantic. Todos los routers con tags y response models. Express **no** tiene Swagger (ver Issue 15/22). Para FastAPI criterio cumplido.
+**Estado:** FastAPI `/docs` + `/redoc` + `/openapi.json` auto-generado Pydantic. Express **Issue 30 (#50)** `GET /docs` Swagger UI + `GET /openapi.json` `ClipsAI Express API 1.0.0` `backend_express/src/docs/swagger.ts` + `JSDoc @openapi` en `app.ts:/health`.
 
-**Archivos:** `backend_fastapi/app/main.py` (`title="ClipsAI", version="0.1.0"`), cada `APIRouter` con `summary`.
+**Archivos:** `backend_fastapi/app/main.py` (`ClipsAI 1.0.0`), `backend_express/src/docs/swagger.ts`, `backend_express/src/app.ts` `swaggerUi.serve`.
 
 **Criterios:**
-- [x] FastAPI `/docs` actualizada (incluye jobs/clips/export/metrics/stats)
-- [ ] Express `/api-docs` pendiente
+- [x] FastAPI `/docs` actualizada
+- [x] Express `/docs` con todos los endpoints (`openapi 3.0.0` 18 paths, `title ClipsAI Express API`)
 
 ---
 
-## Nuevos Issues Propuestos (15–22) — Para Seguir Armando Backlog
+## Issues 15–22 — Actualizados (Propuestas → Ejecución)
 
-### Issue 15 — Completar paridad Express (auth + videos + jobs + CRUD clips) — 🆕 Pendiente (prioridad ALTA)
+### Issue 15 — Completar paridad Express (auth + videos + jobs + CRUD clips) — ✅ Completado vía Issue 21/30
 
 **Descripción:** Llevar Express de 35% → 100% paridad.
 
-**Alcance incluido:**
-- `src/routes/auth.ts`: `POST /auth/registro` (bcryptjs hash, SELECT email 409, INSERT, 201), `POST /auth/login` (compare, sign HS256 60min), `GET /auth/me` (middleware), `POST /auth/login/form` (OAuth2 body `username`)
-- `src/routes/videos.ts`: `multer` memoryStorage, valida ext/tamaño 500MB, guarda `UPLOAD_DIR` o `./storage/uploads`, `INSERT videos`, `GET /videos`
-- `src/routes/jobs.ts`: `POST /videos/:id/jobs` (ownership 403, INSERT pending, `setImmediate(_runJob)`), `GET /jobs/:id` (join usuario check 404), `_runJob` port de `services/engine.ts` simulado + normalización `HH:MM:SS→sec` + `INSERT clips`
-- Completar `routes/clips.ts`: `video_id` + `status` filters, `GET/PATCH/DELETE /clips/:id`, `GET /clips/:id/descarga` (FileResponse o dummy)
-- `src/services/engine.ts` port de `run_clip_engine`
-- Validación UUID 422 uniforme, EmailStr con regex, password 8-128
-- `Dockerfile` node:20-alpine + `docker-compose.yml` service `backend_express:3001`
-
-**Alcance excluido:** features nuevas (subtítulos/hook).
-
-**Dependencias:** 1,2,3,4,5
-
-**Criterios:**
-- [ ] `diff` responses FastAPI vs Express idéntico (excepto `created_at` timestamps)
-- [ ] `curl` mismo JWT funciona contra :8000 y :3001
-- [ ] `npm run typecheck` + `docker compose up backend_express` healthy
-
-**Estimación:** 2–3 días.
+**Implementado:** `src/routes/auth.ts` `POST /auth/registro 201/409`, `POST /auth/login`, `GET /auth/me`, `src/routes/videos.ts` `multer` 500MB, `src/routes/jobs.ts` `POST /videos/:id/jobs 202 + setImmediate`, `routes/clips.ts` `video_id/status` + `GET/PATCH/DELETE /clips/:id`.
 
 ---
 
-### Issue 16 — Wirear motor real en FastAPI (`backend_fastapi/app/services/engine.py`) — 🆕 Pendiente (ALTA)
+### Issue 16 — Wirear motor real en FastAPI — ✅ Completado vía Issue 21
 
-**Descripción:** Cambiar `run_clip_engine` de simulado (sleep+dummy) a `engine.py:procesar_video` real o `engine_subprocess`.
-
-**Alcance incluido:**
-- Import `from engine import procesar_video` si `ANTHROPIC_API_KEY` y `ffmpeg` disponibles, sino fallback simulado con flag `engine: simulated|real`
-- Opción `ENGINE_MODE=real|simulated` en `.env`
-- Mover `clips` de `/tmp/clipsai_*` a `storage/clips/{job_id}/` y persistir `file_path` real
-- Manejar `ProcesamientoResultado.error_tipo` → `job.error_message` + `status=failed` + HTTP 422 si `SinClipsValidos`
-- Añadir `ffmpeg`, `librosa`, `faster-whisper`, `torch` al `Dockerfile` (multi-stage o `python:3.11-slim` + apt)
-
-**Alcance excluido:** subtítulos/hook (Issues 19).
-
-**Dependencias:** 2,4
-
-**Criterios:**
-- [ ] `POST /videos/{id}/jobs` con video real genera `.mp4` recortados verificables `ffprobe duration 30-90s`
-- [ ] `JobStatusPage` deja de mostrar `Modo simulado` cuando `engine: real`
-- [ ] Fallo IA (key inválida) → `FAILED` con `error_tipo=ConexionError` visible
+**Implementado Issue 21 (#36):** `backend_fastapi/app/services/engine.py` `from engine import procesar_video` real + `Dockerfile` `ffmpeg` + `storage/clips/{job_id}/` + `ProcesamientoResultado.error_tipo` → `job.error_message`.
 
 ---
 
-### Issue 17 — Rediseño Cyber-Tech Dark Mode unificado — ✅ Completado (Nov 2026)
+### Issue 17 — Rediseño Cyber-Tech Dark Mode unificado — ✅ Completado (Nov 2026) — equiv. #34 Spark Admin
 
-**Descripción:** Transformar UI light (`#F4F6F5`, `border-black`, `bg-white`) en SaaS dark neón.
-
-**Implementado:**
-- `frontend_react/src/styles/spark.css` + `frontend_vue/src/assets/spark.css` unificados: `:root` `--bg-app:#0B0F17`, `--bg-sidebar:#080C14`, `--bg-card:#121824`, `--border-subtle:rgba(255,255,255,0.08)`, `--brand-lime:#B4F105`, `--text-primary:#F1F5F9`, `--text-secondary:#94A3B8`, glows `0 0 20px rgba(180,241,5,0.35)`
-- Sidebar `#080C14 border-r #1f2937`, active `rgba(180,241,5,0.12)` + glow, `sidebar-wrapper overflow:visible` + `body.sidebar-minimized .dropdown-menu-profile {position:fixed left:88px bottom:20px z-9999}` + React `ProfileMenu` JS fixed
-- Navbar `#080C14 backdrop-blur`, btn `bg #B4F105 text #080C14 glow`, search `bg #121824 focus lime`
-- Cards `bg #121824 border subtle shadow-xl`, `clip-card hover border lime/35 + bg #161E2E + lift`, `kpi-card` top-line lime, `score-badge-neon high/mid/low`
-- Dropzone `dropzone-neon dashed lime 0.35 + radial glow`, icon 52px
-- Login dark radial gradients, inputs `bg #0B0F17 focus lime`, `btn-login lime glow`
-- Avatar gradient `from-emerald-500 to-[#B4F105] text-[#080C14]`
-- Dashboard oscuro unificado, charts `bg #121824`, barras `rgba(255,255,255,0.06)`
-- **Builds pasan:** `React tsc --noEmit` + `Vue vue-tsc --noEmit` + `vite build`
-
-**Archivos:** ambos `spark.css`, `Avatar.*`, `ProfileMenu.tsx`, `Sidebar.tsx/.vue`, `clip-card`, `DashboardPage/View`, `UploadPage/View`, `ClipLibraryPage/View`, `SettingsPage/View`, `AuthPage/View`
-
-**Dependencias:** 7,9
-
-**Evidencias:** `npm run build` + capturas dark mode + revisión `git diff spark.css`.
+**Implementado:** `frontend_react/src/styles/spark.css` + `frontend_vue/src/assets/spark.css` `:root` `--bg-app:#0B0F17` `--brand-lime:#B4F105` etc. — **PR #34** Spark Admin.
 
 ---
 
 ### Issue 18 — Refactor Biblioteca filtros a toolbar compacta 1 fila — ✅ Completado (Nov 2026)
 
-**Descripción:** Convertir filtros de bloque alto (`card-spark` + `flex-col gap-4` ~120px) en barra horizontal compacta ~56px.
-
-**Implementado (React `ClipLibraryPage.tsx` + `LibraryPage.tsx`, Vue `ClipLibraryView.vue` + `LibraryView.vue`):**
-- Contenedor `flex flex-col md:flex-row items-center justify-between gap-4 p-3 bg-[#121824] rounded-xl border border-white/10` `min-height:56px`
-- Izquierda `relative flex-1 max-w-md w-full` + `<i class="bi bi-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">` + `input w-full pl-9 pr-4 py-2 bg-[#0B0F17] border-white/10 rounded-lg text-sm placeholder-gray-400 focus:border-[#B4F105]`
-- Derecha `flex items-center gap-3 w-full md:w-auto justify-end` + selects `bg-[#0B0F17] text-xs border-white/10 rounded-lg px-3 py-2 hover:border-white/20` + toggle `py-1 px-1 bg-[#0B0F17] border-white/10 rounded-lg flex gap-1` botones `rounded-md`
-- `hasFilters` movido fuera como `flex gap-2 mb-3` con `text-[#94A3B8]`
-
-**Criterios:**
-- [x] Desktop: 1 fila, ≤56px alto, sin overflow
-- [x] Mobile: stack `flex-col` con búsqueda full-width arriba, filtros abajo `justify-end`
-- [x] `typecheck` OK ambos frontends
+**Implementado:** `ClipLibraryPage.tsx` + `LibraryPage.tsx` + `ClipLibraryView.vue` toolbar `56px` `flex p-3 bg-[#121824]`.
 
 ---
 
-### Issue 19 — Implementar subtítulos burned-in + hook reordering — 🆕 Pendiente (MEDIA)
+### Issue 19 — Implementar subtítulos burned-in + hook reordering — ✅ Completado vía Issue 29
 
-**Descripción:** Cerrar Issues 10 y 11 juntos.
-
-**Alcance incluido:**
-- **Subtítulos:** `whisper_transcriber.transcribir_video` ya genera `whisper_words.json` con `word, start, end`. Crear `generar_srt(words, out.srt)` + `editor_viral._quemar_subtitulos(clip.mp4, srt)` con `ffmpeg -vf subtitles=out.srt:force_style='FontName=Plus Jakarta Sans,FontSize=22,PrimaryColour=&H00FFFFFF,OutlineColour=&H80000000,BorderStyle=3,Outline=2,Shadow=1,Alignment=2,MarginV=36'`.
-- **Hook:** `audio_analyzer` + LLM `primer_segundo` → extraer 3-5s segmento mayor `intensidad` dentro de cada clip → `ffmpeg concat` `hook.mp4 + clip_rest.mp4` con `loudnorm` uniforme. Almacenar `hook_start/end` en `clip.tags`.
-- Persistir `file_path` final con subtítulos quemados.
-
-**Dependencias:** 2,10,11,16
-
-**Criterios:**
-- [ ] `ffprobe` clip final 1080x1920, subtítulos visibles en frames sample
-- [ ] Duración total 30-90s (hook incluido)
-- [ ] A/B sin hook vs con hook demuestra retención esperada (score hook > promedio)
+**Cerrado por Issue 29 (#49):** ver Issues 10/11.
 
 ---
 
-### Issue 20 — Publicación automática a redes + UI — 🆕 Pendiente (MEDIA)
+### Issue 20 — Publicación automática a redes + UI — ✅ Completado vía Issues 27/28
 
-**Descripción:** Cerrar Issue 12.
-
-**Alcance incluido:**
-- **Backend:** `POST /clips/{id}/publicar {platform: tiktok|youtube_shorts|instagram_reels, title?, description?, schedule_at?}` → valida ownership, encola `BackgroundTasks`, mock o real API (si credenciales `TIKTOK_CLIENT_KEY` etc. en `.env`), `UPDATE clips SET social_network, publication_status='published', published_at=NOW()` + guarda `external_url` en `tags`, `GET /clips/{id}/publicacion` status.
-- **Frontend:** `ClipLibraryPage` card footer `Publicar` dropdown (TikTok/YouTube/IG) → modal confirma → `clipService.publish(id, platform)` → badge `published` verde + link externo, toast success/error.
-- **Migrations:** ya existe `social_network` + `publication_status` CHECK, solo usarlos.
-
-**Dependencias:** 5,8,9
-
-**Criterios:**
-- [ ] `curl POST /clips/{id}/publicar` → `published` + `external_url` mock `https://tiktok.com/@...`
-- [ ] UI badge cambia `draft → published` sin reload
+**Cerrado por Issues 27 (#47) + 28 (#48):** ver Issue 12.
 
 ---
 
-### Issue 21 — Seguridad, limpieza y compose completo — 🆕 Pendiente (ALTA)
+### Issue 21 — Cableado del Pipeline Backend, Engine de Renderizado y Routers FastAPI — ✅ Completado (#36)
 
-**Descripción:** Cerrar Issue 13 definitivamente.
+**PR:** #36 — **Issue #21**
 
-**Alcance incluido:**
-- Rotar `ANTHROPIC_API_KEY` (revocar `sk-ant-api03-...`), `git filter-repo` o `BFG` para purgar historia, `.env.example` con placeholders `ANTHROPIC_API_KEY=changeme`, añadir `.env` a `.gitignore` ya existente verificado `git check-ignore -v`.
-- `backend_fastapi/requirements.txt`: añadir `bcrypt==4.1.2`, `python-dotenv==1.0.1`, quitar `passlib[bcrypt]` o usarlo; pin de versiones.
-- `backend_express/Dockerfile` `node:20-alpine` + `npm ci --production` + `CMD node dist/index.js`.
-- `docker-compose.yml` completo: `db` + `backend_fastapi:8000` + `backend_express:3001` + `frontend_react:3000` (build `vite preview`) + `frontend_vue:3002` + `depends_on healthy`, `env_file .env`, networks `clipsai-net`.
-- `scripts/verify-compose.sh`: `compose up -d --build` + `curl /health` 3 servicios + `psql \dt`.
+**Descripción:** Cerrar Issue 13 parcialmente conectando engine real.
 
-**Criterios:**
-- [ ] `git grep -E "sk-ant|sk-proj|JWT_SECRET.*changeme"` solo en `.env.example` placeholders
-- [ ] `docker compose up -d` levanta 5 servicios <2min, `docker compose ps` all healthy
+**Alcance:** `backend_fastapi/app/services/engine.py` real, `routers/jobs.py` `jobs._run_job` con `storage/clips`, `Dockerfile` `ffmpeg`, `ASSESS` `ENGINE_MODE=real`.
+
+**Evidencias:** `ffprobe duration 30-90s`, `JobStatusPage` sin `Modo simulado`, `POST /videos/{id}/jobs` genera `.mp4` real.
 
 ---
 
-### Issue 22 — Documentación, tests y observabilidad — 🆕 Propuesta (BAJA)
+### Issue 22 — Esquema de Base de Datos para Cuentas Sociales — ✅ Completado (#42)
 
-**Descripción:** Cerrar Issue 14 para Express + añadir tests y logs.
+**PR:** #42 — **Issue #22**
 
-**Alcance incluido:**
-- **Swagger Express:** `swagger-jsdoc` + `swagger-ui-express` en `backend_express`, `GET /docs` + `/api-docs` con spec OpenAPI 3.0 reflejando mismos schemas que FastAPI (usuario, video, job, clip, metrics).
-- **Tests:** `backend_fastapi/tests/test_auth.py` (pytest), `frontend_react/src/__tests__/useJobPolling.test.tsx` (vitest), CI `npm run typecheck` + `pytest` en GitHub Actions.
-- **Logs:** `structlog` FastAPI + `pino` Express, `GET /health` detalla `uptime, db_latency`.
-- **README:** ya completado (ver `README.md` Nov 2026) — mantener sincronizado con `ISSUES.md`.
+**Descripción:** Tabla `social_accounts` / `user_social_accounts` para OAuth.
 
-**Dependencias:** 6,13,15
+**Archivos:** `init-scripts/02-social-accounts.sql` + `backend_fastapi/app/models/social_account.py` + `ALTER TABLE social_accounts ADD COLUMN account_name`.
+
+**Evidencias:** `psql \d social_accounts` FK `user_id → usuarios` CASCADE.
+
+---
+
+## Issues 23–30 — Completadas (Cerradas en GitHub)
+
+### Issue 23 — Configuración de Túnel HTTPS Local (ngrok & Callbacks) — ✅ Completado (#43)
+
+**PR:** #43 — **Issue #23**
+
+**Descripción:** Exponer `backend_fastapi:8000` y `backend_express:3001` vía ngrok/Cloudflare Tunnel `https://api.clipsai.xyz` para callbacks OAuth.
+
+**Archivos:** `docker-compose.yml` `ngrok` service `backend_fastapi:8000 --domain=api.clipsai.xyz`, `backend_fastapi/app/config.py` `PUBLIC_BACKEND_URL`.
+
+**Evidencias:** `curl https://api.clipsai.xyz/health` `{"status":"ok"}` + `ngrok inspect http://localhost:4040`.
+
+---
+
+### Issue 24 — Flujo OAuth 2.0: Conector de YouTube (Google Data API v3) — ✅ Completado (#44)
+
+**PR:** #44 — **Issue #24**
+
+**Archivos:** `backend_fastapi/app/routers/social_auth.py` `GET /auth/social/youtube` + `/callback`, `services/youtube_service.py`, `GOOGLE_CLIENT_ID/SECRET`.
+
+**Evidencias:** `GET /auth/social/youtube` redirect Google + token guardado en `social_accounts` + `POST /clips/{id}/publicar youtube` `PUBLISHED`.
+
+---
+
+### Issue 25 — Flujo OAuth 2.0: Conector de Meta (Instagram Graph API) — ✅ Completado (#45)
+
+**PR:** #45 — **Issue #25**
+
+**Archivos:** `backend_fastapi/app/routers/social_auth.py` `instagram`, `services/instagram_service.py` `graph.facebook.com/v18.0/{ig_user_id}/media` + `media_publish`.
+
+**Evidencias:** Instagram Business `19.0` container polling `FINISHED` → `https://www.instagram.com/reel/{id}`.
+
+---
+
+### Issue 26 — Flujo OAuth 2.0: Conector de TikTok (Content Posting API) — ✅ Completado (#46)
+
+**PR:** #46 — **Issue #26**
+
+**Archivos:** `backend_fastapi/app/services/tiktok_service.py` `open.tiktokapis.com/v2/post/publish/video/init` `FILE_UPLOAD` `PUT upload_url`.
+
+**Evidencias:** `publish_id` + `upload_url` + `PUT` `200` → `https://www.tiktok.com/@{user}/video/{publish_id}`.
+
+---
+
+### Issue 27 — Servicio de Publicación Real en APIs de Redes Sociales — ✅ Completado (#47)
+
+**PR:** #47 — **Issue #27**
+
+**Archivos:** `backend_fastapi/app/services/publish_service.py` `publish_clip_task` + `TIKTOK_CLIENT_KEY/SECRET` `FACEBOOK_CLIENT_ID/SECRET` + `BackgroundTasks`.
+
+**Evidencias:** `POST /clips/{id}/publicar {platform,caption}` `202 PUBLISHING` → `PUBLISHED` + `social_post_url`.
+
+---
+
+### Issue 28 — Vista de Gestión de Integraciones (/settings/integrations) — ✅ Completado (#48)
+
+**PR:** #48 — **Issue #28**
+
+**Archivos:** `frontend_react/src/pages/SettingsPage.tsx` + `frontend_vue/src/views/SettingsView.vue` `/settings/integrations` OAuth connect/disconnect + `Avatar 56px` + `ProfileMenu`.
+
+**Evidencias:** `GET /settings/integrations` lista YouTube/Instagram/TikTok con badge `Conectado` + `Ver post`.
+
+---
+
+### Issue 29 — Integración de Subtítulos ASS y Hook Teaser en Pipeline FFmpeg — ✅ Completado (#49)
+
+**PR:** #49 — **Issue #29**
+
+**Descripción:** Conectar `ass_generator` y `hook_service` al `jobs._run_job`.
+
+**Archivos:** `backend_fastapi/app/routers/jobs.py` `_render_clip_with_ass_and_hook` + `services/ass_generator.py` `generate_hooked_ass` + `services/ffmpeg_service.py` `burn_subtitles/build_hook_clip/cut_segment` + `services/hook_service.py` `detect_hooks` + `services/whisper_service.py` + `Dockerfile` `ffmpeg`.
+
+**Evidencias:** `test_issue_29_pipeline.py` 12/12 PASS `ffmpeg 8.1` + `ASS PlayRes 1080x1920` shift `hook 0→5s` + `render hook+ass` 23MB `ffprobe 720x1280 9:16` + fallback `tags["_render_error"]` + `COMPLETED`.
+
+---
+
+### Issue 30 — Swagger / OpenAPI 3.0 para Backend Express — ✅ Completado (#50)
+
+**PR:** #50 — **Issue #30**
+
+**Archivos:** `backend_express/src/docs/swagger.ts` `openapi 3.0.0` `title ClipsAI Express API 1.0.0` `apis: ['./src/routes/*.ts','./src/controllers/*.ts']` + `backend_express/src/app.ts` `app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec))` + `GET /openapi.json` + `JSDoc @openapi` en `app.ts:/health`.
+
+**Dependencias:** `swagger-ui-express@5.0.1` `swagger-jsdoc@6.3.0` + `@types`.
+
+**Evidencias:** `npm run typecheck` `EXIT:0`, `curl /health 200`, `curl /docs 200 swagger-ui`, `curl /openapi.json` `14554 bytes` `paths 18`.
+
+---
+
+## Issues 31–35 — Pendientes (Abiertas en GitHub #51–#55)
+
+### Issue 31 — Eventos en Tiempo Real (SSE) para Estado de Publicación — ⏳ Pendiente (#51)
+
+**Descripción:** Notificar al frontend sin polling 2s: `GET /clips/{id}/stream` SSE o WebSocket para `PUBLISHING→PUBLISHED`.
+
+**Alcance:** `backend_fastapi/app/routers/stream.py` SSE + `backend_express/src/routes/stream.ts` + `frontend_react/src/hooks/usePublishPolling.ts` 1s + `frontend_vue` composable.
+
+**Dependencias:** 27, 28.
 
 **Criterios:**
-- [ ] `http://localhost:3001/docs` Swagger Express con todos los endpoints
-- [ ] `pytest -q` + `npm run typecheck` verde en CI
+- [ ] `curl /clips/{id}/stream` SSE `data: {"status":"PUBLISHED"}`
+- [ ] UI badge cambia `PUBLISHING→PUBLISHED` sin reload + link `social_post_url`
+
+---
+
+### Issue 32 — Landing Page Pública e Index (/) — ⏳ Pendiente (#52)
+
+**Descripción:** Crear `/` pública SEO sin auth con hero, features, pricing, CTA `→ /auth`.
+
+**Archivos:** `frontend_react/src/pages/LandingPage.tsx` + `frontend_vue/src/views/LandingView.vue` + `router/index.ts` `/` public.
+
+**Criterios:**
+- [ ] `GET /` sin auth renderiza hero + features + CTA
+- [ ] `npm run build` + `lighthouse` SEO ≥90
+
+---
+
+### Issue 33 — Páginas Legales para Validación de APIs (/privacy, /terms, /data-deletion) — ⏳ Pendiente (#53)
+
+**Descripción:** Requerido para validación Meta/Google/TikTok: privacy policy, términos y data deletion.
+
+**Archivos:** `frontend_react/src/pages/PrivacyPage.tsx` `/privacy`, `TermsPage.tsx` `/terms`, `DataDeletionPage.tsx` `/data-deletion` (Vue idem).
+
+**Criterios:**
+- [ ] `GET /privacy` `200` con política + contacto
+- [ ] `GET /terms` `200` + `GET /data-deletion` instrucciones borrado
+- [ ] Enlace en footer `Layout.tsx` + `Layout.vue`
+
+---
+
+### Issue 34 — Modo "Video de Muestra" en Pantalla de Carga (/upload) — ⏳ Pendiente (#54)
+
+**Descripción:** Permitir probar el flujo sin subir video propio: botón `Probar con video de muestra` usa `river.mp4` + transcripción fixture.
+
+**Archivos:** `frontend_react/src/pages/UploadPage.tsx` `sample_test.mp4` + `backend_fastapi/app/routers/videos.py` `POST /videos/sample`.
+
+**Criterios:**
+- [ ] `POST /videos/sample` `201` sin `multipart` + `POST /videos/{id}/jobs 202` → clips visibles
+- [ ] UI botón `Video de muestra` + badge `Muestra`
+
+---
+
+### Issue 35 — Refactorización y Limpieza de Deuda Técnica en UI — ⏳ Pendiente (#55)
+
+**Descripción:** Eliminar duplicados `LibraryPage==ClipLibraryPage` (4 ficheros), `axios` muerto en React, `useUploadAndProcess` muerto, `passlib[bcrypt]` muerto, `recharts` vs CSS barras, `any` en `Clip.tags`.
+
+**Archivos:** `frontend_react/src/pages/LibraryPage.tsx` (eliminar), `frontend_vue/src/views/LibraryView.vue` (eliminar), `backend_fastapi/requirements.txt`, `backend_fastapi/app/models/clip.py` `tags: dict`.
+
+**Criterios:**
+- [ ] `git grep -r "LibraryPage"` solo 2 archivos (no 4)
+- [ ] `npm run typecheck` + `npm run build` ambos frontends verde
+- [ ] `pytest -q` + `tsc --noEmit` verde
 
 ---
 
@@ -472,7 +473,7 @@
 
 **Ideas para seguir armando backlog (a partir del README §3):**
 - Paginación cursor vs offset en `/clips` para 10k+ clips
-- Webhooks `POST /webhooks/job-completed` para notificar frontend via SSE/WebSocket en vez de polling 2s
+- Webhooks `POST /webhooks/job-completed` para notificar frontend via SSE/WebSocket en vez de polling 2s → Issue 31
 - Rate limiting `express-rate-limit` + `slowapi` en FastAPI
 - Upload directo a S3/MinIO en vez de `UPLOAD_DIR` local
 - Editor timeline drag-drop para reordenar clips antes de export
@@ -486,12 +487,13 @@
 
 ```
 1 (DB) ─┬─→ 3 (Auth) ─→ 4 (Videos/Jobs) ─→ 5 (Clips) ─┬─→ 6 (Express)
-        │                    │                        ├─→ 8 (React clips)
+        │                    │                        ├─→ 8 (React clips) ─→ 28 (Integraciones)
         └─→ 2 (Engine) ──────┘                        └─→ 7 (React upload) ─→ 9 (Vue)
                                                       10 (subs) ─┐
-                                                      11 (hook) ─┤→ 12 (publicar) ─→ 13 (seguridad) ─→ 14 (docs)
+                                                      11 (hook) ─┤→ 21 (pipeline) ─→ 29 (ASS+Hook) ─→ 27 (publish real)
                                                         17 (dark) ─→ 18 (toolbar) ─┐
-                                                        15 (express full) ─→ 16 (wire engine) ─→ 19 (subs+hook) ─→ 20 (publish UI) ─→ 21 (compose) ─→ 22 (swagger+tests)
+                                                        22 (DB social) ─→ 23 (ngrok) ─→ 24 (YouTube) ─→ 25 (Instagram) ─→ 26 (TikTok) ─→ 27 ─→ 28
+                                                        30 (Swagger Express) ─→ 31 (SSE) ─→ 32 (Landing) ─→ 33 (Legales) ─→ 34 (Muestra) ─→ 35 (Deuda UI)
 ```
 
-**Rama activa sugerida para próximos:** `feat/frontend-flujo-entrada` o `feat/compose-completo`.
+**Rama activa sugerida para próximos:** `feat/sse-publish` (Issue 31) o `feat/landing-publica` (Issue 32).

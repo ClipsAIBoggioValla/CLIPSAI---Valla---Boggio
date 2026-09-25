@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { jobService, videoService } from '@/api/services'
 import { ApiError } from '@/types/api'
@@ -10,6 +10,14 @@ const transcriptFile = ref<File | null>(null)
 type UploadState = 'idle' | 'uploading' | 'creating_job'
 const status = ref<UploadState>('idle')
 const error = ref<string | null>(null)
+const activeJobId = ref<string | null>(null)
+
+onMounted(() => {
+  try {
+    const id = localStorage.getItem('clipsai_active_job_id')
+    if (id) activeJobId.value = id
+  } catch {}
+})
 
 function onVideoChange(e: Event) {
   const t = e.target as HTMLInputElement
@@ -21,17 +29,20 @@ function onTranscriptChange(e: Event) {
 }
 
 async function handleSubmit() {
-  if (!videoFile.value || !transcriptFile.value) {
-    error.value = 'Selecciona ambos archivos: video y transcripción.'
+  if (!videoFile.value) {
+    error.value = 'Selecciona el archivo de video.'
     return
   }
   error.value = null
   try {
     status.value = 'uploading'
-    const video = await videoService.upload(videoFile.value, transcriptFile.value)
+    const video = await videoService.upload(videoFile.value, transcriptFile.value ?? null)
     status.value = 'creating_job'
     const job = await jobService.createJob(video.id)
     const jobId = job.job_id ?? job.id
+    try {
+      localStorage.setItem('clipsai_active_job_id', jobId)
+    } catch {}
     router.push(`/jobs/${jobId}`)
   } catch (err: unknown) {
     status.value = 'idle'
@@ -42,6 +53,10 @@ async function handleSubmit() {
 
 <template>
   <div class="max-w-3xl mx-auto">
+    <div v-if="activeJobId" class="rounded-xl border border-[rgba(180,241,5,0.22)] bg-[rgba(180,241,5,0.08)] px-4 py-3 flex items-center justify-between gap-3 mb-6">
+      <span class="text-sm font-bold text-[#B4F105] flex items-center gap-2"><span class="h-2 w-2 rounded-full bg-[#B4F105] animate-pulse" /> Procesamiento activo</span>
+      <RouterLink :to="`/jobs/${activeJobId}`" class="btn-custom btn-custom-primary btn-custom-sm">Ver progreso {{ activeJobId.slice(0,8) }} →</RouterLink>
+    </div>
     <div class="page-header" style="margin-bottom: 2rem">
       <div>
         <div class="flex flex-wrap items-center gap-3 mb-4">
@@ -71,7 +86,7 @@ async function handleSubmit() {
       </div>
 
       <div>
-        <label class="form-label-custom">Archivo de Transcripción <span class="text-[#B4F105]">*</span></label>
+        <label class="form-label-custom">Archivo de Transcripción <span class="text-[#94A3B8] font-normal">(opcional)</span></label>
         <label :class="['dropzone-neon flex flex-col items-center justify-center rounded-xl p-6 sm:p-8 cursor-pointer', transcriptFile ? 'has-file' : '']">
           <span class="dropzone-icon-neon mb-3"><i class="bi bi-file-earmark-text" /></span>
           <span class="text-sm font-bold" style="color: #F1F5F9">{{ transcriptFile ? transcriptFile.name : 'Arrastra o selecciona tu transcripción' }}</span>
@@ -81,7 +96,7 @@ async function handleSubmit() {
         </label>
       </div>
 
-      <button type="submit" :disabled="status !== 'idle' || !videoFile || !transcriptFile" class="btn-custom btn-custom-primary w-full justify-center btn-custom-lg shadow-[0_0_28px_rgba(180,241,5,0.35)]">
+      <button type="submit" :disabled="status !== 'idle' || !videoFile" class="btn-custom btn-custom-primary w-full justify-center btn-custom-lg shadow-[0_0_28px_rgba(180,241,5,0.35)]">
         <span v-if="status !== 'idle'" class="h-4 w-4 animate-spin rounded-full border-2 border-[#080C14]/30 border-t-[#080C14]" />
         <i v-else class="bi bi-lightning-charge-fill" />
         {{ status === 'uploading' ? 'Subiendo archivos...' : status === 'creating_job' ? 'Iniciando procesamiento...' : 'Subir y procesar' }}

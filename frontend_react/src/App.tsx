@@ -10,16 +10,21 @@ import IntegrationsSettings from '@/pages/settings/IntegrationsSettings'
 import Layout from '@/components/Layout'
 import { useAuth } from '@/context/AuthContext'
 
+const ALLOW_ANONYMOUS_LAYOUT =
+  ((import.meta as unknown as { env?: Record<string, string> })?.env?.VITE_ALLOW_ANONYMOUS) === 'true'
+
 function ProtectedLayout() {
-  const { isAuthenticated, isLoading } = useAuth()
+  const { user, isLoading } = useAuth()
   if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bs-body-bg)' }}>
-        <span className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--brand-forest-medium)]/30 border-t-[var(--brand-forest-medium)]" />
-      </div>
-    )
+    return <div className="p-4 text-center">Cargando aplicación...</div>
   }
-  if (!isAuthenticated) return <Navigate to="/auth" replace />
+  if (!user) {
+    if (ALLOW_ANONYMOUS_LAYOUT) return <Layout />
+    // Fallback garantizado: no retornar null ni redirigir a ruta no definida.
+    // Si backend no responde (timeout 3s) y user queda null, redirigir limpiamente a /auth (ruta definida)
+    // evita pantalla en blanco; alternativa local sería renderizar <UploadPage /> dentro de <Layout />
+    return <Navigate to="/auth" replace />
+  }
   return <Layout />
 }
 
