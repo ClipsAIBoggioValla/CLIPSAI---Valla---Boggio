@@ -23,28 +23,65 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function init() {
     isLoading.value = true
-    let stored: string | null = null
+    // Timeout de rescate 1000ms — forzar isLoading a false si no cambia
+    const rescue = window.setTimeout(() => {
+      if (isLoading.value) {
+        console.warn('[InitAuth] Timeout de seguridad forzado a false')
+        isLoading.value = false
+      }
+    }, 1000)
     try {
-      stored = localStorage.getItem(TOKEN_KEY)
-    } catch {
-      stored = null
-    }
-    if (!stored) {
-      isLoading.value = false
-      return
-    }
+      console.log('[InitAuth] Iniciando verificación de sesión...')
+      let stored: string | null = null
+      try {
+        stored =
+          localStorage.getItem(TOKEN_KEY) ||
+          localStorage.getItem('token') ||
+          localStorage.getItem('access_token')
+      } catch (e) {
+        console.error('[InitAuth] Error al leer localStorage:', e)
+        stored = null
+      }
+      if (!stored || stored === 'null' || stored === 'undefined' || stored.trim() === '') {
+        console.log('[InitAuth] No hay token en localStorage, saltando verificación.')
+        try {
+          localStorage.removeItem(TOKEN_KEY)
+          localStorage.removeItem('token')
+          localStorage.removeItem('access_token')
+        } catch {}
+        isLoading.value = false
+        window.clearTimeout(rescue)
+        return
+      }
     token.value = stored
     try {
-      const me = await userService.getMe()
-      user.value = me as unknown as AuthUser
-    } catch {
+      const me = (await Promise.race([
+        userService
+          .getMe()
+          .then((m) => m as unknown as AuthUser)
+          .catch(async () => await authService.me()),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Timeout 2.5s: /users/me no responde')), 2500),
+        ),
+      ])) as AuthUser
+      user.value = me
+    } catch (err) {
+      console.warn('[InitAuth] Timeout 2.5s o error, asumiendo sesión anónima/invitado', err)
+      // No limpiar token para permitir reintento silencioso, solo user null para mostrar UI
+      user.value = null
+    }
+    } catch (err) {
+      console.error('[InitAuth] Error durante inicialización:', err)
       try {
-        user.value = await authService.me()
-      } catch {
-        persist(null)
-        user.value = null
-      }
+        localStorage.removeItem(TOKEN_KEY)
+        localStorage.removeItem('token')
+        localStorage.removeItem('access_token')
+      } catch {}
+      persist(null)
+      user.value = null
     } finally {
+      console.log('[InitAuth] Finalizando estado de carga.')
+      window.clearTimeout(rescue)
       isLoading.value = false
     }
   }
