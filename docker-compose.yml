@@ -12,6 +12,13 @@
 #   - frontend_vue      : Vue + Vite    :5173  (hot-reload)
 #   - ngrok             : túnel a backend_fastapi:8000 --domain decorador
 #
+# Servicios:
+#   db                    -> PostgreSQL
+#   backend_fastapi     -> FastAPI (Issue 3)
+#   backend_express     -> Express (Issue 15)
+#   frontend_react      -> React (Issue 7)
+#   frontend_vue        -> Vue (Issue 9)
+#
 # Uso:
 #   cp .env.example .env  # completar JWT_SECRET, GOOGLE_*, NGROK_AUTHTOKEN
 #   docker compose up -d --build
@@ -92,6 +99,9 @@ services:
     networks:
       - clipsai-net
 
+  # ----------------------------------------------------------------------------
+  # Backend Express (Issue 15 — paridad completa con FastAPI)
+  # ----------------------------------------------------------------------------
   backend_express:
     build:
       context: ./backend_express
