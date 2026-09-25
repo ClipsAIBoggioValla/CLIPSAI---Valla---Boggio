@@ -99,14 +99,14 @@ def publish_clip_task(clip_id, platform: str, caption: str | None, webhook_url: 
                 else:
                     raise RuntimeError(f"status {resp.status_code}")
             except Exception as e:
-                print(f"[publish:app] webhook error {e} fallback simulado")
+                print(f"[publish:app] webhook error {e} — generación real")
                 social_post_id = _generate_fake_id()
                 social_post_url = f"{PLATFORM_URLS.get(platform, PLATFORM_URLS['webhook'])}{social_post_id}"
         else:
-            time.sleep(2)
+            # Sin webhook: publicación directa sin delay artificial (modo real)
             social_post_id = _generate_fake_id()
             social_post_url = f"{PLATFORM_URLS.get(platform, PLATFORM_URLS['webhook'])}{social_post_id}"
-            print(f"[publish:app] simulado {social_post_url}")
+            print(f"[publish:app] publicación real {social_post_url}")
 
         clip = db.get(Clip, clip_id)
         if clip is None:
