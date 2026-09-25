@@ -13,8 +13,24 @@ from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
-for _p in (Path(__file__).resolve().parents[3] / ".env", Path(__file__).resolve().parents[2] / ".env"):
-    load_dotenv(dotenv_path=_p, override=False)
+# Carga .env segura sin parents[3] fijo que causa IndexError en /app
+_cur_hook = Path(__file__).resolve()
+_env_candidates: list[Path] = []
+for _idx in (3, 2, 1, 0):
+    if _idx < len(_cur_hook.parents):
+        _env_candidates.append(_cur_hook.parents[_idx] / ".env")
+for _p in _cur_hook.parents:
+    try:
+        cand = _p / ".env"
+        if cand not in _env_candidates and cand.exists():
+            _env_candidates.append(cand)
+    except Exception:
+        continue
+for _p in _env_candidates:
+    try:
+        load_dotenv(dotenv_path=_p, override=False)
+    except Exception:
+        continue
 
 
 class HookSegment(TypedDict):

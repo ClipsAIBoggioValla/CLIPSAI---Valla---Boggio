@@ -73,23 +73,30 @@ async def upload_video(
     db: DbSession,
     current_user: CurrentUser,
     video: UploadFile = File(..., description="Archivo de video"),
-    transcription: UploadFile = File(..., description="Archivo de transcripcion"),
+    transcription: UploadFile | None = File(None, description="Archivo de transcripcion (opcional)"),
 ) -> Video:
-    if video is None or transcription is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Se requieren ambos archivos: video y transcription")
+    if video is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Se requiere archivo de video")
 
     video_ext = _validate_extension(video.filename, ALLOWED_VIDEO_EXTS, "video")
-    transcript_ext = _validate_extension(transcription.filename, ALLOWED_TRANSCRIPT_EXTS, "transcription")
+    transcript_ext: str | None = None
+    if transcription is not None:
+        transcript_ext = _validate_extension(transcription.filename, ALLOWED_TRANSCRIPT_EXTS, "transcription")
 
     upload_dir = _get_upload_dir()
     video_dest = upload_dir / f"{uuid.uuid4().hex}{video_ext}"
-    transcript_dest = upload_dir / f"{uuid.uuid4().hex}{transcript_ext}"
+    transcript_dest: Path | None = None
+    if transcription is not None and transcript_ext is not None:
+        transcript_dest = upload_dir / f"{uuid.uuid4().hex}{transcript_ext}"
 
     try:
         await _save_upload_file(video, video_dest)
-        await _save_upload_file(transcription, transcript_dest)
+        if transcription is not None and transcript_dest is not None:
+            await _save_upload_file(transcription, transcript_dest)
     except HTTPException:
-        for p in (video_dest, transcript_dest):
+        for p in (video_dest, transcript_dest) if transcript_dest else (video_dest,):
+            if p is None:
+                continue
             try:
                 if p.exists():
                     p.unlink()
@@ -97,7 +104,9 @@ async def upload_video(
                 pass
         raise
     except Exception as exc:
-        for p in (video_dest, transcript_dest):
+        for p in (video_dest, transcript_dest) if transcript_dest else (video_dest,):
+            if p is None:
+                continue
             try:
                 if p.exists():
                     p.unlink()
@@ -109,21 +118,24 @@ async def upload_video(
             await video.close()
         except Exception:
             pass
-        try:
-            await transcription.close()
-        except Exception:
-            pass
+        if transcription is not None:
+            try:
+                await transcription.close()
+            except Exception:
+                pass
 
-    try:
-        transcript_text = transcript_dest.read_text(encoding="utf-8")[:50000]
-    except Exception:
-        transcript_text = None
+    transcript_text: str | None = None
+    if transcript_dest is not None:
+        try:
+            transcript_text = transcript_dest.read_text(encoding="utf-8")[:50000]
+        except Exception:
+            transcript_text = None
 
     entity = Video(
         user_id=current_user.id,
         filename=video.filename or video_dest.name,
         filepath=str(video_dest),
-        transcription_filepath=str(transcript_dest),
+        transcription_filepath=str(transcript_dest) if transcript_dest else None,
         transcript=transcript_text,
     )
     db.add(entity)

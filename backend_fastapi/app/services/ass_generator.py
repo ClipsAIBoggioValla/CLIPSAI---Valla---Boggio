@@ -162,10 +162,10 @@ def generate_hooked_ass(
     title: str = "clipsai",
 ) -> str:
     hook_dur = hook_end - hook_start
-    if not (3.0 <= hook_dur <= 6.0):
-        raise ValueError(f"Hook duracion {hook_dur:.1f}s debe ser 3-6s")
-    if not (clip_start <= hook_start < hook_end <= clip_end):
-        raise ValueError(f"Hook [{hook_start},{hook_end}] fuera de clip [{clip_start},{clip_end}]")
+    if not (2.5 < hook_dur < 5.5):
+        raise ValueError(f"Hook duracion {hook_dur:.3f}s debe estar estrictamente entre 2.5 y 5.5s")
+    if not (0.0 <= hook_start < hook_end):
+        raise ValueError(f"Rango de hook invalido: [{hook_start},{hook_end}]")
     hook_segs: list[SubtitleSegment] = []
     clip_segs: list[SubtitleSegment] = []
     for s in segments:
@@ -205,6 +205,10 @@ def build_hooked_ass_content(
     title: str = "clipsai",
 ) -> str:
     hook_dur = hook_end - hook_start
+    if not (2.5 < hook_dur < 5.5):
+        raise ValueError(f"Hook duracion {hook_dur:.3f}s debe estar estrictamente entre 2.5 y 5.5s")
+    if not (0.0 <= hook_start < hook_end):
+        raise ValueError(f"Rango de hook invalido: [{hook_start},{hook_end}]")
     hook_segs: list[SubtitleSegment] = []
     clip_segs: list[SubtitleSegment] = []
     for s in segments:

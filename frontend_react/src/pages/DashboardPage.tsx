@@ -37,6 +37,14 @@ export default function DashboardPage() {
   const [metrics, setMetrics] = useState<MetricsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [activeJobId, setActiveJobId] = useState<string | null>(null)
+
+  useEffect(() => {
+    try {
+      const id = localStorage.getItem('clipsai_active_job_id')
+      if (id) setActiveJobId(id)
+    } catch {}
+  }, [])
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -57,6 +65,13 @@ export default function DashboardPage() {
   useEffect(() => {
     fetchAll()
   }, [fetchAll])
+
+  // Timeout de seguridad 5s para evitar spinner infinito si la petición inicial se cuelga
+  useEffect(() => {
+    if (!loading) return
+    const t = window.setTimeout(() => setLoading(false), 5000)
+    return () => window.clearTimeout(t)
+  }, [loading])
 
   const scoreChartData = stats?.score_distribution.map((d) => ({
     name: d.label,
@@ -99,6 +114,16 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-[#0B0F17] text-white">
       <div className="max-w-6xl mx-auto px-4 py-6 sm:py-8">
+        {activeJobId && (
+          <div className="rounded-xl border border-[rgba(180,241,5,0.22)] bg-[rgba(180,241,5,0.08)] px-4 py-3 flex items-center justify-between gap-3 mb-6">
+            <div className="flex items-center gap-2 text-sm font-bold text-[#B4F105]">
+              <span className="h-2 w-2 rounded-full bg-[#B4F105] animate-pulse" /> Procesamiento activo
+            </div>
+            <Link to={`/jobs/${activeJobId}`} className="btn-custom btn-custom-primary btn-custom-sm">
+              Ver progreso → <i className="bi bi-arrow-right" />
+            </Link>
+          </div>
+        )}
         <div className="mb-6 sm:mb-8">
           <div className="inline-flex items-center gap-2 mb-3 px-3 py-1 rounded-full text-xs font-bold bg-[rgba(180,241,5,0.10)] text-[#B4F105] border border-[rgba(180,241,5,0.22)]">
             <span className="h-1.5 w-1.5 rounded-full bg-[#B4F105] shadow-[0_0_6px_rgba(180,241,5,0.6)] animate-pulse" /> LIVE
