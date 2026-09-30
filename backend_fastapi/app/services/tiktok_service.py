@@ -18,13 +18,9 @@ from ..models import SocialAccount
 
 logger = logging.getLogger(__name__)
 
-# === AUDITORÍA TIKTOK API v2 - ESTRATEGIA FILE_UPLOAD ===
-# Servicio utiliza API v2 de TikTok: https://open.tiktokapis.com/v2/post/publish/video/init/
-# Estrategia FILE_UPLOAD con video_size/chunk_size/total_chunk_count=1 y PUT a upload_url
-# Fallback MP4: sample_test.mp4 en /app/storage si archivo físico no existe (creado via FFmpeg/descarga)
-# Credenciales consultadas en user_social_accounts WHERE platform='tiktok' vía _get_social_account()
-# Ver publish_service.py:_publish_tiktok y publish_clip_task para flujo completo
-# Scopes requeridos: user.info.basic,video.upload,video.publish
+# === TikTok API v2 - FILE_UPLOAD 100% real ===
+# Servicio utiliza API v2: https://open.tiktokapis.com/v2/post/publish/video/init/
+# Requiere archivo físico real en storage_path (sin fallback de prueba)
 
 TIKTOK_AUTH_URL = "https://www.tiktok.com/v2/auth/authorize/"
 TIKTOK_TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/"

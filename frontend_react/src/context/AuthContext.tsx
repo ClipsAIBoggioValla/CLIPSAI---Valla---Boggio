@@ -48,31 +48,76 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (initialized.current) return
     initialized.current = true
-    let stored: string | null = null
-    try {
-      stored = localStorage.getItem(TOKEN_KEY)
-    } catch {
-      stored = null
+    const initAuth = async () => {
+      try {
+        console.log('[InitAuth] Iniciando verificación de sesión...')
+        let token: string | null = null
+        try {
+          token =
+            localStorage.getItem(TOKEN_KEY) ||
+            localStorage.getItem('token') ||
+            localStorage.getItem('access_token')
+        } catch (e) {
+          console.error('[InitAuth] Error al leer localStorage:', e)
+          token = null
+        }
+        // SI NO HAY TOKEN: Desactivar loading inmediatamente y salir
+        if (!token || token === 'null' || token === 'undefined' || token.trim() === '') {
+          console.log('[InitAuth] No hay token en localStorage, saltando verificación.')
+          try {
+            localStorage.removeItem(TOKEN_KEY)
+            localStorage.removeItem('token')
+            localStorage.removeItem('access_token')
+          } catch {}
+          setIsLoading(false)
+          return
+        }
+        setToken(token)
+        // SI HAY TOKEN: Intentar validar con cancelación rápida 2.5s
+        try {
+          const me = (await Promise.race([
+            userService
+              .getMe()
+              .then((m) => m as unknown as AuthUser)
+              .catch(async () => await authService.me()),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('Timeout 2.5s: /users/me no responde')), 2500),
+            ),
+          ])) as AuthUser
+          setUser(me)
+        } catch (e) {
+          console.warn('[InitAuth] Timeout 2.5s o error, asumiendo sesión anónima/invitado', e)
+          setUser(null)
+          // No limpiar token para permitir reintento silencioso del polling (401 handling)
+        }
+      } catch (err) {
+        console.error('[InitAuth] Error durante inicialización:', err)
+        try {
+          localStorage.removeItem(TOKEN_KEY)
+          localStorage.removeItem('token')
+          localStorage.removeItem('access_token')
+        } catch {}
+        persistToken(null)
+        setUser(null)
+      } finally {
+        // GARANTIZAR que el spinner SIEMPRE se apague
+        console.log('[InitAuth] Finalizando estado de carga.')
+        setIsLoading(false)
+      }
     }
-    if (!stored) {
-      setIsLoading(false)
-      return
-    }
-    setToken(stored)
-    userService
-      .getMe()
-      .then((me) => setUser(me as unknown as AuthUser))
-      .catch(() =>
-        authService
-          .me()
-          .then((me) => setUser(me))
-          .catch(() => {
-            persistToken(null)
-            setUser(null)
-          }),
-      )
-      .finally(() => setIsLoading(false))
+    initAuth()
   }, [persistToken])
+
+  // Timeout de Rescate en el Render Root — forzar isLoading a false a los 1000ms
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setIsLoading((prev) => {
+        if (prev) console.warn('[InitAuth] Timeout de seguridad forzado a false')
+        return false
+      })
+    }, 1000)
+    return () => window.clearTimeout(timer)
+  }, [])
 
   const login = useCallback(
     async (data: UserLogin) => {

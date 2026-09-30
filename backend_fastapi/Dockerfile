@@ -3,7 +3,8 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    HUGGINGFACE_HUB_CACHE=/tmp/huggingface_cache
 
 WORKDIR /app
 
@@ -16,6 +17,8 @@ RUN apt-get update \
 
 COPY requirements.txt ./
 RUN pip install -r requirements.txt
+RUN python -c "from faster_whisper import WhisperModel; WhisperModel('deepdml/faster-whisper-large-v3-turbo-ct2', device='cpu', compute_type='int8')"
+RUN chmod -R a+rX /tmp/huggingface_cache
 
 COPY app ./app
 

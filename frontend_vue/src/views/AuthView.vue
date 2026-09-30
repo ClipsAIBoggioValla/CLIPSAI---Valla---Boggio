@@ -27,7 +27,14 @@ function messageForError(err: unknown): string {
 }
 
 watch(() => auth.isAuthenticated, (v) => {
-  if (v) router.replace('/upload')
+  if (v) {
+    let dest = '/upload'
+    try {
+      const saved = localStorage.getItem('clipsai_active_job_id')
+      if (saved) dest = `/jobs/${saved}`
+    } catch {}
+    router.replace(dest)
+  }
 }, { immediate: true })
 
 async function handleSubmit() {
@@ -39,7 +46,12 @@ async function handleSubmit() {
     } else {
       await auth.register({ email: email.value.trim(), password: password.value, full_name: fullName.value.trim() || undefined })
     }
-    router.replace('/upload')
+    let dest = '/upload'
+    try {
+      const saved = localStorage.getItem('clipsai_active_job_id')
+      if (saved) dest = `/jobs/${saved}`
+    } catch {}
+    router.replace(dest)
   } catch (err: unknown) {
     error.value = messageForError(err)
   } finally {

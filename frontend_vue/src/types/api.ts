@@ -55,6 +55,7 @@ export interface JobResponse {
   job_id: string
   video_id: string
   status: JobStatus
+  progress: number
   error_message: string | null
   result_metadata?: JobResultMetadata | null
   created_at: string
@@ -69,8 +70,13 @@ export interface ClipResponse {
   start_time: number
   end_time: number
   score: number | null
-  tags: string[] | null
+  tags: Record<string, unknown> | string[] | null
   storage_path: string | null
+  file_path: string | null
+  stream_url: string | null
+  duration: number | null
+  has_ass: boolean
+  has_hook: boolean
   status: string
   published_platform: string | null
   social_post_id: string | null
@@ -80,6 +86,19 @@ export interface ClipResponse {
   social_network: string | null
   created_at: string
   updated_at: string
+}
+
+export interface ReRenderRequest {
+  enable_ass: boolean
+  enable_hook: boolean
+}
+
+export interface ReRenderResponse {
+  detail: string
+  clip_id: string
+  status: string
+  enable_ass: boolean
+  enable_hook: boolean
 }
 
 export type PublishPlatform = 'tiktok' | 'instagram' | 'youtube' | 'webhook'
@@ -175,6 +194,13 @@ export interface ClipListItem {
   social_post_url?: string | null
   published_at?: string | null
   created_at: string
+  updated_at?: string | null
+  file_path: string | null
+  stream_url: string | null
+  duration: number | null
+  has_ass: boolean
+  has_hook: boolean
+  tags?: Record<string, unknown> | string[] | null
 }
 
 export interface ClipListResponse {
@@ -194,6 +220,7 @@ export interface ClipListParams {
   page?: number
   limit?: number
   video_id?: string
+  job_id?: string
   status?: string
 }
 

@@ -6,13 +6,14 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 
 class JobResponse(BaseModel):
     id: uuid.UUID
     video_id: uuid.UUID
     status: str
+    progress: int = Field(default=0, ge=0, le=100)
     error_message: str | None = None
     result_metadata: dict[str, Any] | list[Any] | None = None
     created_at: datetime

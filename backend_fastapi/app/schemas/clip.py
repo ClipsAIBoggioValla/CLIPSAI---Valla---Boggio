@@ -26,8 +26,14 @@ class ClipResponse(BaseModel):
     start_time: float
     end_time: float
     score: float | int | None = None
-    tags: list[Any] | None = None
+    tags: list[Any] | dict[str, Any] | None = None
     storage_path: str | None = None
+    # Integración Issue #36
+    file_path: str | None = None
+    stream_url: str | None = None
+    duration: float | None = None
+    has_ass: bool = False
+    has_hook: bool = False
     status: str
     published_platform: str | None = None
     social_post_id: str | None = None
@@ -67,6 +73,14 @@ class ClipListItem(BaseModel):
     social_post_url: str | None = None
     published_at: datetime | None = None
     created_at: datetime
+    updated_at: datetime | None = None
+    # Integración Issue #36
+    file_path: str | None = None
+    stream_url: str | None = None
+    duration: float | None = None
+    has_ass: bool = False
+    has_hook: bool = False
+    tags: dict[str, Any] | list[Any] | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

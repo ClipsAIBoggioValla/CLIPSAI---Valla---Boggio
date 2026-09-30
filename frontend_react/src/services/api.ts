@@ -37,10 +37,11 @@ function normalizeVideo(raw: VideoUploadResponse & { filename?: string; title?: 
   return { ...raw, filename, title }
 }
 
-function normalizeJob(raw: JobResponse & { id?: string; job_id?: string; status?: string }): JobResponse {
+function normalizeJob(raw: JobResponse & { id?: string; job_id?: string; status?: string; progress?: number }): JobResponse {
   const id = raw.id ?? raw.job_id ?? ''
   const status = (raw.status ?? 'PENDING').toString().toUpperCase() as JobResponse['status']
-  return { ...raw, id, job_id: raw.job_id ?? id, status } as JobResponse
+  const progress = typeof raw.progress === 'number' ? raw.progress : 0
+  return { ...raw, id, job_id: raw.job_id ?? id, status, progress } as JobResponse
 }
 
 export const authService = {
@@ -56,11 +57,11 @@ export const authService = {
 }
 
 export const videoService = {
-  async upload(videoFile: File, transcriptFile: File): Promise<VideoUploadResponse> {
+  async upload(videoFile: File, transcriptFile?: File | null): Promise<VideoUploadResponse> {
     const fd = new FormData()
     fd.append('video', videoFile, videoFile.name)
-    fd.append('transcription', transcriptFile, transcriptFile.name)
-    const raw = await http.post<VideoUploadResponse>('/videos', fd)
+    if (transcriptFile) fd.append('transcription', transcriptFile, transcriptFile.name)
+    const raw = await http.post<VideoUploadResponse>('/videos', fd, { timeout: 0 })
     return normalizeVideo(raw as VideoUploadResponse & { filename?: string; title?: string })
   },
   async list(): Promise<VideoUploadResponse[]> {
@@ -115,12 +116,16 @@ export const clipService = {
     if (params?.page) cleaned.page = String(params.page)
     if (params?.limit) cleaned.limit = String(params.limit)
     if (params?.video_id) cleaned.video_id = params.video_id
+    if (params?.job_id) cleaned.job_id = params.job_id
     if (params?.status) cleaned.status = params.status
     const qs = Object.keys(cleaned).length ? `?${new URLSearchParams(cleaned).toString()}` : ''
     return http.get<import('@/types/api').ClipListResponse>(`/clips${qs}`)
   },
   publishClip(clipId: string, data: import('@/types/api').PublishClipPayload): Promise<import('@/types/api').PublishClipResponse> {
     return http.postJson<import('@/types/api').PublishClipResponse>(`/clips/${clipId}/publicar`, data)
+  },
+  reRenderClip(clipId: string, options: import('@/types/api').ReRenderRequest): Promise<import('@/types/api').ReRenderResponse> {
+    return http.postJson<import('@/types/api').ReRenderResponse>(`/clips/${clipId}/re-render`, options)
   },
 
   list(params?: { video_id?: string; status?: string }): Promise<ClipResponse[]> {

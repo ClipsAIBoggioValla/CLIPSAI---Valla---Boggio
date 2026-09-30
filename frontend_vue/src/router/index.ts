@@ -20,15 +20,35 @@ const router = createRouter({
   ],
 })
 
+const ALLOW_ANONYMOUS =
+  ((import.meta as unknown as { env?: Record<string, string> })?.env?.VITE_ALLOW_ANONYMOUS) === 'true'
+
 router.beforeEach((to) => {
   const auth = useAuthStore()
   let hasToken = false
   try {
-    hasToken = !!localStorage.getItem('clipsai_token')
+    hasToken = !!localStorage.getItem('clipsai_token') || !!localStorage.getItem('token') || !!localStorage.getItem('access_token')
   } catch {
     hasToken = !!auth.token
   }
+  // Modo local/abierto o fallback cuando backend no responde: no bloquear vistas principales como / o /upload
+  // Garantiza contenido visible en lugar de pantalla vacía
+  if (to.path === '/' || to.path === '/upload' || to.path === '/dashboard') {
+    if (ALLOW_ANONYMOUS) return
+    // Fallback: si no hay token pero es vista principal, permitir renderizado dentro de Layout con UploadPage/dashboard
+    // en lugar de redirigir a ruta no definida o retornar null
+    if (!hasToken && !auth.isLoading) {
+      // Permitir acceso anónimo a vistas principales para evitar bloqueo
+      return
+    }
+    if (to.meta.requiresAuth && !hasToken && auth.isLoading) {
+      // Esperar rescate 1000ms
+      return
+    }
+  }
   if (to.meta.requiresAuth && !hasToken) {
+    // Si isLoading aún true, esperar al timeout de rescate (1000ms) en lugar de bloquear con spinner infinito
+    if (auth.isLoading) return
     return '/login'
   }
   if (to.meta.requiresAuth && !auth.isAuthenticated && !auth.isLoading && !hasToken) {

@@ -9,6 +9,7 @@ const BASE_URL = (RAW || 'http://localhost:8000').replace(/\/$/, '')
 
 export const apiClient = axios.create({
   baseURL: BASE_URL,
+  timeout: 10000, // Forzar fallo a los 10s si backend no responde — 3s era demasiado estricto para Whisper en CPU local
   headers: { Accept: 'application/json', 'ngrok-skip-browser-warning': 'true' },
   withCredentials: true,
 })
@@ -41,7 +42,11 @@ apiClient.interceptors.response.use(
         detail = data.detail.map((e) => `${e.loc.join('.')}: ${e.msg}`).join(' | ')
       else if (typeof error.response.data === 'string' && error.response.data)
         detail = (error.response.data as string).slice(0, 500)
-      if (status === 401 || detail.toLowerCase().includes('not authenticated')) {
+      // Para polling de jobs (/jobs/:id) no redirigir ni mostrar alerta intrusiva en 401;
+      // useJobPolling manejará reintento silencioso en segundo plano
+      const url = (error.config?.url ?? '') as string
+      const isJobPolling = url.includes('/jobs/')
+      if ((status === 401 || detail.toLowerCase().includes('not authenticated')) && !isJobPolling) {
         try {
           localStorage.removeItem(TOKEN_KEY)
         } catch {}
@@ -49,6 +54,10 @@ apiClient.interceptors.response.use(
         if (path !== '/login' && path !== '/auth') {
           import('@/router').then((m) => m.default.push('/login').catch(() => { window.location.href = '/login' })).catch(() => { window.location.href = '/login' })
         }
+      }
+      // Para jobs, no limpiar token automáticamente para permitir reintento
+      if (isJobPolling && status === 401) {
+        console.warn('[apiClient] 401 en polling job, sin redirigir, reintento silencioso')
       }
       return Promise.reject(new ApiError(status, detail, data))
     }

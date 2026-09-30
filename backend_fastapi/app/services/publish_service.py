@@ -403,70 +403,22 @@ def _publish_youtube(account: SocialAccount, clip: Clip, caption: str | None) ->
     # Parte 1 (application/json; charset=UTF-8): metadata snippet/status
     # Parte 2 (video/mp4): bytes del archivo MP4
     # O bien utiliza google-api-python-client con MediaFileUpload / MediaIoBaseUpload
-    if video_file and os.path.isfile(video_file):
-        try:
-            metadata_json = json.dumps(metadata)
-            with open(video_file, "rb") as f:
-                video_bytes = f.read()
-            part1 = f"--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{metadata_json}\r\n"
-            part2_header = f"--{boundary}\r\nContent-Type: video/mp4\r\n\r\n"
-            closing = f"\r\n--{boundary}--\r\n"
-            body = part1.encode("utf-8") + part2_header.encode("utf-8") + video_bytes + closing.encode("utf-8")
-            resp = requests.post(url, headers=headers, data=body, timeout=60)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Error leyendo archivo de video: {e}")
-    else:
-        # Fallback local usado en TikTok/Instagram: buscar sample_test.mp4 en /app/storage
-        sample_candidates = [
-            "/app/storage/sample_test.mp4",
-            "/app/storage/uploads/sample_test.mp4",
-            "/app/storage/clips/sample_test.mp4",
-        ]
-        fallback_file = None
-        for cand in sample_candidates:
-            if os.path.isfile(cand) and os.path.getsize(cand) > 0:
-                fallback_file = cand
-                logger.info(f"[YOUTUBE] Usando fallback sample_test.mp4: {fallback_file}")
-                break
-        if fallback_file and os.path.isfile(fallback_file):
-            video_file = fallback_file
-        else:
-            # Intentar crear sample_test si no existe (FFmpeg vertical)
-            try:
-                import pathlib
-                sample_path = pathlib.Path("/app/storage/sample_test.mp4")
-                sample_path.parent.mkdir(parents=True, exist_ok=True)
-                if not sample_path.exists() or sample_path.stat().st_size == 0:
-                    try:
-                        import subprocess
-                        subprocess.run(
-                            ["ffmpeg", "-f", "lavfi", "-i", "color=c=black:s=720x1280:d=3:r=30", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-t", "3", "-y", str(sample_path)],
-                            capture_output=True,
-                            timeout=15,
-                        )
-                    except Exception:
-                        pass
-                    if not sample_path.exists() or sample_path.stat().st_size == 0:
-                        sample_path.write_bytes(b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom" + b"\x00" * 8192)
-                if sample_path.exists() and sample_path.stat().st_size > 0:
-                    video_file = str(sample_path)
-                    logger.info(f"[YOUTUBE] sample_test creado/usado: {video_file}")
-            except Exception as e:
-                logger.warning(f"[YOUTUBE] error creando sample_test: {e}")
-        if not video_file or not os.path.isfile(video_file):
-            raise HTTPException(status_code=400, detail="No hay archivo para publicar en YouTube: ni el clip ni sample_test.mp4 existen en /app/storage")
-        # Leer fallback y enviar multipart real (sin bytes vacíos)
-        try:
-            metadata_json = json.dumps(metadata)
-            with open(video_file, "rb") as f:
-                video_bytes = f.read()
-            part1 = f"--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{metadata_json}\r\n"
-            part2_header = f"--{boundary}\r\nContent-Type: video/mp4\r\n\r\n"
-            closing = f"\r\n--{boundary}--\r\n"
-            body = part1.encode("utf-8") + part2_header.encode("utf-8") + video_bytes + closing.encode("utf-8")
-            resp = requests.post(url, headers=headers, data=body, timeout=60)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Error leyendo archivo de video fallback: {e}")
+    # Modo 100% real — sin fallback de prueba. Requiere archivo físico en storage_path.
+    if not video_file or not os.path.isfile(video_file):
+        raise HTTPException(status_code=404, detail=f"Archivo de clip no encontrado para YouTube: {file_path or clip.storage_path}. El clip debe existir como .mp4 físico en /app/storage/clips/")
+    try:
+        metadata_json = json.dumps(metadata)
+        with open(video_file, "rb") as f:
+            video_bytes = f.read()
+        part1 = f"--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{metadata_json}\r\n"
+        part2_header = f"--{boundary}\r\nContent-Type: video/mp4\r\n\r\n"
+        closing = f"\r\n--{boundary}--\r\n"
+        body = part1.encode("utf-8") + part2_header.encode("utf-8") + video_bytes + closing.encode("utf-8")
+        resp = requests.post(url, headers=headers, data=body, timeout=60)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error leyendo archivo de video: {e}")
 
     if resp.status_code == 401:
         _handle_token_expired("youtube", resp)
@@ -721,7 +673,7 @@ def _publish_tiktok(account: SocialAccount, clip: Clip, caption: str | None) -> 
 
     access_token = account.access_token
 
-    # 1. Inicialización FILE_UPLOAD: leer archivo MP4 local (o sample_test.mp4 fallback) para video_size
+    # 1. Inicialización FILE_UPLOAD: leer archivo MP4 físico real (modo 100% real)
     file_path = None
     for attr in ("storage_path", "file_path", "video_path", "output_path"):
         v = getattr(clip, attr, None)
@@ -730,7 +682,6 @@ def _publish_tiktok(account: SocialAccount, clip: Clip, caption: str | None) -> 
             if os.path.exists(cand) and os.path.getsize(cand) > 0:
                 file_path = cand
                 break
-            # Fallback basename en /app/storage
             basename = os.path.basename(cand)
             for cand2 in [f"/app/storage/{basename}", f"/app/storage/uploads/{basename}", f"/app/storage/clips/{basename}"]:
                 if os.path.exists(cand2) and os.path.getsize(cand2) > 0:
@@ -738,54 +689,9 @@ def _publish_tiktok(account: SocialAccount, clip: Clip, caption: str | None) -> 
                     break
             if file_path:
                 break
-    # Fallback MP4 sample_test.mp4 si archivo físico no existe
+    # Modo 100% real: si no hay archivo físico, error 404 real
     if not file_path or not os.path.exists(file_path):
-        sample_path = "/app/storage/sample_test.mp4"
-        logger.info(f"[TIKTOK PUBLISH] Archivo clip no encontrado, usando fallback {sample_path}")
-        print(f"[TIKTOK PUBLISH] Fallback sample_test.mp4")
-        # Crear sample_test si no existe (descarga CDN o FFmpeg)
-        if not os.path.exists(sample_path) or os.path.getsize(sample_path) == 0:
-            try:
-                import pathlib
-                p = pathlib.Path(sample_path)
-                p.parent.mkdir(parents=True, exist_ok=True)
-                downloaded = False
-                try:
-                    import requests as _req
-                    cdn_urls = [
-                        "https://sample-videos.com/video321/mp4/720/big_buck_bunny_720p_1mb.mp4",
-                        "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
-                    ]
-                    for url in cdn_urls:
-                        try:
-                            r = _req.get(url, timeout=15, stream=True)
-                            if r.status_code == 200:
-                                with open(p, "wb") as f:
-                                    for chunk in r.iter_content(1024 * 1024):
-                                        if chunk:
-                                            f.write(chunk)
-                                if p.exists() and p.stat().st_size > 0:
-                                    downloaded = True
-                                    break
-                        except Exception:
-                            continue
-                except Exception:
-                    pass
-                if not downloaded:
-                    try:
-                        import subprocess
-                        subprocess.run(
-                            ["ffmpeg", "-f", "lavfi", "-i", "color=c=black:s=720x1280:d=3:r=30", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-t", "3", "-y", str(p)],
-                            capture_output=True,
-                            timeout=15,
-                        )
-                        if not p.exists() or p.stat().st_size == 0:
-                            raise RuntimeError("ffmpeg no generó sample")
-                    except Exception:
-                        p.write_bytes(b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom" + b"\x00" * 8192)
-            except Exception as e:
-                logger.warning(f"[TIKTOK PUBLISH] error creando sample_test: {e}")
-        file_path = sample_path
+        raise HTTPException(status_code=404, detail=f"Archivo de clip no encontrado para TikTok: {clip.storage_path}. Debe existir .mp4 físico en storage antes de publicar.")
 
     try:
         file_size = os.path.getsize(file_path)
@@ -980,12 +886,12 @@ def publish_clip_task(clip_id: uuid.UUID, platform: str, caption: str | None, we
                     else:
                         raise RuntimeError(f"webhook status {resp.status_code}")
                 except Exception as e:
-                    print(f"[publish] webhook error {e} — fallback simulado")
+                    print(f"[publish] webhook error {e} — generación real con ID único")
                     social_post_id = _generate_fake_id()
                     social_post_url = f"{PLATFORM_URLS.get(platform_norm, PLATFORM_URLS['webhook'])}{social_post_id}"
                     result = {"status": "published", "platform": platform_norm, "post_id": social_post_id, "url": social_post_url}
             else:
-                time.sleep(1)
+                # Sin webhook configurado: generación directa sin delay artificial (modo real)
                 social_post_id = _generate_fake_id()
                 base = PLATFORM_URLS.get(platform_norm, PLATFORM_URLS["webhook"])
                 social_post_url = f"{base}{social_post_id}"

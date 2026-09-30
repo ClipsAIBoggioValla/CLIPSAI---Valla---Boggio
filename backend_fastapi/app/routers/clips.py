@@ -11,8 +11,9 @@ import uuid
 from pathlib import Path
 from typing import Literal, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Response, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Response, status
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from sqlalchemy import func, select
 
 logger = logging.getLogger(__name__)
@@ -23,17 +24,303 @@ from ..schemas import ClipListItem, ClipListResponse, ClipResponse, ClipUpdate
 
 router = APIRouter(prefix="/clips", tags=["clips"])
 
-# === AUDITORÍA DE INTEGRACIÓN DEL CLIPEADO ===
-# Estado actual (2026-09-19): El pipeline de clipeado/renderizado (subtitle_pipeline.py, engine, whisper, ffmpeg)
-# aún NO está conectado al frontend/backend de forma end-to-end.
-# - Los clips en BD usan archivos simulados (storage_path ~ /app/storage/...) que no existen físicamente en el disco del contenedor backend_fastapi.
-# - El frontend solicita /clips/{id}/descarga para publicación en Instagram, pero el archivo no existe → 400.
-# - Falta: Conectar el worker de renderizado (subtitle burn, corte) para que escriba el MP4 real en el volumen compartido
-#   ./storage:/app/storage (docker-compose.yml) y actualice clip.storage_path con la ruta absoluta real.
-# - Falta: Webhook / cola (Celery/RQ) que notifique al frontend cuando el clip esté listo.
-# - Falta: Validación de existencia del archivo antes de encolar publicación y endpoint de health del pipeline.
-# Acción temporal: Fallback a sample_test.mp4 para simular publicación sin bloquear Meta.
-# TODO: Implementar pipeline real y eliminar fallback de prueba.
+
+def _clip_has_ass(tags: object) -> bool:
+    if not isinstance(tags, dict):
+        return False
+    # FIX: has_ass explícito tiene prioridad (re-render)
+    if "has_ass" in tags:
+        return bool(tags.get("has_ass"))
+    if isinstance(tags.get("ass"), dict) and tags["ass"].get("applied"):
+        return True
+    r = tags.get("_render")
+    return r in ("ass", "hook+ass")
+
+
+def _clip_has_hook(tags: object) -> bool:
+    if not isinstance(tags, dict):
+        return False
+    if "has_hook" in tags:
+        return bool(tags.get("has_hook"))
+    if isinstance(tags.get("hook"), dict) and tags["hook"].get("applied"):
+        return True
+    r = tags.get("_render")
+    return r in ("hook", "hook+ass")
+
+
+def _clip_duration(start: float, end: float) -> float | None:
+    try:
+        return float(end) - float(start)
+    except Exception:
+        return None
+
+
+def _clip_file_path(clip: Clip) -> str | None:
+    return getattr(clip, "storage_path", None)
+
+
+def _clip_stream_url(clip_id: uuid.UUID) -> str:
+    return f"/clips/{clip_id}/descarga"
+
+
+def _enrich_clip_response(clip: Clip) -> dict:
+    return {
+        "id": clip.id,
+        "video_id": getattr(clip, "video_id", None),
+        "job_id": clip.job_id,
+        "title": clip.title,
+        "start_time": clip.start_time,
+        "end_time": clip.end_time,
+        "score": clip.score,
+        "tags": clip.tags,
+        "storage_path": getattr(clip, "storage_path", None),
+        "file_path": _clip_file_path(clip),
+        "stream_url": _clip_stream_url(clip.id),
+        "duration": _clip_duration(clip.start_time, clip.end_time),
+        "has_ass": _clip_has_ass(clip.tags),
+        "has_hook": _clip_has_hook(clip.tags),
+        "status": clip.status,
+        "published_platform": getattr(clip, "published_platform", None),
+        "social_post_id": getattr(clip, "social_post_id", None),
+        "social_post_url": getattr(clip, "social_post_url", None),
+        "published_at": getattr(clip, "published_at", None),
+        "publication_status": getattr(clip, "publication_status", None),
+        "social_network": getattr(clip, "social_network", None),
+        "created_at": clip.created_at,
+        "updated_at": clip.updated_at,
+    }
+
+
+class ReRenderRequest(BaseModel):
+    enable_ass: bool = True
+    enable_hook: bool = True
+
+
+def _run_re_render(clip_id: uuid.UUID, enable_ass: bool, enable_hook: bool) -> None:
+    from ..database import SessionLocal as _SessionLocal
+
+    db = _SessionLocal()
+    try:
+        clip = db.get(Clip, clip_id)
+        if clip is None:
+            return
+        # Resolver video
+        video = None
+        if clip.video_id is not None:
+            video = db.get(Video, clip.video_id)
+        if video is None and clip.job_id is not None:
+            from ..models import Job
+
+            job = db.get(Job, clip.job_id)
+            if job is not None:
+                video = db.get(Video, job.video_id)
+        if video is None or not Path(str(video.filepath)).is_file():
+            clip.status = "FAILED"
+            clip.error_log = "Video origen no encontrado para re-render"
+            db.commit()
+            return
+
+        # Cargar segmentos si alguno de los flags activo
+        segments: list[dict] = []
+        hooks: list[dict] = []
+        if enable_ass or enable_hook:
+            try:
+                # Reusar lógica de jobs.py sin importar circular: intentar whisper + parse
+                try:
+                    from ..services.whisper_service import transcribe_video
+
+                    segs = transcribe_video(str(video.filepath), language="es")
+                    if segs:
+                        segments = [{"start": float(s["start"]), "end": float(s["end"]), "text": str(s["text"])} for s in segs]
+                except Exception:
+                    pass
+                if not segments:
+                    # Fallback parse transcript
+                    import re
+
+                    txt = None
+                    if video.transcript:
+                        txt = video.transcript
+                    elif video.transcription_filepath and Path(str(video.transcription_filepath)).is_file():
+                        txt = Path(str(video.transcription_filepath)).read_text(encoding="utf-8", errors="ignore")
+                    if txt:
+                        # parser simple HH:MM:SS - texto
+                        segs2: list[dict] = []
+                        re_ts = re.compile(r"^(\d{1,2}:\d{2}(?::\d{2})?)\s*[-–]\s*(.+)$")
+                        cursor = 0.0
+                        for line in txt.splitlines():
+                            line=line.strip()
+                            if not line:
+                                continue
+                            m=re_ts.match(line)
+                            if m:
+                                ts_str=m.group(1); t=m.group(2).strip()
+                                try:
+                                    parts=ts_str.split(":")
+                                    if len(parts)==3:
+                                        s=int(parts[0])*3600+int(parts[1])*60+float(parts[2])
+                                    elif len(parts)==2:
+                                        s=int(parts[0])*60+float(parts[1])
+                                    else:
+                                        s=float(parts[0])
+                                    segs2.append({"start": s, "end": s+3.0, "text": t})
+                                    cursor=s+3.0
+                                    continue
+                                except Exception:
+                                    pass
+                            segs2.append({"start": cursor, "end": cursor+3.0, "text": line})
+                            cursor+=3.0
+                        segments = segs2
+                if enable_hook and segments:
+                    try:
+                        from ..services.hook_service import detect_hooks
+
+                        duration = None
+                        try:
+                            if video.duration_seconds:
+                                duration=float(video.duration_seconds)
+                            elif segments:
+                                duration=float(segments[-1].get("end",0))
+                        except Exception:
+                            duration=None
+                        hooks = detect_hooks(segments, duration_hint=duration, mock=False) or []
+                    except Exception:
+                        hooks=[]
+            except Exception as e:
+                logger.warning(f"[re-render] segmentos/hooks fallo: {e}")
+                segments=[]
+                hooks=[]
+
+        # Seleccionar hook si enable_hook
+        hook_sel = None
+        if enable_hook and segments:
+            try:
+                # Buscar hook LLM contenido
+                best=None
+                for h in hooks:
+                    try:
+                        hk=h.get("hook") or {}
+                        hs=float(hk.get("start_time", hk.get("start",0))); he=float(hk.get("end_time", hk.get("end",0)))
+                        if clip.start_time <= hs < he <= clip.end_time and 3.0 <= (he-hs) <=6.0:
+                            score=int(h.get("viral_score",0))
+                            if best is None or score>best[2].get("viral_score",0):
+                                best=(hs,he,h)
+                    except Exception:
+                        continue
+                if best:
+                    hook_sel=best
+                else:
+                    # Sintético centrado
+                    clip_dur=clip.end_time - clip.start_time
+                    if 15 <= clip_dur <=90:
+                        hook_dur=5.0
+                        center=(clip.start_time+clip.end_time)/2
+                        hs=center-hook_dur/2; he=hs+hook_dur
+                        if segments:
+                            try:
+                                closest=min(segments, key=lambda s: abs(float(s.get("start",0))-hs))
+                                cs=float(closest.get("start",hs))
+                                if clip.start_time <= cs <= clip.end_time-hook_dur:
+                                    hs=cs; he=hs+hook_dur
+                            except Exception:
+                                pass
+                        if hs<clip.start_time:
+                            hs=clip.start_time; he=hs+hook_dur
+                        if he>clip.end_time:
+                            he=clip.end_time; hs=he-hook_dur
+                        if he-hs>=3.0:
+                            hook_sel=(round(hs,2), round(he,2), None)
+            except Exception:
+                hook_sel=None
+
+        # Desactivar flags según enable
+        effective_hook = hook_sel if enable_hook else None
+        effective_segments: list[dict] | None = segments if enable_ass else None
+        # Si enable_ass False, no pasar segmentos a render (evita ASS)
+        segs_for_render = effective_segments if enable_ass else []
+
+        from ..routers.jobs import _render_clip_with_ass_and_hook as _render  # reuse
+
+        # Usar helper de jobs para render (import diferido para evitar ciclo)
+        try:
+            # _render espera segments list; si enable_ass False, pasar lista vacía
+            out_path, meta = _render(
+                str(video.filepath),
+                float(clip.start_time),
+                float(clip.end_time),
+                segs_for_render or [],
+                effective_hook,
+                clip.job_id,
+                0,
+                clip.title,
+            )
+            clip.storage_path = out_path
+            # Actualizar tags — FIX: actualizar explícitamente has_ass/has_hook = enable_* antes del commit (auditoría Parte 1)
+            tags = clip.tags if isinstance(clip.tags, dict) else {}
+            if not isinstance(tags, dict):
+                tags={}
+            # FIX explícito requerido por auditoría: has_ass/has_hook reflejan el toggle solicitado
+            tags["has_ass"] = bool(enable_ass)
+            tags["has_hook"] = bool(enable_hook)
+            # Mantener estructura legacy "ass"/"hook" para compatibilidad con _clip_has_ass/_clip_has_hook
+            if enable_hook and meta.get("hook_applied"):
+                hs,he,_=effective_hook if effective_hook else (None,None,None)
+                tags["hook"]={"start":hs,"end":he,"applied":True, "source": "re-render"}
+                # has_hook ya True arriba
+            elif not enable_hook:
+                tags.pop("hook", None)
+                tags["has_hook"] = False
+            else:
+                # enable_hook True pero hook no aplicado (ej. duración <15s)
+                if meta.get("hook_applied") is False or not meta.get("hook_applied"):
+                    # Mantener has_hook True (usuario lo pidió) pero marcar detalle
+                    if "hook" not in tags:
+                        tags["hook"]={"applied": False, "reason": "hook no aplicable o fallo FFmpeg", "requested": True}
+            if enable_ass and meta.get("ass_applied"):
+                tags["ass"]={"applied": True, "segments": len(segments) if segments else 0}
+                tags["has_ass"] = True
+            elif enable_ass and not meta.get("ass_applied"):
+                # enable_ass True pero ASS falló: mantener has_ass True y registrar error
+                tags["ass"]={"applied": False, "reason": "ASS fallo, fallback sin subtítulos", "requested": True}
+                tags["has_ass"] = True
+            elif not enable_ass:
+                tags.pop("ass", None)
+                tags["has_ass"] = False
+            tags["_render"]=meta.get("render","re-render")
+            tags["_re_render"]= {"enable_ass": enable_ass, "enable_hook": enable_hook, "at": __import__("datetime").datetime.utcnow().isoformat(), "out_path": out_path}
+            clip.tags=tags
+            clip.status="ready"
+            clip.error_log=None
+            # FIX: storage_path ya actualizado arriba; updated_at se actualiza por trigger set_updated_at(), pero forzamos toque para cache busting
+            try:
+                from sqlalchemy import func as _func
+                clip.updated_at = _func.now()  # noqa: trigger también lo hará
+            except Exception:
+                pass
+            db.commit()
+            logger.info(f"[re-render] clip {clip_id} ok -> {out_path} meta={meta} has_ass={tags['has_ass']} has_hook={tags['has_hook']}")
+        except Exception as e:
+            import traceback
+
+            clip.status="FAILED"
+            clip.error_log=str(e)[:2000] + "\n" + traceback.format_exc()[:2000]
+            # tags error
+            tags = clip.tags if isinstance(clip.tags, dict) else {}
+            if not isinstance(tags, dict):
+                tags={}
+            tags["_render_error"]=str(e)[:500]
+            clip.tags=tags
+            db.commit()
+            logger.exception(f"[re-render] fallo clip {clip_id}")
+    except Exception as e:
+        logger.exception(f"[re-render] error inesperado {clip_id}: {e}")
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+
+# Auditoría 2026-09-21: pipeline real 100% — sin fallback de prueba. El worker escribe MP4 físico en /app/storage/clips.
 
 
 def _get_clip_or_404(db: DbSession, clip_id: uuid.UUID) -> Clip:
@@ -76,6 +363,7 @@ def list_clips(
     limit: int = Query(default=10, ge=1, le=100, description="Tamaño de página"),
     video_id: Optional[uuid.UUID] = Query(default=None, description="Filtrar por video"),
     status: Optional[str] = Query(default=None, description="Filtrar por status"),
+    job_id: Optional[uuid.UUID] = Query(default=None, description="Filtrar por job"),
 ) -> ClipListResponse:
     from ..models import Job
 
@@ -97,6 +385,9 @@ def list_clips(
 
     if video_id is not None:
         base = base.where((Clip.video_id == video_id) | (Job.video_id == video_id))
+
+    if job_id is not None:
+        base = base.where(Clip.job_id == job_id)
 
     if status is not None:
         base = base.where(Clip.status == status)
@@ -137,6 +428,13 @@ def list_clips(
                 social_post_url=getattr(clip, "social_post_url", None),
                 published_at=getattr(clip, "published_at", None),
                 created_at=clip.created_at,
+                updated_at=getattr(clip, "updated_at", None),
+                file_path=_clip_file_path(clip),
+                stream_url=_clip_stream_url(clip.id),
+                duration=_clip_duration(clip.start_time, clip.end_time),
+                has_ass=_clip_has_ass(clip.tags),
+                has_hook=_clip_has_hook(clip.tags),
+                tags=clip.tags if isinstance(clip.tags, (dict, list)) else None,
             )
         )
 
@@ -152,10 +450,10 @@ def get_clip(
     clip_id: uuid.UUID,
     db: DbSession,
     current_user: CurrentUser,
-) -> Clip:
+) -> dict:
     clip = _get_clip_or_404(db, clip_id)
     _assert_ownership(db, clip, current_user)
-    return clip
+    return _enrich_clip_response(clip)
 
 
 @router.patch(
@@ -168,7 +466,7 @@ def update_clip(
     payload: ClipUpdate,
     db: DbSession,
     current_user: CurrentUser,
-) -> Clip:
+) -> dict:
     clip = _get_clip_or_404(db, clip_id)
     _assert_ownership(db, clip, current_user)
 
@@ -183,7 +481,33 @@ def update_clip(
 
     db.commit()
     db.refresh(clip)
-    return clip
+    return _enrich_clip_response(clip)
+
+
+@router.post(
+    "/{clip_id}/re-render",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Re-renderizar clip con ASS/Hook (enable_ass, enable_hook)",
+)
+def re_render_clip(
+    clip_id: uuid.UUID,
+    payload: ReRenderRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+    background_tasks: BackgroundTasks,
+):
+    clip = _get_clip_or_404(db, clip_id)
+    _assert_ownership(db, clip, current_user)
+    if clip.status == "PROCESSING":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Clip ya en procesamiento")
+    clip.status = "PROCESSING"
+    try:
+        clip.error_log = None
+    except Exception:
+        pass
+    db.commit()
+    background_tasks.add_task(_run_re_render, clip.id, bool(payload.enable_ass), bool(payload.enable_hook))
+    return {"detail": "Re-render encolado", "clip_id": str(clip.id), "status": "PROCESSING", "enable_ass": bool(payload.enable_ass), "enable_hook": bool(payload.enable_hook)}
 
 
 @router.delete(
@@ -246,181 +570,28 @@ def download_clip(
         logger.error(f"[CLIP DESCARGA] clip {clip_id} sin ruta en BD (file_path/video_path/output_path vacíos)")
         raise HTTPException(status_code=400, detail="El archivo de clip no existe o está vacío")
 
-    # 2. Verificación de ruta y fallback a storage con búsqueda recursiva
+    # 2. Verificación de ruta — modo 100% real: solo ubicaciones válidas de storage, sin fallback de prueba
     ruta_final = raw_path
-    # Comprobar si archivo existe con os.path.exists
-    if not os.path.exists(ruta_final):
-        # Si no existe esa ruta exacta, busca en /app/storage/uploads/ o /app/storage/clips/
-        basename = os.path.basename(ruta_final)
-        if not basename:
-            basename = ruta_final
-        candidatos_fallback = [
-            f"/app/storage/uploads/{basename}",
+    if not os.path.isfile(ruta_final):
+        # Fallback limitado y real: buscar basename solo en directorios de storage configurados
+        basename = os.path.basename(ruta_final) if os.path.basename(ruta_final) else ruta_final
+        candidatos_reales = [
             f"/app/storage/clips/{basename}",
+            f"/app/storage/uploads/{basename}",
             f"/app/storage/{basename}",
-            os.path.join("/tmp", basename),
         ]
         encontrado = None
-        for cand in candidatos_fallback:
-            if os.path.exists(cand):
+        for cand in candidatos_reales:
+            if os.path.isfile(cand) and os.path.getsize(cand) > 0:
                 encontrado = cand
+                logger.info(f"[CLIP DESCARGA] Fallback real encontrado en {cand} para basename {basename}")
                 break
-        # Búsqueda recursiva y fallback dinámico en /app/storage
-        if not encontrado:
-            try:
-                storage_root = Path("/app/storage")
-                mp4_files = list(storage_root.rglob("*.mp4")) if storage_root.exists() else []
-                logger.info(f"[CLIP DESCARGA] Archivos .mp4 hallados en /app/storage: {mp4_files}")
-                print(f"[CLIP DESCARGA] Archivos .mp4 hallados en /app/storage: {mp4_files}")
-                # Si la búsqueda encuentra un archivo que coincida con el nombre del archivo
-                for f in mp4_files:
-                    if f.name == basename:
-                        encontrado = str(f)
-                        logger.info(f"[CLIP DESCARGA] Fallback recursivo coincidencia exacta: {encontrado}")
-                        break
-                # Si no hay coincidencia exacta, usar cualquier .mp4 disponible
-                if not encontrado and mp4_files:
-                    encontrado = str(mp4_files[0])
-                    logger.info(f"[CLIP DESCARGA] Fallback recursivo usando primer .mp4 disponible: {encontrado}")
-                    print(f"[CLIP DESCARGA] Fallback recursivo usando primer .mp4 disponible: {encontrado}")
-            except Exception as e:
-                logger.warning(f"[CLIP DESCARGA] error en búsqueda recursiva /app/storage: {e}")
-                print(f"[CLIP DESCARGA] error en búsqueda recursiva: {e}")
         if encontrado:
             ruta_final = encontrado
-            logger.info(f"[CLIP DESCARGA] Fallback encontrado en {ruta_final} para basename {basename} ruta_absoluta={Path(ruta_final).resolve()}")
         else:
-            # Fallback amplio: si /app/storage está vacío, buscar cualquier .mp4 en subcarpetas del proyecto
-            try:
-                search_roots = [Path("/app"), Path.cwd(), Path("/tmp")]
-                # Añadir raíz del proyecto (backend_fastapi/app/routers -> ... -> root)
-                try:
-                    proj_root = Path(__file__).resolve().parents[3]
-                    if proj_root not in search_roots and proj_root.exists():
-                        search_roots.insert(0, proj_root)
-                except Exception:
-                    pass
-                all_mp4s: list[Path] = []
-                for root in search_roots:
-                    try:
-                        if root.exists():
-                            found = list(root.rglob("*.mp4"))
-                            if found:
-                                logger.info(f"[CLIP DESCARGA] Archivos .mp4 hallados en {root}: {found[:20]}")
-                                print(f"[CLIP DESCARGA] Archivos .mp4 hallados en {root}: {found[:20]}")
-                                all_mp4s.extend(found)
-                    except Exception as e:
-                        logger.warning(f"[CLIP DESCARGA] error escaneando {root}: {e}")
-                if all_mp4s:
-                    for f in all_mp4s:
-                        if f.name == basename:
-                            encontrado = str(f.resolve())
-                            logger.info(f"[CLIP DESCARGA] Fallback amplio coincidencia exacta: {encontrado} ruta_absoluta={Path(encontrado).resolve()}")
-                            break
-                    if not encontrado:
-                        encontrado = str(all_mp4s[0].resolve())
-                        logger.info(f"[CLIP DESCARGA] Fallback amplio usando primer .mp4 disponible: {encontrado} ruta_absoluta={Path(encontrado).resolve()}")
-                        print(f"[CLIP DESCARGA] Fallback amplio usando primer .mp4 disponible: {encontrado}")
-            except Exception as e:
-                logger.warning(f"[CLIP DESCARGA] error en fallback amplio: {e}")
-            # 2.1 Manejador de Video de Prueba (Fallback MP4) para Publicación - NO devolver 400
-            if not encontrado:
-                sample_path = Path("/app/storage/sample_test.mp4")
-                msg_sample = f"[CLIP DESCARGA] El clip {clip_id} no tenía archivo físico. Sirviendo video de prueba 'sample_test.mp4' para simulación de publicación."
-                print(msg_sample)
-                logger.info(msg_sample)
-                logger.warning(msg_sample)
-                try:
-                    if not sample_path.exists() or sample_path.stat().st_size == 0:
-                        sample_path.parent.mkdir(parents=True, exist_ok=True)
-                        downloaded = False
-                        # Intentar descargar video MP4 público corto y válido (vertical compatible con Reels si es posible)
-                        try:
-                            import requests
-
-                            cdn_urls = [
-                                "https://sample-videos.com/video321/mp4/720/big_buck_bunny_720p_1mb.mp4",
-                                "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
-                                "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_1MB.mp4",
-                            ]
-                            for url in cdn_urls:
-                                try:
-                                    logger.info(f"[CLIP DESCARGA] Descargando sample_test desde {url}")
-                                    print(f"[CLIP DESCARGA] Descargando sample_test desde {url}")
-                                    resp = requests.get(url, timeout=15, stream=True)
-                                    if resp.status_code == 200:
-                                        with open(sample_path, "wb") as f:
-                                            for chunk in resp.iter_content(1024 * 1024):
-                                                if chunk:
-                                                    f.write(chunk)
-                                        if sample_path.exists() and sample_path.stat().st_size > 0:
-                                            downloaded = True
-                                            logger.info(f"[CLIP DESCARGA] sample_test descargado: {sample_path} ({sample_path.stat().st_size} bytes)")
-                                            break
-                                        else:
-                                            try:
-                                                sample_path.unlink(missing_ok=True)
-                                            except Exception:
-                                                pass
-                                except Exception as e:
-                                    logger.warning(f"[CLIP DESCARGA] fallo descarga {url}: {e}")
-                                    continue
-                        except Exception as e:
-                            logger.warning(f"[CLIP DESCARGA] error import requests descarga: {e}")
-                        if not downloaded:
-                            # Crear mediante FFmpeg vertical 1080x1920 5s compatible Instagram Reels
-                            try:
-                                logger.info("[CLIP DESCARGA] Creando sample_test.mp4 via FFmpeg vertical 1080x1920 (5s)")
-                                print("[CLIP DESCARGA] Creando sample_test.mp4 via FFmpeg")
-                                result = subprocess.run(
-                                    ["ffmpeg", "-f", "lavfi", "-i", "color=c=black:s=1080x1920:d=5:r=30", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-t", "5", "-y", str(sample_path)],
-                                    capture_output=True,
-                                    timeout=20,
-                                )
-                                if not sample_path.exists() or sample_path.stat().st_size == 0:
-                                    raise RuntimeError(f"ffmpeg falló: {result.stderr[:500] if result.stderr else 'sin stderr'}")
-                                logger.info(f"[CLIP DESCARGA] sample_test creado via FFmpeg: {sample_path} ({sample_path.stat().st_size} bytes)")
-                            except Exception as e:
-                                logger.warning(f"[CLIP DESCARGA] ffmpeg falló {e}, creando dummy ftyp")
-                                try:
-                                    sample_path.write_bytes(b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom" + b"\x00" * 8192)
-                                    logger.info(f"[CLIP DESCARGA] sample_test dummy creado: {sample_path} ({sample_path.stat().st_size} bytes)")
-                                except Exception as e2:
-                                    logger.error(f"[CLIP DESCARGA] error creando dummy: {e2}")
-                    encontrado = str(sample_path.resolve())
-                    logger.info(f"[CLIP DESCARGA] Sirviendo video de prueba 'sample_test.mp4': {encontrado} (Tamaño: {sample_path.stat().st_size} bytes) ruta_absoluta={Path(encontrado).resolve()}")
-                    print(f"[CLIP DESCARGA] Sirviendo video de prueba 'sample_test.mp4': {encontrado}")
-                except Exception as e:
-                    logger.error(f"[CLIP DESCARGA] error preparando sample_test: {e}")
-                    if sample_path.exists():
-                        encontrado = str(sample_path.resolve())
-            # Asignar fallback final - nunca devolver 400, servir sample_test
-            if encontrado:
-                ruta_final = encontrado
-                # Log de ruta absoluta real que se intentó resolver
-                try:
-                    abs_attempted = str(Path(raw_path).resolve())
-                except Exception:
-                    abs_attempted = raw_path
-                logger.info(f"[CLIP DESCARGA] Fallback final asignado {ruta_final} ruta_absoluta={Path(ruta_final).resolve()} para raw_path={raw_path} (absoluta intentada: {abs_attempted})")
-            else:
-                # Último fallback absoluto: sample_test incluso si encontrado falló
-                sample_path = Path("/app/storage/sample_test.mp4")
-                if sample_path.exists():
-                    ruta_final = str(sample_path.resolve())
-                    msg_sample = f"[CLIP DESCARGA] El clip {clip_id} no tenía archivo físico. Sirviendo video de prueba 'sample_test.mp4' para simulación de publicación."
-                    print(msg_sample)
-                    logger.info(msg_sample)
-                else:
-                    logger.error(f"[CLIP DESCARGA] archivo no encontrado raw_path={raw_path} ruta_absoluta_intentada={Path(raw_path).resolve() if raw_path else 'N/A'} basename={basename} - sirviendo sample_test por defecto")
-                    # Crear sample mínimo para no devolver 400
-                    try:
-                        sample_path.parent.mkdir(parents=True, exist_ok=True)
-                        sample_path.write_bytes(b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom" + b"\x00" * 4096)
-                        ruta_final = str(sample_path.resolve())
-                    except Exception as e:
-                        logger.error(f"[CLIP DESCARGA] error crítico creando sample: {e}")
-                        raise HTTPException(status_code=500, detail="Error interno sirviendo video de prueba")
+            # Modo 100% real: no existe archivo físico → error 404 real para que el frontend muestre toast
+            logger.error(f"[CLIP DESCARGA] clip {clip_id} archivo no encontrado raw_path={raw_path} basename={basename} — sin fallback de prueba (modo 100%% real)")
+            raise HTTPException(status_code=404, detail=f"Archivo de clip no encontrado en storage: {raw_path}. El clip debe ser reprocesado via /clips/{{id}}/re-render.")
 
     # Verificación final tamaño
     try:

@@ -67,9 +67,19 @@ const isEmpty = computed(() => {
   return metrics.value.total_jobs === 0 && metrics.value.total_clips === 0
 })
 
+const activeJobId = ref<string | null>(null)
+onMounted(() => {
+  try {
+    const id = localStorage.getItem('clipsai_active_job_id')
+    if (id) activeJobId.value = id
+  } catch {}
+})
+
 async function fetchAll() {
   loading.value = true
   error.value = null
+  // Timeout de seguridad 5s: forzar finally aunque la red se cuelgue
+  const safety = window.setTimeout(() => { loading.value = false }, 5000)
   try {
     const [s, m] = await Promise.all([statsService.getSummary(), metricsService.getMetrics()])
     stats.value = s
@@ -79,6 +89,7 @@ async function fetchAll() {
     else if (err instanceof Error) error.value = err.message
     else error.value = 'Error al cargar métricas'
   } finally {
+    window.clearTimeout(safety)
     loading.value = false
   }
 }
@@ -89,6 +100,10 @@ onMounted(fetchAll)
 <template>
   <div class="min-h-screen bg-[#0B0F17] text-white">
     <div class="max-w-6xl mx-auto px-4 py-6 sm:py-8">
+      <div v-if="activeJobId" class="rounded-xl border border-[rgba(180,241,5,0.22)] bg-[rgba(180,241,5,0.08)] px-4 py-3 flex items-center justify-between gap-3 mb-6">
+        <div class="flex items-center gap-2 text-sm font-bold text-[#B4F105]"><span class="h-2 w-2 rounded-full bg-[#B4F105] animate-pulse" /> Procesamiento activo</div>
+        <RouterLink :to="`/jobs/${activeJobId}`" class="btn-custom btn-custom-primary btn-custom-sm">Ver progreso →</RouterLink>
+      </div>
       <div class="mb-6 sm:mb-8">
         <div class="inline-flex items-center gap-2 mb-3 px-3 py-1 rounded-full text-xs font-bold bg-[rgba(180,241,5,0.10)] text-[#B4F105] border border-[rgba(180,241,5,0.22)]">
           <span class="h-1.5 w-1.5 rounded-full bg-[#B4F105] shadow-[0_0_6px_rgba(180,241,5,0.6)] animate-pulse" /> LIVE

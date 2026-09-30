@@ -11,3 +11,5 @@ email-validator==2.2.0
 requests==2.32.3
 python-dotenv==1.0.1
 anthropic==0.64.0
+faster-whisper==1.1.1
+json-repair>=0.30.0,<1.0

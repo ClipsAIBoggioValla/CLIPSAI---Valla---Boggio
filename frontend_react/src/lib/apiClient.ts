@@ -48,18 +48,37 @@ interface RequestOptions {
   body?: BodyInit | null
   headers?: HeadersInit
   noAuth?: boolean
+  timeout?: number
 }
 
 export async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', body, headers, noAuth = false } = opts
+  const { method = 'GET', body, headers, noAuth = false, timeout = 10000 } = opts
   const finalHeaders = buildHeaders(headers, !noAuth)
   const useCredentials = path.includes('/login') || path.includes('/me') || path.includes('/auth')
-  const res = await fetch(`${BASE_URL}${path}`, {
-    method,
-    headers: finalHeaders,
-    body: body ?? null,
-    credentials: useCredentials ? 'include' : 'include',
-  })
+  const controller = new AbortController()
+  // timeout=0 desactiva el límite para operaciones largas como la subida de videos.
+  const timeoutId = timeout > 0 ? window.setTimeout(() => controller.abort(), timeout) : undefined
+  const abortMessage = timeout > 0 ? `Timeout ${Math.round(timeout / 1000)}s: backend no responde` : 'La solicitud fue cancelada'
+  let res: Response
+  try {
+    res = await fetch(`${BASE_URL}${path}`, {
+      method,
+      headers: finalHeaders,
+      body: body ?? null,
+      credentials: useCredentials ? 'include' : 'include',
+      signal: controller.signal,
+    })
+  } catch (e: unknown) {
+    if (e instanceof DOMException && e.name === 'AbortError') {
+      throw new ApiError(0, abortMessage)
+    }
+    if (e instanceof Error && e.name === 'AbortError') {
+      throw new ApiError(0, abortMessage)
+    }
+    throw e
+  } finally {
+    if (timeoutId !== undefined) window.clearTimeout(timeoutId)
+  }
   if (!res.ok) throw await parseError(res)
   if (res.status === 204) return undefined as unknown as T
   const text = await res.text()

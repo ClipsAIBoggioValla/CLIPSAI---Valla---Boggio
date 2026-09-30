@@ -6,6 +6,13 @@ __pycache__/
 *.pyc
 *.pyo
 
+storage/uploads/*
+storage/clips/*
+!storage/uploads/.gitkeep
+!storage/clips/.gitkeep
+*.mp4
+*.wav
+
 audio.mp3
 audio.wav
 audio_trans_temp.wav
@@ -20,3 +27,6 @@ clips_editados/
 gaming_procesado/
 
 .env
+storage/*
+*.mp4
+*.wav

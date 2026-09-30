@@ -11,7 +11,7 @@ import logging
 
 from .config import get_settings
 from .database import Base, engine
-from .routers import auth, clips, export, jobs, metrics, publish, social_auth, stats, subtitles, users, videos
+from .routers import auth, clips, export, jobs, metrics, publish, social_auth, stats, stream as publish_stream, subtitles, users, videos
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,25 @@ try:
     import sys
     from pathlib import Path as _Path
 
-    _root = _Path(__file__).resolve().parents[2].parent
+    # Resolución segura sin parents[2].parent que desborda en /app (IndexError)
+    _cur = _Path(__file__).resolve()
+    _root = None
+    for _p in _cur.parents:
+        try:
+            # Priorizar backend/backend_fastapi para evitar self-match
+            if (_p / "backend").is_dir() or (_p / "backend_fastapi").is_dir():
+                _root = _p
+                break
+            if (_p / ".env").exists():
+                _root = _p
+                break
+            if _p != _cur.parent and (_p / "engine.py").exists():
+                _root = _p
+                break
+        except Exception:
+            continue
+    if _root is None:
+        _root = _cur.parents[min(2, len(_cur.parents) - 1)]
     if str(_root) not in sys.path:
         sys.path.insert(0, str(_root))
     from backend.api.routes.retrim import router as retrim_router  # type: ignore
@@ -44,6 +62,9 @@ async def lifespan(app: FastAPI):
         conn.execute(text("ALTER TABLE videos ADD COLUMN IF NOT EXISTS duration_seconds DOUBLE PRECISION;"))
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS result_metadata JSONB;"))
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS error_message TEXT;"))
+        conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS progress INTEGER DEFAULT 0;"))
+        # Asegurar CHECK progress 0-100 si no existe
+        conn.execute(text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='chk_jobs_progress') THEN ALTER TABLE jobs ADD CONSTRAINT chk_jobs_progress CHECK (progress >= 0 AND progress <= 100); END IF; END $$;"))
         conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS video_id UUID;"))
         conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS score DOUBLE PRECISION;"))
         conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS tags JSONB;"))
@@ -101,6 +122,37 @@ async def lifespan(app: FastAPI):
             )
         )
         conn.commit()
+    # --- Limpieza automática de Jobs huérfanos al iniciar (evita processing infinito tras reinicio) ---
+    try:
+        from .database import SessionLocal
+
+        db = SessionLocal()
+        try:
+            # Buscar jobs en processing (case-insensitive por si quedó PROCESSING)
+            interrupted_jobs = db.query(Job).filter(Job.status == "processing").all()
+            if not interrupted_jobs:
+                from sqlalchemy import func
+
+                interrupted_jobs = db.query(Job).filter(func.lower(Job.status) == "processing").all()
+            if interrupted_jobs:
+                for job in interrupted_jobs:
+                    job.status = "failed"
+                    job.error_message = "Proceso interrumpido por reinicio del servidor."
+                db.commit()
+                print(f"[STARTUP] Se marcaron {len(interrupted_jobs)} trabajos huérfanos como 'failed'.")
+            else:
+                print("[STARTUP] No hay trabajos huérfanos en 'processing'.")
+        except Exception as e:
+            print(f"[STARTUP] Error al limpiar jobs huérfanos: {e}")
+            try:
+                db.rollback()
+            except Exception:
+                pass
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[STARTUP] Error al limpiar jobs huérfanos: {e}")
+
     yield
 
 
@@ -195,6 +247,17 @@ app.include_router(metrics.router)
 app.include_router(clips.router)
 app.include_router(stats.router)
 app.include_router(subtitles.router)
+# Montar antes de publish.router: este router implementa el SSE compatible con EventSource (?token=).
+app.include_router(publish_stream.router)
+# El router publish aún declara una implementación SSE anterior; evitar duplicar la ruta pública.
+publish.router.routes[:] = [
+    route
+    for route in publish.router.routes
+    if not (
+        getattr(route, "path", None) == "/clips/{clip_id}/publish-stream"
+        and "GET" in (getattr(route, "methods", None) or set())
+    )
+]
 app.include_router(publish.router)
 app.include_router(users.router)
 app.include_router(users.router, prefix="/api")

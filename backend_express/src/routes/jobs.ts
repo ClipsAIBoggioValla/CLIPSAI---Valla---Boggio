@@ -40,8 +40,27 @@ function getProvider(): string {
 
 async function runClipEngine(videoPath: string, transcriptionPath: string): Promise<Record<string, unknown>> {
   const fs = await import('fs')
-  if (!fs.existsSync(videoPath) || !fs.existsSync(transcriptionPath)) {
-    throw new Error('Video o transcripción no encontrada')
+  // Verificación de ruta física antes de Whisper/FFmpeg (evitar ENOENT y código 4)
+  if (!videoPath || !videoPath.trim()) {
+    throw new Error('Ruta de video vacía — verificar video.filepath en BD')
+  }
+  if (!fs.existsSync(videoPath)) {
+    throw new Error(`Video no encontrado en disco: ${videoPath} (os.path.exists=False)`)
+  }
+  try {
+    const st = fs.statSync(videoPath)
+    if (st.size === 0) throw new Error(`Video vacío (0 bytes): ${videoPath}`)
+  } catch (e) {
+    if (e instanceof Error && e.message.includes('Video')) throw e
+    // ignorar stat warning
+  }
+  if (!transcriptionPath || !transcriptionPath.trim()) {
+    // Transcripción puede venir de transcript BD pero Express la requiere como archivo — validar
+    console.warn(`[engine:express] transcriptionPath vacío — verificar video.transcription_filepath`)
+    throw new Error(`Transcripción no encontrada: transcriptionPath vacío para video ${videoPath}`)
+  }
+  if (!fs.existsSync(transcriptionPath)) {
+    throw new Error(`Transcripción no encontrada en disco: ${transcriptionPath}`)
   }
   const provider = getProvider()
   console.log(`[engine:express] provider=${provider} ANTHROPIC=${!!process.env.ANTHROPIC_API_KEY} OPENAI=${!!process.env.OPENAI_API_KEY} OPENROUTER=${!!process.env.OPENROUTER_API_KEY}`)
@@ -70,49 +89,35 @@ async function runClipEngine(videoPath: string, transcriptionPath: string): Prom
           console.error('[engine:express] parse engine JSON fallo', e)
         }
       } else {
-        const stderr = (res.stderr as unknown as string) || ''
-        console.error(`[engine:express] spawn fallo status=${res.status} stderr=${String(stderr).slice(0, 500)}`)
+        const stderr = (res.stderr as unknown as string) || String(res.error || '') || ''
+        const stdout = (res.stdout as unknown as string) || ''
+        console.error(`[engine:express] spawn fallo status=${res.status} stderr=${String(stderr).slice(0, 800)} stdout=${String(stdout).slice(0,500)}`)
+        // Propagar error descriptivo en lugar de solo código "4"
+        const detail = stderr.trim() ? stderr.trim().slice(0, 800) : stdout.trim() ? stdout.trim().slice(0,800) : `exit code ${res.status}`
+        throw new Error(`FFmpeg/engine spawn falló (code=${res.status}): ${detail}`)
       }
+    } else {
+      throw new Error(`engine.py no encontrado en ${enginePath} — verificar despliegue`)
     }
   } catch (e) {
-    console.error('[engine:express] spawn exception', e)
+    console.error('[engine:express] spawn exception', e, e instanceof Error ? e.stack : '')
+    if (e instanceof Error && (e.message.includes('spawn falló') || e.message.includes('engine.py no encontrado'))) throw e
   }
-  // Intento directo Anthropic/OpenRouter si python falló y hay key
+  // Intento directo Anthropic/OpenRouter si python falló y hay key — log con traceback
   if (provider !== 'none') {
     try {
-      console.log(`[engine:express] intento LLM directo provider=${provider} no implementado full, usando fallback transcript-based`)
+      console.log(`[engine:express] intento LLM directo provider=${provider} no implementado full`)
     } catch (e) {
-      console.error('[engine:express] LLM directo fallo', e)
+      console.error('[engine:express] LLM directo fallo', e, e instanceof Error ? e.stack : '')
     }
   }
-  // Fallback determinístico transcript-based (no deja FAILED)
-  await new Promise((r) => setTimeout(r, 800))
-  let preview = ''
-  try {
-    const fs2 = await import('fs')
-    preview = fs2.readFileSync(transcriptionPath, 'utf-8').slice(0, 120)
-  } catch {}
-  console.warn('[engine:express] fallback simulado aplicado')
-  return {
-    clips: [
-      { inicio: '00:00:10', fin: '00:00:45', titulo: 'Clip destacado 1 (fallback)', score: 7.5, transcript_preview: preview },
-      { inicio: '00:01:00', fin: '00:01:35', titulo: 'Clip destacado 2 (fallback)', score: 7.0 },
-    ],
-    engine: 'fallback',
-    provider,
-    fallback: true,
-  }
+  // Modo 100% real — sin fallback de prueba. Error descriptivo con causa raíz
+  throw new Error(`Engine real no disponible o falló — verificar ANTHROPIC_API_KEY, engine.py y que video/transcripción existan (provider=${provider}). Revisar logs spawn previos para código de salida.`)
 }
 
-function buildFallback(videoId: string, preview: string): Record<string, unknown> {
-  return {
-    clips: [
-      { inicio: '00:00:10', fin: '00:00:45', titulo: 'Clip destacado 1 (fallback)', score: 7.5, transcript_preview: preview.slice(0, 120) },
-      { inicio: '00:01:00', fin: '00:01:35', titulo: 'Clip destacado 2 (fallback)', score: 7.0 },
-    ],
-    engine: 'fallback',
-    fallback: true,
-  }
+function buildFallback(_videoId: string, _preview: string): Record<string, unknown> {
+  // Deshabilitado en modo 100% real — no genera clips sintéticos
+  throw new Error('buildFallback deshabilitado en modo 100% real')
 }
 
 async function runJob(jobId: string): Promise<void> {
@@ -128,16 +133,8 @@ async function runJob(jobId: string): Promise<void> {
     const videoPath = video.file_path as string
     const transcriptionPath = (video.transcription_filepath as string) || ''
 
-    let result: Record<string, unknown>
-    try {
-      result = await runClipEngine(videoPath, transcriptionPath)
-    } catch (e) {
-      console.error(`[jobs:express] runClipEngine exception job=${jobId}`, e)
-      const preview = (video.transcript as string) || ''
-      console.warn(`[jobs:express] fallback aplicado job=${jobId}`)
-      result = buildFallback(videoId, preview)
-      ;(result as Record<string, unknown>).fallback_error = e instanceof Error ? e.message : String(e)
-    }
+    // Modo 100% real — sin fallback, error se propaga a FAILED
+    const result: Record<string, unknown> = await runClipEngine(videoPath, transcriptionPath)
 
     let clipsPayload: Record<string, unknown>[] = Array.isArray((result as Record<string, unknown>).clips)
       ? ((result as Record<string, unknown>).clips as Record<string, unknown>[])
@@ -146,10 +143,7 @@ async function runJob(jobId: string): Promise<void> {
         : []
 
     if (clipsPayload.length === 0) {
-      console.warn(`[jobs:express] 0 clips devueltos job=${jobId}, usando fallback`)
-      const preview = (video.transcript as string) || ''
-      result = buildFallback(videoId, preview)
-      clipsPayload = (result.clips as Record<string, unknown>[]) || []
+      throw new Error('El engine real no devolvió clips (0 clips) — verificar transcripción y LLM (modo 100% real, sin fallback)')
     }
 
     const fresh = await client.query('SELECT id FROM jobs WHERE id = $1', [jobId])
@@ -177,50 +171,32 @@ async function runJob(jobId: string): Promise<void> {
         [videoId, jobId, String(title).slice(0, 255), start, end, score, tags ? JSON.stringify(tags) : null, storage, 'ready']
       )
     }
-    if ((result as Record<string, unknown>).fallback) {
-      console.warn(`[jobs:express] job ${jobId} completado via fallback`)
-    } else {
-      console.log(`[jobs:express] job ${jobId} completado ${clipsPayload.length} clips`)
-    }
+    console.log(`[jobs:express] job ${jobId} completado 100% real ${clipsPayload.length} clips`)
   } catch (err: unknown) {
-    console.error(`[jobs:express] fallo irrecuperable job=${jobId}`, err)
-    try {
-      const preview = ''
-      const fallback = buildFallback('', preview)
-      ;(fallback as Record<string, unknown>).fatal_error = err instanceof Error ? err.message : String(err)
-      const jRes = await pool.query('SELECT video_id FROM jobs WHERE id = $1', [jobId])
-      const vid = jRes.rows[0]?.video_id as string | undefined
-      await pool.query('UPDATE jobs SET result_metadata = $1::jsonb, status = $2, error_message = NULL, updated_at = NOW() WHERE id = $3', [
-        JSON.stringify(fallback),
-        'completed',
-        jobId,
-      ])
-      const clips = (fallback.clips as Record<string, unknown>[]) || []
-      for (const item of clips) {
-        const title = (item.titulo as string) || 'Clip fallback'
-        const start = parseTimeToSeconds(item.inicio as unknown)
-        const end = parseTimeToSeconds(item.fin as unknown)
-        await pool.query('INSERT INTO clips (video_id, job_id, title, start_time, end_time, score, tags, file_path, status) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9)', [
-          vid || '00000000-0000-0000-0000-000000000000',
-          jobId,
-          String(title).slice(0, 255),
-          start,
-          end,
-          7.0,
-          null,
-          '',
-          'ready',
-        ])
-      }
-      console.warn(`[jobs:express] job ${jobId} recuperado via fallback tras error fatal`)
-      return
-    } catch (e2) {
-      console.error(`[jobs:express] fallback fatal también falló job=${jobId}`, e2)
+    // FIX: Capturar e imprimir Traceback completo en lugar de solo str(err) == "4"
+    const stack = err instanceof Error ? err.stack ?? '' : ''
+    console.error(`[jobs:express] fallo irrecuperable job=${jobId} — modo 100% real sin fallback`, err, stack ? `\nStack: ${stack}` : '')
+    let rawMsg = err instanceof Error ? String(err.message).trim() : String(err).trim()
+    let descriptive = rawMsg
+    if (!rawMsg || rawMsg === '4' || rawMsg.length <= 4) {
+      descriptive = `${err instanceof Error ? err.name : 'Error'}: ${rawMsg || 'error sin mensaje'} — Fallo en pipeline Job ${jobId}. Posibles causas: segments vacío (Whisper sin audio), filepath no existe, o FFmpeg args inválidos. Stack: ${stack.slice(0,1500)}`
+    } else {
+      descriptive = `${err instanceof Error ? err.name + ': ' : ''}${rawMsg}${stack ? `\n${stack.slice(0,1200)}` : ''}`
     }
-    const msg = err instanceof Error ? err.message : String(err)
+    if (stack.includes('segments') && (stack.includes('RangeError') || stack.includes('index') || rawMsg.includes('index'))) {
+      descriptive = `No se detectaron segmentos de audio suficientes en el video — Whisper devolvió lista vacía. Job ${jobId}: ${rawMsg}${stack ? `\n${stack.slice(0,1200)}` : ''}`
+    }
+    // Validación de arrays vacíos: mensaje descriptivo si clips vacíos
+    if (rawMsg.includes('0 clips') || rawMsg.includes('no devolvió clips')) {
+      descriptive = `No se detectaron segmentos de audio suficientes en el video — engine devolvió 0 clips. Job ${jobId}: verificar transcripción y audio. ${rawMsg}`
+    }
     try {
-      await pool.query("UPDATE jobs SET status = 'failed', error_message = $1, updated_at = NOW() WHERE id = $2", [msg.slice(0, 2000), jobId])
-    } catch {}
+      const tbMeta = JSON.stringify({ error: descriptive.slice(0,2000), error_type: err instanceof Error ? err.name : 'Unknown', traceback: stack.slice(0,3000), engine: 'real', failed: true })
+      await pool.query("UPDATE jobs SET status = 'failed', error_message = $1, result_metadata = $2::jsonb, updated_at = NOW() WHERE id = $3", [descriptive.slice(0, 2000), tbMeta, jobId])
+      console.info(`[jobs:express] job ${jobId} marcado FAILED con mensaje descriptivo`)
+    } catch (dbErr) {
+      console.error(`[jobs:express] error al marcar FAILED job=${jobId}`, dbErr)
+    }
   } finally {
     client.release()
   }

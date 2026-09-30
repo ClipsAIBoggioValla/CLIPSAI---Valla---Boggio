@@ -71,30 +71,31 @@ videosRouter.post(
     const videoFile = files?.video?.[0]
     const transcriptFile = files?.transcription?.[0]
 
-    if (!videoFile || !transcriptFile) {
-      if (videoFile?.path) try { fs.unlinkSync(videoFile.path) } catch {}
+    if (!videoFile) {
       if (transcriptFile?.path) try { fs.unlinkSync(transcriptFile.path) } catch {}
-      return res.status(400).json({ detail: 'Se requieren ambos archivos: video y transcription' })
+      return res.status(400).json({ detail: 'Se requiere archivo de video' })
     }
 
     let transcriptText: string | null = null
-    try {
-      const raw = fs.readFileSync(transcriptFile.path, 'utf-8')
-      transcriptText = raw.slice(0, 50000)
-    } catch {
-      transcriptText = null
+    if (transcriptFile) {
+      try {
+        const raw = fs.readFileSync(transcriptFile.path, 'utf-8')
+        transcriptText = raw.slice(0, 50000)
+      } catch {
+        transcriptText = null
+      }
     }
 
     try {
       const r = await pool.query(
         'INSERT INTO videos (usuario_id, original_filename, file_path, transcription_filepath, transcript) VALUES ($1,$2,$3,$4,$5) RETURNING id, original_filename AS filename, created_at',
-        [userId, videoFile.originalname || videoFile.filename, videoFile.path, transcriptFile.path, transcriptText]
+        [userId, videoFile.originalname || videoFile.filename, videoFile.path, transcriptFile?.path ?? null, transcriptText]
       )
       const row = r.rows[0] as Record<string, unknown>
       return res.status(201).json({ id: row.id, filename: row.filename, created_at: new Date(row.created_at as string).toISOString() })
     } catch (err) {
       try { fs.unlinkSync(videoFile.path) } catch {}
-      try { fs.unlinkSync(transcriptFile.path) } catch {}
+      if (transcriptFile?.path) try { fs.unlinkSync(transcriptFile.path) } catch {}
       console.error('POST /videos error', err)
       return res.status(500).json({ detail: 'Error interno' })
     }
