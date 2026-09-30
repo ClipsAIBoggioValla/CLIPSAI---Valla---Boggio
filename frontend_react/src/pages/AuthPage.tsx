@@ -28,7 +28,14 @@ export default function AuthPage() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  if (!isLoading && isAuthenticated) return <Navigate to="/upload" replace />
+  if (!isLoading && isAuthenticated) {
+    let dest = '/upload'
+    try {
+      const saved = localStorage.getItem('clipsai_active_job_id')
+      if (saved) dest = `/jobs/${saved}`
+    } catch {}
+    return <Navigate to={dest} replace />
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -40,7 +47,12 @@ export default function AuthPage() {
       } else {
         await register({ email: email.trim(), password, full_name: fullName.trim() || undefined })
       }
-      navigate('/upload', { replace: true })
+      let dest = '/upload'
+      try {
+        const saved = localStorage.getItem('clipsai_active_job_id')
+        if (saved) dest = `/jobs/${saved}`
+      } catch {}
+      navigate(dest, { replace: true })
     } catch (err: unknown) {
       setError(messageForError(err))
     } finally {

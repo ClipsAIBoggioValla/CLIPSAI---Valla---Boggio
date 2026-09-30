@@ -86,7 +86,7 @@ class Settings(BaseSettings):
         min_length=16,
     )
     jwt_algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
-    jwt_expire_minutes: int = Field(default=60, validation_alias="JWT_EXPIRE_MINUTES")
+    jwt_expire_minutes: int = Field(default=1440, validation_alias="JWT_EXPIRE_MINUTES")
 
     # ---- Backend público permanente ----
     public_backend_url: str = Field(
@@ -124,6 +124,22 @@ class Settings(BaseSettings):
     frontend_url: str = Field(
         default="http://localhost:3000",
         validation_alias="FRONTEND_URL",
+    )
+
+    # ---- Claude / LLM (Anthropic) — selección semántica de clips y títulos ----
+    anthropic_api_key: str = Field(default="", validation_alias="ANTHROPIC_API_KEY")
+    anthropic_model: str = Field(default="claude-sonnet-4-20250514", validation_alias="ANTHROPIC_MODEL")
+    anthropic_version: str = Field(default="2023-06-01", validation_alias="ANTHROPIC_VERSION")
+    openai_api_key: str = Field(default="", validation_alias="OPENAI_API_KEY")
+    openrouter_api_key: str = Field(default="", validation_alias="OPENROUTER_API_KEY")
+    openrouter_model: str = Field(default="anthropic/claude-3.5-sonnet", validation_alias="OPENROUTER_MODEL")
+    openrouter_endpoint: str = Field(
+        default="https://openrouter.ai/api/v1/chat/completions", validation_alias="OPENROUTER_ENDPOINT"
+    )
+    deepseek_api_key: str = Field(default="", validation_alias="DEEPSEEK_API_KEY")
+    llm_model: str = Field(default="deepseek-chat", validation_alias="MODEL")
+    llm_endpoint: str = Field(
+        default="https://api.deepseek.com/v1/chat/completions", validation_alias="API_ENDPOINT"
     )
 
     model_config = SettingsConfigDict(

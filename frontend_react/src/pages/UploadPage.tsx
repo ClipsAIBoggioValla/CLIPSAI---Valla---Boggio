@@ -1,5 +1,5 @@
-import { useState, type ChangeEvent, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, type ChangeEvent, type FormEvent, useEffect } from 'react'
+import { useNavigate, Link } from 'react-router-dom'
 import { jobService, videoService } from '@/services/api'
 import { ApiError } from '@/types/api'
 
@@ -17,6 +17,14 @@ export default function UploadPage() {
   const [transcriptFile, setTranscriptFile] = useState<File | null>(null)
   const [status, setStatus] = useState<UploadState>('idle')
   const [error, setError] = useState<string | null>(null)
+  const [activeJobId, setActiveJobId] = useState<string | null>(null)
+
+  useEffect(() => {
+    try {
+      const id = localStorage.getItem('clipsai_active_job_id')
+      if (id) setActiveJobId(id)
+    } catch {}
+  }, [])
 
   const isUploading = status === 'uploading' || status === 'creating_job'
 
@@ -29,17 +37,20 @@ export default function UploadPage() {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    if (!videoFile || !transcriptFile) {
-      setError('Selecciona ambos archivos: video y transcripción.')
+    if (!videoFile) {
+      setError('Selecciona el archivo de video.')
       return
     }
     setError(null)
     try {
       setStatus('uploading')
-      const video = await videoService.upload(videoFile, transcriptFile)
+      const video = await videoService.upload(videoFile, transcriptFile ?? null)
       setStatus('creating_job')
       const job = await jobService.createJob(video.id)
       const jobId = job.job_id ?? job.id
+      try {
+        localStorage.setItem('clipsai_active_job_id', jobId)
+      } catch {}
       navigate(`/jobs/${jobId}`, { replace: false })
     } catch (err: unknown) {
       setStatus('idle')
@@ -49,6 +60,16 @@ export default function UploadPage() {
 
   return (
     <div className="max-w-3xl mx-auto">
+      {activeJobId && (
+        <div className="rounded-xl border border-[rgba(180,241,5,0.22)] bg-[rgba(180,241,5,0.08)] px-4 py-3 flex items-center justify-between gap-3 mb-6">
+          <span className="text-sm font-bold text-[#B4F105] flex items-center gap-2">
+            <span className="h-2 w-2 rounded-full bg-[#B4F105] animate-pulse" /> Procesamiento activo detectado
+          </span>
+          <Link to={`/jobs/${activeJobId}`} className="btn-custom btn-custom-primary btn-custom-sm">
+            Ver progreso {activeJobId.slice(0, 8)} →
+          </Link>
+        </div>
+      )}
       <div className="page-header" style={{ marginBottom: '2rem' }}>
         <div>
           <div className="flex flex-wrap items-center gap-3 mb-4">
@@ -99,7 +120,7 @@ export default function UploadPage() {
 
         <div>
           <label className="form-label-custom">
-            Archivo de Transcripción <span className="text-[#B4F105]">*</span>
+            Archivo de Transcripción <span className="text-[#94A3B8] font-normal">(opcional)</span>
           </label>
           <label className={`dropzone-neon flex flex-col items-center justify-center rounded-xl p-6 sm:p-8 cursor-pointer ${transcriptFile ? 'has-file' : ''}`}>
             <span className="dropzone-icon-neon mb-3"><i className="bi bi-file-earmark-text" /></span>
@@ -118,7 +139,7 @@ export default function UploadPage() {
           </label>
         </div>
 
-        <button type="submit" disabled={isUploading || !videoFile || !transcriptFile} className="btn-custom btn-custom-primary w-full justify-center btn-custom-lg shadow-[0_0_28px_rgba(180,241,5,0.35)]">
+        <button type="submit" disabled={isUploading || !videoFile} className="btn-custom btn-custom-primary w-full justify-center btn-custom-lg shadow-[0_0_28px_rgba(180,241,5,0.35)]">
           {isUploading ? (
             <>
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#080C14]/30 border-t-[#080C14]" />

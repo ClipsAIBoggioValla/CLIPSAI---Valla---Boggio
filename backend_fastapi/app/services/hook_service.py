@@ -13,8 +13,25 @@ from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
-for _p in (Path(__file__).resolve().parents[3] / ".env", Path(__file__).resolve().parents[2] / ".env"):
-    load_dotenv(dotenv_path=_p, override=False)
+# Carga .env segura sin parents[3] fijo que causa IndexError en /app
+_cur_hook = Path(__file__).resolve()
+_env_candidates: list[Path] = []
+for _idx in (3, 2, 1, 0):
+    if _idx < len(_cur_hook.parents):
+        _env_candidates.append(_cur_hook.parents[_idx] / ".env")
+# También buscar raíz por marcador (engine.py / backend_fastapi) sin desbordar
+for _p in _cur_hook.parents:
+    try:
+        cand = _p / ".env"
+        if cand not in _env_candidates and cand.exists():
+            _env_candidates.append(cand)
+    except Exception:
+        continue
+for _p in _env_candidates:
+    try:
+        load_dotenv(dotenv_path=_p, override=False)
+    except Exception:
+        continue
 
 
 class HookSegment(TypedDict):
@@ -267,26 +284,42 @@ def _validate_clips(data: dict[str, Any]) -> list[HookClip]:
 
 
 def detect_hooks(segments: list[dict[str, Any]], duration_hint: float | None = None, mock: bool = False) -> list[HookClip]:
-    if mock or _get_provider() == "none":
+    # Modo mock explícito para tests
+    if mock:
         return _mock_hooks(segments)
+    # Integración nativa obligatoria: sin ANTHROPIC_API_KEY debe fallar explícitamente, sin fallback heurístico
+    provider = _get_provider()
+    if provider == "none":
+        raise RuntimeError("Error en API de Claude: ANTHROPIC_API_KEY no configurada (revisar .env y docker-compose.yml ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY})")
     try:
         transcript_text = _format_transcript(segments)
         if not transcript_text.strip():
             raise ValueError("Transcripcion vacia")
         prompt = _build_hook_prompt(transcript_text, duration_hint)
         raw = _call_llm(prompt)
-        print(f"[hook] LLM raw {len(raw)} chars")
+        # Log de confirmación cuando Claude responde exitosamente
+        provider = _get_provider()
+        if provider == "anthropic":
+            logger.info("Análisis de virabilidad completado exitosamente vía Claude API")
+        else:
+            logger.info("Análisis de virabilidad completado exitosamente vía %s API", provider)
+        print(f"[hook] LLM raw {len(raw)} chars via {provider}")
         print(raw[:1200])
         data = _parse_json_strict(raw)
         clips = _validate_clips(data)
         if not clips:
-            print(f"[hook] WARN validacion dejo 0 clips, data: {data} — fallback mock")
-            logger.warning("Hook validacion 0 clips, usando fallback mock")
-            return _mock_hooks(segments)
+            raise RuntimeError(f"Error en API de Claude: validación dejó 0 clips — raw: {raw[:500]}")
+        # Selección semántica vía LLM tiene prioridad sobre heurística nativa (sin fallback)
+        logger.info("Hook: usando resultado semántico de %s (%s clips validados)", provider, len(clips))
         return clips
-    except Exception:
-        logger.exception("detect_hooks fallo, fallback a mock")
-        return _mock_hooks(segments)
+    except RuntimeError as e:
+        # Propagar con prefijo requerido si no lo tiene
+        if "Error en la API de Claude" not in str(e):
+            raise RuntimeError(f"Error en API de Claude: {e}") from e
+        raise
+    except Exception as e:
+        logger.exception("detect_hooks fallo")
+        raise RuntimeError(f"Error en API de Claude: {e}") from e
 
 
 def _mock_hooks(segments: list[dict[str, Any]]) -> list[HookClip]:

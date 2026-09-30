@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     id                  UUID                        PRIMARY KEY DEFAULT uuid_generate_v4(),
     video_id            UUID                        NOT NULL,
     status              VARCHAR(50)                 NOT NULL DEFAULT 'pending',
+    progress            INTEGER                     NOT NULL DEFAULT 0 CHECK (progress >= 0 AND progress <= 100),
     error_message       TEXT,
     created_at          TIMESTAMP WITH TIME ZONE    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMP WITH TIME ZONE    NOT NULL DEFAULT CURRENT_TIMESTAMP,
