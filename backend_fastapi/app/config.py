@@ -61,8 +61,10 @@ class Settings(BaseSettings):
     # Default al nombre de servicio de docker-compose `db` para que funcie
     # aunque DATABASE_URL no venga en el ambiente (usar .env o docker compose).
     # En host Windows sin Docker DNS, se hace fallback a localhost automáticamente.
+    # NOTE: En produccion esto DEBE venir configurada via entorno .env o docker compose.
+    # El valor 'changeme' es solo un placeholder para development local.
     database_url: str = Field(
-        default="postgresql+psycopg2://clipsai:changeme@db:5432/clipsai",
+        default="postgresql+psycopg2://clipsai:changeme_placeholder@db:5432/clipsai",
         validation_alias="DATABASE_URL",
     )
 

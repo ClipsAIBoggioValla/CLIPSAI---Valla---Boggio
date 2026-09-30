@@ -107,7 +107,7 @@ const swaggerDefinition = {
           score: { type: 'number', nullable: true },
           start_time: { type: 'number' },
           end_time: { type: 'number' },
-          transcript: { type: 'string', nullable: true },
+          transcript: { type: 'string', nullable: true, description: 'Extracto (máx. 500 chars) de la transcripción del video origen' },
           status: { type: 'string', nullable: true, example: 'ready' },
           file_path: { type: 'string', nullable: true, example: '/app/storage/clips/abc.mp4' },
           stream_url: { type: 'string', example: '/clips/abc/descarga' },
@@ -115,6 +115,9 @@ const swaggerDefinition = {
           has_ass: { type: 'boolean', example: true },
           has_hook: { type: 'boolean', example: true },
           tags: { type: 'object', nullable: true },
+          published_platform: { type: 'string', nullable: true, example: 'tiktok' },
+          social_post_url: { type: 'string', nullable: true },
+          published_at: { type: 'string', format: 'date-time', nullable: true },
           created_at: { type: 'string', format: 'date-time' },
         },
       },
@@ -146,14 +149,47 @@ const swaggerDefinition = {
           duration: { type: 'number', nullable: true },
           has_ass: { type: 'boolean' },
           has_hook: { type: 'boolean' },
+          tags: { type: 'array', items: { type: 'string' }, nullable: true },
+          storage_path: { type: 'string', description: 'Ruta en disco del archivo del clip' },
+          status: { type: 'string', example: 'ready' },
           published_platform: { type: 'string', nullable: true },
           social_post_id: { type: 'string', nullable: true },
           social_post_url: { type: 'string', nullable: true },
           published_at: { type: 'string', format: 'date-time', nullable: true },
-          publication_status: { type: 'string', nullable: true },
+          publication_status: { type: 'string', nullable: true, example: 'PUBLISHED' },
           social_network: { type: 'string', nullable: true },
           created_at: { type: 'string', format: 'date-time' },
           updated_at: { type: 'string', format: 'date-time' },
+        },
+      },
+      RetrimRequest: {
+        type: 'object',
+        required: ['start_time', 'end_time'],
+        properties: {
+          start_time: { type: 'number', minimum: 0, example: 10 },
+          end_time: { type: 'number', exclusiveMinimum: 5, example: 45, description: 'Debe ser > start_time. Duración resultante entre 5 y 90 segundos.' },
+        },
+      },
+      RetrimResponse: {
+        type: 'object',
+        properties: {
+          clip_id: { type: 'string', format: 'uuid' },
+          start_time: { type: 'number' },
+          end_time: { type: 'number' },
+          duration: { type: 'number', description: 'end_time - start_time' },
+          status: { type: 'string' },
+          file_path: { type: 'string', description: 'Ruta del nuevo archivo generado por FFmpeg' },
+        },
+      },
+      JobStreamEvent: {
+        type: 'object',
+        description: 'Evento SSE emitido en cada cambio de estado del job',
+        properties: {
+          progress: { type: 'integer', example: 55 },
+          status: { type: 'string', enum: ['pending', 'scoring', 'completed', 'failed'] },
+          message: { type: 'string', example: 'Procesando con IA' },
+          job_id: { type: 'string', format: 'uuid' },
+          error: { type: 'string', nullable: true, description: 'Presente solo si el job falló' },
         },
       },
       StatsSummaryResponse: {
@@ -240,6 +276,56 @@ const swaggerDefinition = {
         summary: 'Perfil autenticado',
         security: [{ bearerAuth: [] }],
         responses: { '200': { description: 'Usuario', content: { 'application/json': { schema: { $ref: '#/components/schemas/UsuarioRead' } } } }, '401': { description: 'No autorizado', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } } },
+      },
+    },
+    '/registro': {
+      post: {
+        tags: ['auth'],
+        deprecated: true,
+        summary: 'Registro de usuario (alias raíz)',
+        description: 'Alias de `POST /auth/registro`. El router de auth también se monta en `/`. Se mantiene por compatibilidad con clientes v1.',
+        security: [],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/UsuarioCreate' } } } },
+        responses: {
+          '201': { description: 'Creado', content: { 'application/json': { schema: { $ref: '#/components/schemas/UsuarioRead' } } } },
+          '409': { description: 'Email ya registrado', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '422': { description: 'Validación', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/login': {
+      post: {
+        tags: ['auth'],
+        deprecated: true,
+        summary: 'Login JSON (alias raíz)',
+        description: 'Alias de `POST /auth/login`.',
+        security: [],
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['email', 'password'], properties: { email: { type: 'string', format: 'email' }, password: { type: 'string' } } } } } },
+        responses: {
+          '200': { description: 'Token', content: { 'application/json': { schema: { $ref: '#/components/schemas/Token' } } } },
+          '401': { description: 'Credenciales inválidas', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/login/form': {
+      post: {
+        tags: ['auth'],
+        deprecated: true,
+        summary: 'Login OAuth2 form (alias raíz)',
+        description: 'Alias de `POST /auth/login/form`.',
+        security: [],
+        requestBody: { required: true, content: { 'application/x-www-form-urlencoded': { schema: { type: 'object', required: ['username', 'password'], properties: { username: { type: 'string', description: 'email' }, password: { type: 'string' } } } } } },
+        responses: { '200': { description: 'Token', content: { 'application/json': { schema: { $ref: '#/components/schemas/Token' } } } } },
+      },
+    },
+    '/me': {
+      get: {
+        tags: ['auth'],
+        deprecated: true,
+        summary: 'Perfil autenticado (alias raíz)',
+        description: 'Alias de `GET /auth/me`.',
+        security: [{ bearerAuth: [] }],
+        responses: { '200': { description: 'Usuario', content: { 'application/json': { schema: { $ref: '#/components/schemas/UsuarioRead' } } } } },
       },
     },
     '/videos': {
@@ -346,6 +432,25 @@ const swaggerDefinition = {
         responses: { '200': { description: 'video/mp4', content: { 'video/mp4': { schema: { type: 'string', format: 'binary' } } } } },
       },
     },
+    '/clips/{clipId}/retrim': {
+      post: {
+        tags: ['clips'],
+        summary: 'Re-trim del clip con FFmpeg',
+        description:
+          'Recorta el clip a un nuevo rango [start_time, end_time) usando FFmpeg, guarda el archivo generado ' +
+          'en `storage/retrims/` y actualiza `start_time`, `end_time` y `file_path` del clip. ' +
+          'La duración resultante debe estar entre 5 y 90 segundos.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'clipId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/RetrimRequest' } } } },
+        responses: {
+          '200': { description: 'Clip re-trimado', content: { 'application/json': { schema: { $ref: '#/components/schemas/RetrimResponse' } } } },
+          '404': { description: 'Clip no encontrado o video origen no disponible', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '422': { description: 'Rango inválido (end_time <= start_time, duración <5s o >90s)', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '500': { description: 'FFmpeg falló o no produjo archivo', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
     '/clips/{clipId}/publicar': {
       post: {
         tags: ['publish'],
@@ -400,6 +505,22 @@ const swaggerDefinition = {
         responses: {
           '202': { description: 'Re-render encolado PROCESSING', content: { 'application/json': { schema: { type: 'object', properties: { detail: { type: 'string' }, clip_id: { type: 'string', format: 'uuid' }, status: { type: 'string', example: 'PROCESSING' } } } } } },
           '409': { description: 'Clip ya en procesamiento' },
+    '/jobs/{jobId}/stream': {
+      get: {
+        tags: ['jobs'],
+        summary: 'SSE stream del estado de un Job',
+        description:
+          'Server-Sent Events que emite un evento en cada cambio de estado del job (cada ~1s). ' +
+          'Cierra con `event: done` al llegar a `completed`/`failed`, o con `event: error` si el job no existe o no pertenece al usuario. ' +
+          'Requiere un cliente SSE: Swagger UI no puede consumirlo.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'jobId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          '200': {
+            description: 'Stream SSE de progreso',
+            content: { 'text/event-stream': { schema: { $ref: '#/components/schemas/JobStreamEvent' } } },
+          },
+          '422': { description: 'job_id debe ser UUID válido', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
       },
     },
@@ -424,12 +545,51 @@ const swaggerDefinition = {
         responses: { '200': { description: 'Archivo' } },
       },
     },
+    '/clips/{clipId}/publish': {
+      post: {
+        tags: ['publish'],
+        deprecated: true,
+        summary: 'Publicar clip (alias en inglés)',
+        description: 'Alias en inglés de `POST /clips/{clipId}/publicar`. Mismo body y mismo comportamiento. Se mantiene por compatibilidad con clientes v1.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'clipId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/PublishClipRequest' } } } },
+        responses: {
+          '202': { description: 'Encolado PUBLISHING' },
+          '422': { description: 'platform inválida', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
     '/metrics': {
       get: {
         tags: ['metrics'],
         summary: 'Métricas 7 días',
         security: [{ bearerAuth: [] }],
         responses: { '200': { description: 'Metrics', content: { 'application/json': { schema: { $ref: '#/components/schemas/MetricsResponse' } } } } },
+      },
+    },
+    '/api/metrics': {
+      get: {
+        tags: ['metrics'],
+        deprecated: true,
+        summary: 'Métricas 7 días (alias /api)',
+        description: 'Alias de `GET /metrics`. Se mantiene por compatibilidad con el prefijo `/api` de FastAPI.',
+        security: [{ bearerAuth: [] }],
+        responses: { '200': { description: 'Metrics', content: { 'application/json': { schema: { $ref: '#/components/schemas/MetricsResponse' } } } } },
+      },
+    },
+    '/api/v1/jobs/{jobId}/export': {
+      get: {
+        tags: ['export'],
+        deprecated: true,
+        summary: 'Exportar clips de un Job (alias /api/v1)',
+        description: 'Alias de `GET /jobs/{jobId}/export`. Se mantiene por compatibilidad con el prefijo `/api/v1`.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'jobId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          { name: 'format', in: 'query', schema: { type: 'string', enum: ['csv', 'json'], default: 'json' } },
+        ],
+        responses: { '200': { description: 'Archivo' } },
       },
     },
     '/stats/summary': {
@@ -466,9 +626,28 @@ const swaggerDefinition = {
       post: {
         tags: ['users'],
         summary: 'Cambiar contraseña',
+        description: 'Verifica la contraseña actual y la reemplaza por `new_password` (8-128 caracteres, distinta de la actual).',
         security: [{ bearerAuth: [] }],
         requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['current_password', 'new_password'], properties: { current_password: { type: 'string' }, new_password: { type: 'string', minLength: 8, maxLength: 128 } } } } } },
-        responses: { '200': { description: 'OK' } },
+        responses: {
+          '200': { description: 'Contraseña actualizada' },
+          '400': { description: 'Contraseña actual incorrecta o nueva igual a la actual', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '422': { description: 'Falta current_password/new_password o longitud inválida', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/users/me/password': {
+      put: {
+        tags: ['users'],
+        summary: 'Cambiar contraseña (alias PUT)',
+        description: 'Alias en `PUT` de `POST /users/me/change-password`. Mismo body y mismo comportamiento.',
+        security: [{ bearerAuth: [] }],
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['current_password', 'new_password'], properties: { current_password: { type: 'string' }, new_password: { type: 'string', minLength: 8, maxLength: 128 } } } } } },
+        responses: {
+          '200': { description: 'Contraseña actualizada' },
+          '400': { description: 'Contraseña actual incorrecta o nueva igual a la actual', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '422': { description: 'Falta current_password/new_password o longitud inválida', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
       },
     },
   },

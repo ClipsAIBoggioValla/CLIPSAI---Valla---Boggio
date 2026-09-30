@@ -69,6 +69,7 @@ clipsRouter.get('/', authMiddleware, async (req, res) => {
         const dataRes = await client.query(`SELECT
          c.id, c.job_id, c.title, c.score, c.start_time, c.end_time,
          LEFT(v.transcript, 500) AS transcript,
+         c.status, c.published_platform, c.social_post_url, c.published_at,
          c.created_at
        FROM clips c
        JOIN jobs j ON c.job_id = j.id
@@ -84,6 +85,10 @@ clipsRouter.get('/', authMiddleware, async (req, res) => {
             start_time: Number(r.start_time),
             end_time: Number(r.end_time),
             transcript: r.transcript ?? null,
+            status: r.status ?? null,
+            published_platform: r.published_platform ?? null,
+            social_post_url: r.social_post_url ?? null,
+            published_at: r.published_at ? new Date(r.published_at).toISOString() : null,
             created_at: new Date(r.created_at).toISOString(),
         }));
         return res.json({ items, total, page, limit, total_pages });
@@ -128,6 +133,12 @@ clipsRouter.get('/:clipId', authMiddleware, async (req, res) => {
             tags: row.tags ?? null,
             storage_path: row.file_path,
             status: row.status,
+            published_platform: row.published_platform ?? null,
+            social_post_id: row.social_post_id ?? null,
+            social_post_url: row.social_post_url ?? null,
+            published_at: row.published_at ? new Date(row.published_at).toISOString() : null,
+            publication_status: row.publication_status ?? null,
+            social_network: row.social_network ?? null,
             created_at: new Date(row.created_at).toISOString(),
             updated_at: new Date(row.updated_at ?? row.created_at).toISOString(),
         });
