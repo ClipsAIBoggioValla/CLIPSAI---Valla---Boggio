@@ -309,6 +309,33 @@
 **Archivos:** `docker-compose.yml` `ngrok` service `backend_fastapi:8000 --domain=api.clipsai.xyz`, `backend_fastapi/app/config.py` `PUBLIC_BACKEND_URL`.
 
 **Evidencias:** `curl https://api.clipsai.xyz/health` `{"status":"ok"}` + `ngrok inspect http://localhost:4040`.
+**Estado:** ✅ Ambos backends cumplen.
+- **FastAPI:** expone `/docs` (Swagger) + `/redoc` + `/openapi.json` auto-generado por Pydantic. Todos los routers con `summary`.
+- **Express:** spec OpenAPI 3.0.0 estático en `src/docs/swagger.ts`, servido en `/docs` **y `/api-docs`** + `/openapi.json` y `/api-docs.json`. Audit automático: **33 rutas reales = 33 documentadas, 0 sin documentar, 0 fantasma**.
+
+**Archivos:**
+- `backend_fastapi/app/main.py` (`title=_settings.app_name`, `version="0.1.0"`), cada `APIRouter` con `summary`.
+- `backend_express/src/docs/swagger.ts` — `info`, `servers`, `tags` (10), `components.securitySchemes.bearerAuth`, 15 `schemas`, `paths` (28 paths / 33 operations).
+- `backend_express/src/app.ts` — monta `/docs`, `/api-docs`, `/openapi.json`, `/api-docs.json`.
+
+**Criterios:**
+- [x] FastAPI `/docs` actualizada (incluye jobs/clips/export/metrics/stats)
+- [x] Express `/api-docs` — `GET /api-docs/` y `/api-docs.json` → 200; assets Swagger UI (`swagger-ui.css`, `swagger-ui-bundle.js`) → 200
+- [x] Paridad 100% spec↔código en Express (verificado por auditoría automática de `app.use()` mounts vs. `paths`)
+- [x] Cobertura de aliases de compatibilidad (`/api/metrics`, `/api/v1/jobs/{id}/export`, `/registro`, `/login`, `/login/form`, `/me`, `/clips/{id}/publish`, `/users/me/password`) marcados `deprecated: true` en el spec
+
+**Gaps de paridad funcionales detectados (NO son de documentación → fuera de alcance de Issue 14):**
+FastAPI tiene 2 routers que Express no implementa. Requieren feature work, no docs:
+- `app/routers/subtitles.py` — `POST /subtitles`, `GET /subtitles/{clipId}`
+- `app/routers/social_auth.py` — 9 endpoints OAuth2 (`/auth/social/status`, `/{platform}` disconnect, `youtube|instagram|tiktok` connect/callback). Express usa `webhook_override_url` en su lieu (ver `PublishClipRequest.platform: webhook`). → **Issue 15 / 22**
+
+**Evidencia de verificación:**
+```bash
+cd backend_express && npm run typecheck && npm run build   # exit 0
+curl -s -o /dev/null -w '%{http_code}' localhost:3001/api-docs/          # 200
+curl -s -o /dev/null -w '%{http_code}' localhost:3001/openapi.json        # 200
+node -e "import('./dist/docs/swagger.js').then(m=>console.log(Object.keys(m.swaggerSpec.paths).length))"  # 28 paths / 33 ops
+```
 
 ---
 

@@ -19,11 +19,13 @@ function isDocker() {
     }
 }
 function resolveDbHost(url) {
-    if (!url.includes('@db:') && !url.includes('@db/'))
-        return url;
-    if (isDocker())
-        return url;
-    return url.replace('@db:', '@127.0.0.1:').replace('@db/', '@127.0.0.1/');
+    const hasDb = url.includes('@db:') || url.includes('@db/');
+    const hasLocal = url.includes('@127.0.0.1:') || url.includes('@localhost:');
+    if (isDocker() && hasLocal)
+        return url.replace('@127.0.0.1:', '@db:').replace('@localhost:', '@db:').replace('@127.0.0.1/', '@db/');
+    if (!isDocker() && hasDb)
+        return url.replace('@db:', '@127.0.0.1:').replace('@db/', '@127.0.0.1/');
+    return url;
 }
 function buildConnectionString() {
     const raw = process.env.DATABASE_URL;

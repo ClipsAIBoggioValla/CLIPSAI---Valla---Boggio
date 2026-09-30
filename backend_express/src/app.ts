@@ -51,9 +51,13 @@ export function createApp() {
   app.use(express.json())
   app.use(express.urlencoded({ extended: true }))
 
-  // Swagger UI — Issue #30 paridad FastAPI /docs
-  app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, swaggerUiOptions))
+  // Swagger UI — Issue 14/30 paridad FastAPI /docs
+  // `/api-docs` es el criterio de aceptación de Issue 14; `/docs` se mantiene por compatibilidad.
+  const swaggerUiHandler = swaggerUi.setup(swaggerSpec, swaggerUiOptions)
+  app.use('/docs', swaggerUi.serve, swaggerUiHandler)
+  app.use('/api-docs', swaggerUi.serve, swaggerUiHandler)
   app.get('/openapi.json', (_req, res) => res.json(swaggerSpec))
+  app.get('/api-docs.json', (_req, res) => res.json(swaggerSpec))
 
   /**
    * @openapi
