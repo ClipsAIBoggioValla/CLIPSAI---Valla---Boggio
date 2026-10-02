@@ -429,15 +429,25 @@ node -e "import('./dist/docs/swagger.js').then(m=>console.log(Object.keys(m.swag
 
 ---
 
-### Issue 32 — Landing Page Pública e Index (/) — ⏳ Pendiente (#52)
+### Issue 32 — Landing Page Pública e Index (/) — ✅ Completado (#52)
+
+**PR:** #52 — **Issue #32**
 
 **Descripción:** Crear `/` pública SEO sin auth con hero, features, pricing, CTA `→ /auth`.
 
-**Archivos:** `frontend_react/src/pages/LandingPage.tsx` + `frontend_vue/src/views/LandingView.vue` + `router/index.ts` `/` public.
+**Archivos:** `frontend_react/src/pages/LandingPage.tsx` + `frontend_react/src/components/landing/` (LandingNav, LandingHero, LandingHowItWorks, LandingAbout, LandingFeatures, LandingFooter, landingData, landingSeo) + `frontend_react/src/styles/landing.css` + `frontend_vue/src/views/LandingView.vue` + `frontend_vue/src/components/landing/` (mismos componentes) + `frontend_vue/src/assets/landing.css` + `router/index.ts` `/` public + `index.html` SEO + `public/robots.txt` + `public/sitemap.xml` + `public/favicon.svg` + `public/og-clipsai.png` + `scripts/make_og_image.py`.
 
 **Criterios:**
-- [ ] `GET /` sin auth renderiza hero + features + CTA
-- [ ] `npm run build` + `lighthouse` SEO ≥90
+- [x] `GET /` sin auth renderiza hero + features + CTA — verificado con Chrome headless: DOM renderiza hero, cómo funciona (3 tabs), sobre nosotros, features grid y footer
+- [x] `npm run build` + `lighthouse` SEO ≥90 — Lighthouse SEO score: **1.0 (100/100)**, todos los audits pasan (document-title, meta-description, canonical, robots-txt, crawlable-anchors, is-crawlable, hreflang, link-text, http-status-code)
+
+**Evidencias:**
+- `npm run typecheck` EXIT:0 (React + Vue)
+- `npm run build` EXIT:0 (React + Vue)
+- Lighthouse SEO: 100/100
+- Chrome headless DOM: hero + 3 tabs interactivos + sobre nosotros + features + footer con enlaces legales
+- Redirección con sesión activa: `Navigate to="/dashboard"` (React) + `router.replace("/dashboard")` (Vue)
+- Assets: robots.txt, sitemap.xml, favicon.svg, og-clipsai.png (1200×630) servidos correctamente
 
 ---
 

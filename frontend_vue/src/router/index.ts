@@ -4,7 +4,10 @@ import { useAuthStore } from '@/stores/auth'
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', redirect: '/dashboard' },
+    // Landing pública (Issue 32): anteportada sin auth para usuarios anónimos
+    // y revisores de las APIs de redes sociales. Con sesión activa, LandingView
+    // redirige a /dashboard.
+    { path: '/', name: 'landing', component: () => import('@/views/LandingView.vue'), meta: { public: true } },
     { path: '/auth', name: 'auth', component: () => import('@/views/AuthView.vue') },
     { path: '/dashboard', name: 'dashboard', component: () => import('@/views/DashboardView.vue'), meta: { requiresAuth: true } },
     { path: '/clips', name: 'clips', component: () => import('@/views/ClipLibraryView.vue'), meta: { requiresAuth: true } },
@@ -31,9 +34,11 @@ router.beforeEach((to) => {
   } catch {
     hasToken = !!auth.token
   }
-  // Modo local/abierto o fallback cuando backend no responde: no bloquear vistas principales como / o /upload
-  // Garantiza contenido visible en lugar de pantalla vacía
-  if (to.path === '/' || to.path === '/upload' || to.path === '/dashboard') {
+  // Modo local/abierto o fallback cuando backend no responde: no bloquear vistas principales como /upload o /dashboard
+  // Garantiza contenido visible en lugar de pantalla vacía.
+  // `/` (landing pública, Issue 32) no entra acá a propósito: se renderiza siempre
+  // sin auth para que los revisores de Meta/Google/TikTok puedan verla.
+  if (to.path === '/upload' || to.path === '/dashboard') {
     if (ALLOW_ANONYMOUS) return
     // Fallback: si no hay token pero es vista principal, permitir renderizado dentro de Layout con UploadPage/dashboard
     // en lugar de redirigir a ruta no definida o retornar null

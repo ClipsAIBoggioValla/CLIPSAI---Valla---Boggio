@@ -1,0 +1,12 @@
+User-agent: *
+Allow: /
+Disallow: /auth
+Disallow: /dashboard
+Disallow: /upload
+Disallow: /jobs/
+Disallow: /clips
+Disallow: /settings
+Disallow: /integrations
+Disallow: /library
+
+Sitemap: https://clipsai.xyz/sitemap.xml
