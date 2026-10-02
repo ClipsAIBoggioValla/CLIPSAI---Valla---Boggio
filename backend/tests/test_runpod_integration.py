@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 import types
@@ -7,6 +8,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from backend.handler import process_video_job
+from backend_fastapi.app.routers.videos import UploadUrlRequest, generate_upload_url
 from backend_fastapi.app.services.runpod_service import RunPodError, process_video_via_runpod
 
 
@@ -77,6 +79,41 @@ class RunPodClientTests(unittest.TestCase):
     def test_client_requires_api_key(self) -> None:
         with self.assertRaisesRegex(RunPodError, "RUNPOD_API_KEY"):
             process_video_via_runpod("https://media.example/video.mp4")
+
+
+class PresignedUploadUrlTests(unittest.TestCase):
+    @patch.dict(
+        os.environ,
+        {
+            "AWS_ACCESS_KEY_ID": "test-access-key",
+            "AWS_SECRET_ACCESS_KEY": "test-secret-key",
+            "AWS_ENDPOINT_URL": "https://s3.example.test",
+            "AWS_REGION": "auto",
+            "BUCKET_NAME": "clipsai-test",
+        },
+        clear=False,
+    )
+    def test_returns_presigned_put_url_and_unique_key(self) -> None:
+        s3_client = Mock()
+        s3_client.generate_presigned_url.return_value = "https://s3.example.test/upload"
+        boto3_module = types.ModuleType("boto3")
+        boto3_module.client = Mock(return_value=s3_client)
+        config_module = types.ModuleType("botocore.config")
+        config_module.Config = Mock(return_value="s3v4-config")
+        botocore_module = types.ModuleType("botocore")
+        botocore_module.config = config_module
+
+        with patch.dict(
+            sys.modules,
+            {"boto3": boto3_module, "botocore": botocore_module, "botocore.config": config_module},
+        ):
+            result = asyncio.run(
+                generate_upload_url(UploadUrlRequest(file_name="video.mp4", file_type="video/mp4"))
+            )
+
+        self.assertEqual(result["upload_url"], "https://s3.example.test/upload")
+        self.assertRegex(result["file_key"], r"^uploads/[0-9a-f-]{36}\.mp4$")
+        self.assertEqual(s3_client.generate_presigned_url.call_args.kwargs["ExpiresIn"], 900)
 
 
 if __name__ == "__main__":

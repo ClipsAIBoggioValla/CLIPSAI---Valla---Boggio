@@ -241,6 +241,7 @@ def _registro_alias(payload: _UsuarioCreateCompat, db=_DependsCompat(_get_db_com
 app.include_router(_compat_auth)
 app.include_router(social_auth.router, prefix="/auth/social", tags=["Social Auth"])
 app.include_router(videos.router)
+app.include_router(videos.upload_url_router)
 app.include_router(jobs.router)
 app.include_router(export.router)
 app.include_router(metrics.router)

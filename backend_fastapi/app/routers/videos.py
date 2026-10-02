@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, status
+from pydantic import BaseModel
 from sqlalchemy import select
 
 from ..deps import CurrentUser, DbSession
@@ -14,6 +15,55 @@ from ..models import Video
 from ..schemas import VideoResponse
 
 router = APIRouter(prefix="/videos", tags=["videos"])
+upload_url_router = APIRouter(prefix="/api/videos", tags=["videos"])
+
+
+class UploadUrlRequest(BaseModel):
+    file_name: str
+    file_type: str
+
+
+def get_s3_client():
+    # Import lazily so the FastAPI app can still load in environments that have
+    # not installed the optional S3 dependency yet.
+    import boto3
+    from botocore.config import Config
+
+    return boto3.client(
+        "s3",
+        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+        endpoint_url=os.getenv("AWS_ENDPOINT_URL"),
+        region_name=os.getenv("AWS_REGION", "auto"),
+        config=Config(signature_version="s3v4"),
+    )
+
+
+@upload_url_router.post("/upload-url", summary="Generar URL prefirmada para subir un video")
+async def generate_upload_url(payload: UploadUrlRequest) -> dict[str, str]:
+    try:
+        s3_client = get_s3_client()
+        bucket_name = os.getenv("BUCKET_NAME", "clipsai-videos")
+
+        file_extension = os.path.splitext(payload.file_name)[1]
+        file_key = f"uploads/{uuid.uuid4()}{file_extension}"
+
+        presigned_url = s3_client.generate_presigned_url(
+            ClientMethod="put_object",
+            Params={
+                "Bucket": bucket_name,
+                "Key": file_key,
+                "ContentType": payload.file_type,
+            },
+            ExpiresIn=900,
+        )
+
+        return {"upload_url": presigned_url, "file_key": file_key}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error al generar la presigned URL: {str(exc)}",
+        ) from exc
 
 ALLOWED_VIDEO_EXTS = {".mp4", ".mov", ".avi"}
 ALLOWED_TRANSCRIPT_EXTS = {".txt", ".srt"}
