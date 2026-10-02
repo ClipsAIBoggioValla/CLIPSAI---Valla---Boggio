@@ -30,6 +30,27 @@ export const authService = {
 }
 
 export const videoService = {
+  async uploadDirectToStorage(videoFile: File): Promise<{ file_key: string }> {
+    const { data: signed } = await apiClient.post<{ upload_url: string; file_key: string }>(
+      '/api/videos/upload-url',
+      { file_name: videoFile.name, file_type: videoFile.type },
+    )
+    if (!signed.upload_url || !signed.file_key) {
+      throw new Error('El backend no devolvió upload_url y file_key')
+    }
+
+    const response = await fetch(signed.upload_url, {
+      method: 'PUT',
+      headers: { 'Content-Type': videoFile.type },
+      body: videoFile,
+    })
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '')
+      throw new Error(`Error al subir a Cloudflare R2 (HTTP ${response.status})${detail ? `: ${detail.slice(0, 300)}` : ''}`)
+    }
+
+    return { file_key: signed.file_key }
+  },
   async upload(videoFile: File, transcriptFile?: File | null): Promise<VideoUploadResponse> {
     const fd = new FormData()
     fd.append('video', videoFile, videoFile.name)
