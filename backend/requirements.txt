@@ -1,0 +1,4 @@
+-r ../backend_fastapi/requirements.txt
+# CUDA 11.8 compatibility for faster-whisper on the selected RunPod base image.
+ctranslate2==4.4.0
+runpod>=1.7.0,<2.0.0
