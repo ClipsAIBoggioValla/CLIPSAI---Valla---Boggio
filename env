@@ -1,0 +1,93 @@
+# ==============================================================================
+# clipsai — Variables de entorno (copiar desde .env.example y completar)
+# ------------------------------------------------------------------------------
+
+# ------------------------------------------------------------------------------
+# PostgreSQL (Issue 1 — infraestructura)
+# ------------------------------------------------------------------------------
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
+POSTGRES_DB=clipsai
+POSTGRES_PORT=5432
+POSTGRES_TZ=UTC
+
+# ------------------------------------------------------------------------------
+# Backend FastAPI (Issue 3 — autenticacion)
+# ------------------------------------------------------------------------------
+# URL de conexion a Postgres. En docker-compose el host es `db`.
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/clipsai
+
+# Secreto para firmar los JWT. Generar con: `openssl rand -hex 32`
+JWT_SECRET=dev_secret_key_clipsai_2026_super_secure_local
+JWT_ALGORITHM=HS256
+JWT_EXPIRE_MINUTES=1440
+
+APP_ENV=development
+
+# ------------------------------------------------------------------------------
+# Motor de clipsai — proveedores de IA
+# ------------------------------------------------------------------------------
+# Clave de Anthropic (Claude) - https://console.anthropic.com/
+ANTHROPIC_API_KEY=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
+
+ANTHROPIC_MODEL=claude-sonnet-5
+
+# Opcional: API estilo OpenAI (DeepSeek) — requiere OPENAI_API_KEY o DEEPSEEK_API_KEY
+# Generar en: https://deepseek.com/ o proveedores compatibles
+OPENAI_API_KEY=tu-api-key-de-openai-o-deepseek
+# Alternativamente, clave específica de DeepSeek (si usas su SDK directo)
+DEEPSEEK_API_KEY=tu-api-key-deepseek
+ANTHROPIC_API_KEY=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
+APP_ENV=development
+GOOGLE_CLIENT_ID=495434816750-jo42nu3dfvebui7vv83vv81dnvi14oru.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=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
+FACEBOOK_CLIENT_ID=28131687023148591
+FACEBOOK_CLIENT_SECRET=1492d37f616f6c9334ee971dfdac164f
+TIKTOK_CLIENT_KEY=sbaw6c422zbwkoj2s0
+TIKTOK_CLIENT_SECRET=nONsFutCfkJ0mJ70bcCYC5vokRQrauPt
+TIKTOK_REDIRECT_URI=https://api.clipsai.xyz/auth/social/tiktok/callback
+# ------------------------------------------------------------------------------
+# Motor de clipsai — proveedores de IA (deepseek base_url)
+# ------------------------------------------------------------------------------
+# Si usas la API de DeepSeek directamente, el endpoint base:
+API_ENDPOINT=https://api.deepseek.com/v1/chat/completions
+MODEL=deepseek-chat
+ENVIRONMENT=development
+DEBUG=True
+BACKEND_FASTAPI_PORT=8000
+BACKEND_EXPRESS_PORT=3001
+
+# ------------------------------------------------------------------------------
+# OAuth 2.0 — YouTube (Google Data API v3) — Issue #24
+# ------------------------------------------------------------------------------
+GOOGLE_REDIRECT_URI=https://api.clipsai.xyz/auth/social/youtube/callback
+FRONTEND_REDIRECT_URL=http://localhost:3000
+
+# ------------------------------------------------------------------------------
+# OAuth 2.0 — Instagram Graph API (Meta) — Issue #25
+# ------------------------------------------------------------------------------
+INSTAGRAM_CLIENT_ID=28131687023148591
+INSTAGRAM_CLIENT_SECRET=1492d37f616f6c9334ee971dfdac164f
+INSTAGRAM_REDIRECT_URI=https://api.clipsai.xyz/auth/social/instagram/callback
+
+# Backend público permanente (Cloudflare Tunnel)
+PUBLIC_BACKEND_URL=https://api.clipsai.xyz
+BACKEND_URL=https://api.clipsai.xyz
+API_BASE_URL=https://api.clipsai.xyz
+VITE_API_URL=https://6elhcgdh33hh11-8000.proxy.runpod.net
+NEXT_PUBLIC_API_URL=https://api.clipsai.xyz
+WEBHOOK_URL=https://api.clipsai.xyz/webhooks
+PUBLISH_WEBHOOK_URL=https://api.clipsai.xyz/webhooks/publish
+FRONTEND_URL=https://api.clipsai.xyz
+# Redirect URIs oficiales para paneles de desarrolladores:
+# Google/YouTube: https://api.clipsai.xyz/auth/social/youtube/callback
+# Meta/Instagram: https://api.clipsai.xyz/auth/social/instagram/callback
+# TikTok: https://api.clipsai.xyz/auth/social/tiktok/callback
+RUNPOD_ENDPOINT_ID=z2i8jvcp4hnh6s
+RUNPOD_API_KEY=rpa_1QNASX020PKAUNWLH1QLSG4EEAVFHMLE4GBDOW71zbpk1w
+# Cloudflare R2 Credentials
+AWS_ACCESS_KEY_ID=117ed7596776440108be63522d0e74a1
+AWS_SECRET_ACCESS_KEY=fb56c397741542a9ac4773168a57ef5badd7081e408d79e77fdf626811d907b6
+AWS_ENDPOINT_URL=https://01792bda75527bca303fced5da66a28f.r2.cloudflarestorage.com
+AWS_REGION=auto
+BUCKET_NAME=clipsai-videos
