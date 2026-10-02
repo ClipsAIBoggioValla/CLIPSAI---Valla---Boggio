@@ -486,7 +486,7 @@ backend/
 | Modo anónimo | `VITE_ALLOW_ANONYMOUS=true` permite Layout sin user | idem en guard |
 | Build | `tsc --noEmit` / `tsc -b && vite build` | `vue-tsc --noEmit` |
 
-**Rutas (ambos):** `/auth`, `/login→/auth`, `/`→`/dashboard`, `/dashboard`, `/clips`, `/library` (Vue; React alias borrado a `/dashboard`), `/upload`, `/jobs/:jobId`, `/settings`, `/dashboard/integrations`, `/settings/integrations`, `/404` (Vue), `*→/dashboard` (React).
+**Rutas (ambos):** `/` landing pública (Issue 32, sin auth; con sesión activa redirige a `/dashboard`), `/auth`, `/login→/auth`, `/dashboard`, `/clips`, `/library` (Vue; React alias borrado a `/dashboard`), `/upload`, `/jobs/:jobId`, `/settings`, `/dashboard/integrations`, `/settings/integrations`, `/404` (Vue), `*→/dashboard` (React).
 
 ### 10.2 Páginas clave
 
@@ -498,6 +498,7 @@ backend/
 - **Integraciones:** `IntegrationsPage`/`IntegrationsView` + `settings/IntegrationsSettings` — conectar/desconectar YouTube/Instagram/TikTok vía `/auth/social/*/connect`, badge `Conectado` + `Ver post` (Issue 28).
 - **Settings:** avatar 56px, `PUT /users/me`, change-password, preferencias theme/export_format.
 - **Layout:** Sidebar `#080C14` fixed 280px (80px minimized con fix `dropdown-menu-profile` fixed left 88px), Navbar sticky con búsqueda → `/clips?q=`, Footer, `ProtectedRoute`.
+- **Landing (Issue 32):** `LandingPage.tsx` / `LandingView.vue` en `/` — hero con CTA `Probar gratis → /auth`, "Cómo funciona" con 3 tabs interactivos (cargar → análisis IA → publicación), "Sobre nosotros" (motor IA, análisis de audio, scoring de viralidad), features grid (9:16, subtítulos ASS, autopublicación) y footer con enlaces legales (`/privacy`, `/terms`, `/data-deletion`). SEO: `index.html` con title/description/canonical/og/twitter + `robots.txt` + `sitemap.xml` + `og-clipsai.png`. Lighthouse SEO 100/100.
 
 ### 10.3 Deuda conocida en UI
 
@@ -703,6 +704,7 @@ Red `clipsai-net` bridge; volumen nombrado `clipsai_postgres_data`. `down` conse
 | `scripts/test_hooks.py`, `scripts/test_subtitles.py` | pruebas de hook y subtítulos |
 | `limpiar.py` | limpia artefactos del motor |
 | `start-dev.ps1` | orquestación del stack |
+| `scripts/make_og_image.py` | genera `public/og-clipsai.png` (1200×630) para ambos frontends |
 
 **Validación:**
 - Typecheck frontends: `npm run typecheck` (React `tsc --noEmit`, Vue `vue-tsc --noEmit`).
@@ -710,6 +712,7 @@ Red `clipsai-net` bridge; volumen nombrado `clipsai_postgres_data`. `down` conse
 - Express: `npm run typecheck`, `curl /health`, `curl /docs`.
 - Infra: `docker compose logs -f`, `docker compose ps`, `curl :8000/health`, `curl :8000/docs`.
 - Pipeline Issue 29: `test_issue_29_pipeline.py` (ffprobe 9:16, ASS PlayRes, fallback).
+- Landing Issue 32: `npm run build` + `npx lighthouse http://localhost:3000/ --only-categories=seo` (SEO 100/100) + `curl /robots.txt` + `curl /sitemap.xml`.
 - Cobertura de tests automatizados aún limitada (Issue 22 propuesta: `pytest` + `vitest`).
 
 ---
@@ -722,9 +725,9 @@ Fuente detallada: [`ISSUES.md`](./ISSUES.md) (sincronizada con GitHub, Sep 2026)
 
 | Estado | Cantidad | Lista |
 |--------|----------|-------|
-| ✅ Completado | 19 | 1, 2, 3, 4, 5, 7, 14, 17, 18, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30 (+ PR #34 Spark) |
+| ✅ Completado | 20 | 1, 2, 3, 4, 5, 7, 14, 17, 18, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 32 (+ PR #34 Spark) |
 | ⚠️ Parcial | 2 | 6 (Express ~90-100%, pulidos menores), 13 (seguridad/compose) |
-| ⏳ Pendiente | 5 | 31, 32, 33, 34, 35 (GitHub #51–#55) |
+| ⏳ Pendiente | 4 | 31, 33, 34, 35 (GitHub #51, #53–#55) |
 | ↩️ Cerradas vía otras | 3 | 8, 9, 10/11/12 → Issues 27/28/29 |
 
 ### 17.2 Estado por área
@@ -735,19 +738,18 @@ Fuente detallada: [`ISSUES.md`](./ISSUES.md) (sincronizada con GitHub, Sep 2026)
 | Motor IA | ✅ | `main.py` + wrapper `engine.py` + `engine_subprocess.py` |
 | FastAPI | ✅ | ~40 rutas, auth, videos/jobs/clips, publish, subtitles, social, export, metrics, docs |
 | Express | ✅ ~95% | mismas entidades + Swagger + SSE; sin `social_auth` (solo FastAPI) |
-| React / Vue | ✅ ~95% | auth, upload, jobs, dashboard, biblioteca, settings, integraciones |
+| React / Vue | ✅ ~95% | auth, upload, jobs, dashboard, biblioteca, settings, integraciones, landing pública |
 | Subtítulos + Hook | ✅ | Issue 29 — `ENABLE_ASS_HOOK=True` en `jobs` |
 | OAuth + Publish real | ✅ | Issues 22–28 — YouTube/Instagram/TikTok |
 | Docs OpenAPI | ✅ | FastAPI `/docs` + Express `/docs` + `/openapi.json` |
 | Seguridad | ⚠️ | key filtrada, rate-limit ausente |
-| Pendientes activas | ⏳ | SSE publish UI (31), landing (32), legales (33), video muestra (34), deuda UI (35) |
+| Pendientes activas | ⏳ | SSE publish UI (31), legales (33), video muestra (34), deuda UI (35) |
 
 ### 17.3 Issues pendientes (abiertas en GitHub)
 
 | # | Título | Criterio clave |
 |---|--------|----------------|
 | 31 | SSE estado de publicación en UI | UI `PUBLISHING→PUBLISHED` sin reload (endpoint SSE ya existe) |
-| 32 | Landing pública `/` | hero+features+CTA sin auth, Lighthouse SEO ≥90 |
 | 33 | Páginas legales `/privacy /terms /data-deletion` | requerido para validación Meta/Google/TikTok |
 | 34 | Video de muestra en `/upload` | `POST /videos/sample 201` sin multipart |
 | 35 | Deuda técnica UI | eliminar `LibraryPage`/`LibraryView` duplicados, `axios` muerto, `any` en tags, `passlib` |
