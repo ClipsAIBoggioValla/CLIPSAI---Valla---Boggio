@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import AuthPage from '@/pages/AuthPage'
 import ClipLibraryPage from '@/pages/ClipLibraryPage'
 import DashboardPage from '@/pages/DashboardPage'
+import LandingPage from '@/pages/LandingPage'
 import SettingsPage from '@/pages/SettingsPage'
 import UploadPage from '@/pages/UploadPage'
 import JobStatusPage from '@/pages/JobStatusPage'
@@ -31,6 +32,10 @@ function ProtectedLayout() {
 export default function App() {
   return (
     <Routes>
+      {/* Landing pública (Issue 32): anteportada sin auth para usuarios anónimos
+          y revisores de las APIs de redes sociales. Con sesión activa, LandingPage
+          redirige a /dashboard. */}
+      <Route path="/" element={<LandingPage />} />
       <Route path="/auth" element={<AuthPage />} />
       <Route path="/login" element={<Navigate to="/auth" replace />} />
       <Route element={<ProtectedLayout />}>
@@ -42,7 +47,6 @@ export default function App() {
         <Route path="/dashboard/integrations" element={<IntegrationsPage />} />
         <Route path="/settings/integrations" element={<IntegrationsSettings />} />
         <Route path="/integrations" element={<Navigate to="/dashboard/integrations" replace />} />
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Route>
     </Routes>
