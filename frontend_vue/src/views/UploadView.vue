@@ -9,6 +9,10 @@ const videoFile = ref<File | null>(null)
 const transcriptFile = ref<File | null>(null)
 type UploadState = 'idle' | 'uploading' | 'creating_job'
 const status = ref<UploadState>('idle')
+type DirectUploadState = 'idle' | 'uploading' | 'success' | 'error'
+const directUploadState = ref<DirectUploadState>('idle')
+const directUploadError = ref<string | null>(null)
+const directUploadKey = ref<string | null>(null)
 const error = ref<string | null>(null)
 const activeJobId = ref<string | null>(null)
 
@@ -22,10 +26,27 @@ onMounted(() => {
 function onVideoChange(e: Event) {
   const t = e.target as HTMLInputElement
   videoFile.value = t.files?.[0] ?? null
+  directUploadState.value = 'idle'
+  directUploadError.value = null
+  directUploadKey.value = null
 }
 function onTranscriptChange(e: Event) {
   const t = e.target as HTMLInputElement
   transcriptFile.value = t.files?.[0] ?? null
+}
+
+async function handleFileUpload(file: File) {
+  directUploadState.value = 'uploading'
+  directUploadError.value = null
+  directUploadKey.value = null
+  try {
+    const result = await videoService.uploadDirectToStorage(file)
+    directUploadKey.value = result.file_key
+    directUploadState.value = 'success'
+  } catch (err: unknown) {
+    directUploadError.value = err instanceof ApiError ? err.detail : err instanceof Error ? err.message : 'Error inesperado durante la subida directa.'
+    directUploadState.value = 'error'
+  }
 }
 
 async function handleSubmit() {
@@ -94,6 +115,30 @@ async function handleSubmit() {
           <span v-if="transcriptFile" class="inline-flex items-center gap-1.5 mt-2 px-2.5 py-1 rounded-full text-xs font-bold bg-[rgba(180,241,5,0.14)] text-[#B4F105] border border-[rgba(180,241,5,0.25)]"><i class="bi bi-check-circle-fill" /> {{ (transcriptFile.size / 1024).toFixed(0) }} KB</span>
           <input type="file" accept=".txt,.srt,text/plain" class="hidden" :disabled="status !== 'idle'" @change="onTranscriptChange" />
         </label>
+      </div>
+
+      <div class="rounded-xl border border-white/10 bg-[#0B0F17] p-4 space-y-3">
+        <div>
+          <p class="text-sm font-bold text-[#F1F5F9]">Subida directa a Cloudflare R2</p>
+          <p class="text-xs mt-1 text-[#94A3B8]">Guarda el video en R2 y devuelve su clave. El botón principal conserva el flujo actual de procesamiento.</p>
+        </div>
+        <button
+          type="button"
+          :disabled="!videoFile || directUploadState === 'uploading' || status !== 'idle'"
+          class="btn-custom btn-custom-light w-full justify-center disabled:opacity-50"
+          @click="videoFile && handleFileUpload(videoFile)"
+        >
+          <span v-if="directUploadState === 'uploading'" class="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-[#B4F105]" />
+          <i v-else-if="directUploadState === 'success'" class="bi bi-check-circle-fill text-emerald-400" />
+          <i v-else class="bi bi-cloud-arrow-up" />
+          {{ directUploadState === 'uploading' ? 'Subiendo a R2...' : directUploadState === 'success' ? 'Subida directa completada' : 'Subir video directamente a R2' }}
+        </button>
+        <div v-if="directUploadState === 'uploading'" role="status" class="space-y-2">
+          <div class="progress"><div class="progress-bar w-full animate-pulse" style="height: 8px; border-radius: 50rem" /></div>
+          <p class="text-xs text-center text-[#94A3B8]">Transfiriendo archivo directamente al storage...</p>
+        </div>
+        <p v-if="directUploadState === 'success' && directUploadKey" role="status" class="text-xs text-emerald-400 break-all">Archivo guardado. Clave: {{ directUploadKey }}</p>
+        <p v-if="directUploadState === 'error' && directUploadError" role="alert" class="text-xs text-red-400">{{ directUploadError }}</p>
       </div>
 
       <button type="submit" :disabled="status !== 'idle' || !videoFile" class="btn-custom btn-custom-primary w-full justify-center btn-custom-lg shadow-[0_0_28px_rgba(180,241,5,0.35)]">

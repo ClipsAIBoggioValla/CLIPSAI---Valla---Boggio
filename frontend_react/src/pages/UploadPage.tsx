@@ -4,6 +4,7 @@ import { jobService, videoService } from '@/services/api'
 import { ApiError } from '@/types/api'
 
 type UploadState = 'idle' | 'uploading' | 'creating_job'
+type DirectUploadState = 'idle' | 'uploading' | 'success' | 'error'
 
 function fileErrorMessage(err: unknown): string {
   if (err instanceof ApiError) return err.detail
@@ -18,6 +19,9 @@ export default function UploadPage() {
   const [status, setStatus] = useState<UploadState>('idle')
   const [error, setError] = useState<string | null>(null)
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
+  const [directUploadState, setDirectUploadState] = useState<DirectUploadState>('idle')
+  const [directUploadError, setDirectUploadError] = useState<string | null>(null)
+  const [directUploadKey, setDirectUploadKey] = useState<string | null>(null)
 
   useEffect(() => {
     try {
@@ -30,9 +34,26 @@ export default function UploadPage() {
 
   function onVideoChange(e: ChangeEvent<HTMLInputElement>) {
     setVideoFile(e.target.files?.[0] ?? null)
+    setDirectUploadState('idle')
+    setDirectUploadError(null)
+    setDirectUploadKey(null)
   }
   function onTranscriptChange(e: ChangeEvent<HTMLInputElement>) {
     setTranscriptFile(e.target.files?.[0] ?? null)
+  }
+
+  async function handleFileUpload(file: File) {
+    setDirectUploadState('uploading')
+    setDirectUploadError(null)
+    setDirectUploadKey(null)
+    try {
+      const result = await videoService.uploadDirectToStorage(file)
+      setDirectUploadKey(result.file_key)
+      setDirectUploadState('success')
+    } catch (err: unknown) {
+      setDirectUploadError(fileErrorMessage(err))
+      setDirectUploadState('error')
+    }
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -137,6 +158,39 @@ export default function UploadPage() {
             )}
             <input type="file" accept=".txt,.srt,text/plain" onChange={onTranscriptChange} className="hidden" disabled={isUploading} />
           </label>
+        </div>
+
+        <div className="rounded-xl border border-white/10 bg-[#0B0F17] p-4 space-y-3">
+          <div>
+            <p className="text-sm font-bold text-[#F1F5F9]">Subida directa a Cloudflare R2</p>
+            <p className="text-xs mt-1 text-[#94A3B8]">Guarda el video en R2 y devuelve su clave. El botón principal conserva el flujo actual de procesamiento.</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => videoFile && void handleFileUpload(videoFile)}
+            disabled={!videoFile || directUploadState === 'uploading' || isUploading}
+            className="btn-custom btn-custom-light w-full justify-center disabled:opacity-50"
+          >
+            {directUploadState === 'uploading' ? (
+              <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-[#B4F105]" /> Subiendo a R2...</>
+            ) : directUploadState === 'success' ? (
+              <><i className="bi bi-check-circle-fill text-emerald-400" /> Subida directa completada</>
+            ) : (
+              <><i className="bi bi-cloud-arrow-up" /> Subir video directamente a R2</>
+            )}
+          </button>
+          {directUploadState === 'uploading' && (
+            <div role="status" className="space-y-2">
+              <div className="progress"><div className="progress-bar w-full animate-pulse" style={{ height: '8px', borderRadius: '50rem' }} /></div>
+              <p className="text-xs text-center text-[#94A3B8]">Transfiriendo archivo directamente al storage...</p>
+            </div>
+          )}
+          {directUploadState === 'success' && directUploadKey && (
+            <p role="status" className="text-xs text-emerald-400 break-all">Archivo guardado. Clave: {directUploadKey}</p>
+          )}
+          {directUploadState === 'error' && directUploadError && (
+            <p role="alert" className="text-xs text-red-400">{directUploadError}</p>
+          )}
         </div>
 
         <button type="submit" disabled={isUploading || !videoFile} className="btn-custom btn-custom-primary w-full justify-center btn-custom-lg shadow-[0_0_28px_rgba(180,241,5,0.35)]">
