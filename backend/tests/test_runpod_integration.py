@@ -8,7 +8,12 @@ import unittest
 from unittest.mock import Mock, patch
 
 from backend.handler import process_video_job
-from backend_fastapi.app.routers.videos import UploadUrlRequest, generate_upload_url
+from backend_fastapi.app.routers.videos import (
+    ProcessVideoRequest,
+    UploadUrlRequest,
+    generate_upload_url,
+    process_video,
+)
 from backend_fastapi.app.services.runpod_service import RunPodError, process_video_via_runpod
 
 
@@ -114,6 +119,66 @@ class PresignedUploadUrlTests(unittest.TestCase):
         self.assertEqual(result["upload_url"], "https://s3.example.test/upload")
         self.assertRegex(result["file_key"], r"^uploads/[0-9a-f-]{36}\.mp4$")
         self.assertEqual(s3_client.generate_presigned_url.call_args.kwargs["ExpiresIn"], 900)
+
+
+class RunPodOrchestrationTests(unittest.TestCase):
+    @patch.dict(
+        os.environ,
+        {
+            "AWS_ACCESS_KEY_ID": "test-access-key",
+            "AWS_SECRET_ACCESS_KEY": "test-secret-key",
+            "AWS_ENDPOINT_URL": "https://s3.example.test",
+            "BUCKET_NAME": "clipsai-test",
+        },
+        clear=False,
+    )
+    @patch("backend_fastapi.app.services.runpod_service.process_video_via_runpod")
+    def test_file_key_is_presigned_for_read_then_submitted_to_runpod(self, runpod_call: Mock) -> None:
+        s3_client = Mock()
+        s3_client.generate_presigned_url.return_value = "https://s3.example.test/presigned-read"
+        boto3_module = types.ModuleType("boto3")
+        boto3_module.client = Mock(return_value=s3_client)
+        config_module = types.ModuleType("botocore.config")
+        config_module.Config = Mock(return_value="s3v4-config")
+        botocore_module = types.ModuleType("botocore")
+        botocore_module.config = config_module
+        runpod_call.return_value = {"status": "COMPLETED", "clips": [{"title": "Test clip"}]}
+
+        with patch.dict(
+            sys.modules,
+            {"boto3": boto3_module, "botocore": botocore_module, "botocore.config": config_module},
+        ):
+            result = process_video(ProcessVideoRequest(file_key="uploads/video.mp4"))
+
+        self.assertEqual(result["clips"][0]["title"], "Test clip")
+        self.assertEqual(s3_client.generate_presigned_url.call_args.kwargs["ClientMethod"], "get_object")
+        self.assertEqual(s3_client.generate_presigned_url.call_args.kwargs["ExpiresIn"], 3600)
+        runpod_call.assert_called_once_with(
+            "https://s3.example.test/presigned-read",
+            transcription_url=None,
+            transcription_text=None,
+            video_id=None,
+        )
+
+    @patch("backend_fastapi.app.services.runpod_service.process_video_via_runpod")
+    def test_direct_video_url_skips_s3_presigning(self, runpod_call: Mock) -> None:
+        runpod_call.return_value = {"status": "COMPLETED", "clips": []}
+
+        result = process_video(ProcessVideoRequest(video_url="https://media.example/video.mp4"))
+
+        self.assertEqual(result["status"], "COMPLETED")
+        runpod_call.assert_called_once_with(
+            "https://media.example/video.mp4",
+            transcription_url=None,
+            transcription_text=None,
+            video_id=None,
+        )
+
+    def test_process_request_requires_exactly_one_video_source(self) -> None:
+        with self.assertRaisesRegex(ValueError, "exactamente uno"):
+            ProcessVideoRequest()
+        with self.assertRaisesRegex(ValueError, "exactamente uno"):
+            ProcessVideoRequest(file_key="uploads/video.mp4", video_url="https://media.example/video.mp4")
 
 
 if __name__ == "__main__":
