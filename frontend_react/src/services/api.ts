@@ -78,6 +78,13 @@ export const videoService = {
 
     return { file_key: signed.file_key }
   },
+  processDirectUpload(fileKey: string): Promise<import('@/types/api').RunPodProcessResponse> {
+    return http.postJson<import('@/types/api').RunPodProcessResponse>(
+      '/api/videos/process',
+      { file_key: fileKey },
+      { timeout: 0 },
+    )
+  },
   async upload(videoFile: File, transcriptFile?: File | null): Promise<VideoUploadResponse> {
     const fd = new FormData()
     fd.append('video', videoFile, videoFile.name)
