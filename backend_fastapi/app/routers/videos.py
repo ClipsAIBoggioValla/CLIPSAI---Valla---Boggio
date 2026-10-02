@@ -5,9 +5,10 @@ from __future__ import annotations
 import os
 import uuid
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, status
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from sqlalchemy import select
 
 from ..deps import CurrentUser, DbSession
@@ -21,6 +22,24 @@ upload_url_router = APIRouter(prefix="/api/videos", tags=["videos"])
 class UploadUrlRequest(BaseModel):
     file_name: str
     file_type: str
+
+
+class ProcessVideoRequest(BaseModel):
+    file_key: str | None = None
+    video_url: str | None = None
+    transcription_url: str | None = None
+    transcription_text: str | None = None
+    video_id: str | None = None
+
+    @model_validator(mode="after")
+    def validate_source(self) -> "ProcessVideoRequest":
+        has_file_key = bool(self.file_key and self.file_key.strip())
+        has_video_url = bool(self.video_url and self.video_url.strip())
+        if has_file_key == has_video_url:
+            raise ValueError("Envía exactamente uno de file_key o video_url")
+        if self.transcription_url and self.transcription_text is not None:
+            raise ValueError("Envía transcription_url o transcription_text, no ambos")
+        return self
 
 
 def get_s3_client():
@@ -64,6 +83,42 @@ async def generate_upload_url(payload: UploadUrlRequest) -> dict[str, str]:
             status_code=500,
             detail=f"Error al generar la presigned URL: {str(exc)}",
         ) from exc
+
+
+@upload_url_router.post("/process", summary="Procesar un video almacenado en R2 mediante RunPod")
+def process_video(payload: ProcessVideoRequest) -> dict[str, Any]:
+    video_url = payload.video_url.strip() if payload.video_url else ""
+
+    if payload.file_key:
+        try:
+            s3_client = get_s3_client()
+            video_url = s3_client.generate_presigned_url(
+                ClientMethod="get_object",
+                Params={
+                    "Bucket": os.getenv("BUCKET_NAME", "clipsai-videos"),
+                    "Key": payload.file_key.strip(),
+                },
+                ExpiresIn=3600,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error al generar la presigned URL de lectura: {str(exc)}",
+            ) from exc
+
+    try:
+        from ..services.runpod_service import RunPodError, process_video_via_runpod
+
+        return process_video_via_runpod(
+            video_url,
+            transcription_url=payload.transcription_url,
+            transcription_text=payload.transcription_text,
+            video_id=payload.video_id,
+        )
+    except RunPodError as exc:
+        message = str(exc)
+        status_code = 504 if "timeout" in message.lower() or "no terminó" in message.lower() else 502
+        raise HTTPException(status_code=status_code, detail=f"Error al procesar con RunPod: {message}") from exc
 
 ALLOWED_VIDEO_EXTS = {".mp4", ".mov", ".avi"}
 ALLOWED_TRANSCRIPT_EXTS = {".txt", ".srt"}
