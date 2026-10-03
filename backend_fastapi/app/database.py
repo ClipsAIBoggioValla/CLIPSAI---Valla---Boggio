@@ -22,6 +22,11 @@ def _is_docker() -> bool:
 
 
 def _fallback_db_url(url: str) -> str:
+    # Normalizar esquemas de nube (postgres://, postgresql://) al dialecto explicito.
+    if url.startswith("postgres://"):
+        url = "postgresql+psycopg2://" + url[len("postgres://") :]
+    elif url.startswith("postgresql://"):
+        url = "postgresql+psycopg2://" + url[len("postgresql://") :]
     is_docker = _is_docker()
     has_db = "@db:" in url or "@db/" in url
     has_local = "@127.0.0.1:" in url or "@localhost:" in url
