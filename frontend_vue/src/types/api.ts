@@ -31,6 +31,27 @@ export interface VideoUploadResponse {
   created_at: string
 }
 
+export interface RunPodProcessedClip {
+  title?: string
+  titulo?: string
+  titulo_sugerido?: string
+  start_time?: number | string
+  end_time?: number | string
+  inicio?: number | string
+  fin?: number | string
+  score?: number
+  [key: string]: unknown
+}
+
+export interface RunPodProcessResponse {
+  status?: string
+  video_id?: string
+  engine?: string
+  clip_count?: number
+  clips: RunPodProcessedClip[]
+  [key: string]: unknown
+}
+
 export type JobStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED'
 
 export interface Clip {

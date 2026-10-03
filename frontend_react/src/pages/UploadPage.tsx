@@ -1,10 +1,10 @@
 import { useState, type ChangeEvent, type FormEvent, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { jobService, videoService } from '@/services/api'
-import { ApiError } from '@/types/api'
+import { ApiError, type RunPodProcessResponse } from '@/types/api'
 
 type UploadState = 'idle' | 'uploading' | 'creating_job'
-type DirectUploadState = 'idle' | 'uploading' | 'success' | 'error'
+type DirectUploadState = 'idle' | 'uploading' | 'processing' | 'success' | 'error'
 
 function fileErrorMessage(err: unknown): string {
   if (err instanceof ApiError) return err.detail
@@ -22,6 +22,7 @@ export default function UploadPage() {
   const [directUploadState, setDirectUploadState] = useState<DirectUploadState>('idle')
   const [directUploadError, setDirectUploadError] = useState<string | null>(null)
   const [directUploadKey, setDirectUploadKey] = useState<string | null>(null)
+  const [directUploadResult, setDirectUploadResult] = useState<RunPodProcessResponse | null>(null)
 
   useEffect(() => {
     try {
@@ -31,12 +32,14 @@ export default function UploadPage() {
   }, [])
 
   const isUploading = status === 'uploading' || status === 'creating_job'
+  const isDirectUploadBusy = directUploadState === 'uploading' || directUploadState === 'processing'
 
   function onVideoChange(e: ChangeEvent<HTMLInputElement>) {
     setVideoFile(e.target.files?.[0] ?? null)
     setDirectUploadState('idle')
     setDirectUploadError(null)
     setDirectUploadKey(null)
+    setDirectUploadResult(null)
   }
   function onTranscriptChange(e: ChangeEvent<HTMLInputElement>) {
     setTranscriptFile(e.target.files?.[0] ?? null)
@@ -46,9 +49,13 @@ export default function UploadPage() {
     setDirectUploadState('uploading')
     setDirectUploadError(null)
     setDirectUploadKey(null)
+    setDirectUploadResult(null)
     try {
       const result = await videoService.uploadDirectToStorage(file)
       setDirectUploadKey(result.file_key)
+      setDirectUploadState('processing')
+      const processResult = await videoService.processDirectUpload(result.file_key)
+      setDirectUploadResult(processResult)
       setDirectUploadState('success')
     } catch (err: unknown) {
       setDirectUploadError(fileErrorMessage(err))
@@ -135,7 +142,7 @@ export default function UploadPage() {
                 <i className="bi bi-check-circle-fill" /> {(videoFile.size / 1024 / 1024).toFixed(1)} MB
               </span>
             )}
-            <input type="file" accept=".mp4,.mov,.avi,video/mp4,video/quicktime" onChange={onVideoChange} className="hidden" disabled={isUploading} />
+            <input type="file" accept=".mp4,.mov,.avi,video/mp4,video/quicktime" onChange={onVideoChange} className="hidden" disabled={isUploading || isDirectUploadBusy} />
           </label>
         </div>
 
@@ -163,37 +170,55 @@ export default function UploadPage() {
         <div className="rounded-xl border border-white/10 bg-[#0B0F17] p-4 space-y-3">
           <div>
             <p className="text-sm font-bold text-[#F1F5F9]">Subida directa a Cloudflare R2</p>
-            <p className="text-xs mt-1 text-[#94A3B8]">Guarda el video en R2 y devuelve su clave. El botón principal conserva el flujo actual de procesamiento.</p>
+            <p className="text-xs mt-1 text-[#94A3B8]">Sube el video a R2 y envía su URL prefirmada al worker de RunPod.</p>
           </div>
           <button
             type="button"
             onClick={() => videoFile && void handleFileUpload(videoFile)}
-            disabled={!videoFile || directUploadState === 'uploading' || isUploading}
+            disabled={!videoFile || directUploadState === 'uploading' || directUploadState === 'processing' || isUploading}
             className="btn-custom btn-custom-light w-full justify-center disabled:opacity-50"
           >
-            {directUploadState === 'uploading' ? (
-              <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-[#B4F105]" /> Subiendo a R2...</>
+            {directUploadState === 'uploading' || directUploadState === 'processing' ? (
+              <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-[#B4F105]" /> {directUploadState === 'uploading' ? 'Subiendo a R2...' : 'Procesando con RunPod...'}</>
             ) : directUploadState === 'success' ? (
-              <><i className="bi bi-check-circle-fill text-emerald-400" /> Subida directa completada</>
+              <><i className="bi bi-check-circle-fill text-emerald-400" /> Procesamiento completado</>
             ) : (
               <><i className="bi bi-cloud-arrow-up" /> Subir video directamente a R2</>
             )}
           </button>
-          {directUploadState === 'uploading' && (
+          {(directUploadState === 'uploading' || directUploadState === 'processing') && (
             <div role="status" className="space-y-2">
               <div className="progress"><div className="progress-bar w-full animate-pulse" style={{ height: '8px', borderRadius: '50rem' }} /></div>
-              <p className="text-xs text-center text-[#94A3B8]">Transfiriendo archivo directamente al storage...</p>
+              <p className="text-xs text-center text-[#94A3B8]">{directUploadState === 'uploading' ? 'Transfiriendo archivo directamente al storage...' : 'RunPod está analizando el video y buscando clips...'}</p>
             </div>
           )}
           {directUploadState === 'success' && directUploadKey && (
-            <p role="status" className="text-xs text-emerald-400 break-all">Archivo guardado. Clave: {directUploadKey}</p>
+            <div role="status" className="space-y-2">
+              <p className="text-xs text-emerald-400 break-all">Archivo procesado. Clave R2: {directUploadKey}</p>
+              <p className="text-xs text-[#CBD5E1]">{directUploadResult?.clip_count ?? directUploadResult?.clips?.length ?? 0} clips devueltos · motor {directUploadResult?.engine ?? 'ClipsAI'}</p>
+              {directUploadResult?.clips?.length ? (
+                <ul className="space-y-2">
+                  {directUploadResult.clips.map((clip, index) => (
+                    <li key={`${clip.start_time ?? clip.inicio ?? index}-${index}`} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+                      <p className="text-sm font-semibold text-[#F1F5F9]">{clip.title ?? clip.titulo_sugerido ?? clip.titulo ?? `Clip ${index + 1}`}</p>
+                      <p className="text-xs text-[#94A3B8]">
+                        {String(clip.start_time ?? clip.inicio ?? '—')} – {String(clip.end_time ?? clip.fin ?? '—')}
+                        {clip.score !== undefined ? ` · Score ${clip.score}` : ''}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-xs text-[#94A3B8]">El worker no devolvió clips para este video.</p>
+              )}
+            </div>
           )}
           {directUploadState === 'error' && directUploadError && (
             <p role="alert" className="text-xs text-red-400">{directUploadError}</p>
           )}
         </div>
 
-        <button type="submit" disabled={isUploading || !videoFile} className="btn-custom btn-custom-primary w-full justify-center btn-custom-lg shadow-[0_0_28px_rgba(180,241,5,0.35)]">
+        <button type="submit" disabled={isUploading || isDirectUploadBusy || !videoFile} className="btn-custom btn-custom-primary w-full justify-center btn-custom-lg shadow-[0_0_28px_rgba(180,241,5,0.35)]">
           {isUploading ? (
             <>
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#080C14]/30 border-t-[#080C14]" />
