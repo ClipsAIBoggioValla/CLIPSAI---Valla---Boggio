@@ -1,0 +1,74 @@
+# Render Blueprint — Issue 47 (despliegue del backend a la nube).
+# Uso: conectar este directorio (backend_fastapi/) como Blueprint en Render y
+# completar en el dashboard las variables marcadas con `sync: false`.
+services:
+  - type: web
+    name: clipsai-backend
+    runtime: docker # construye desde backend_fastapi/Dockerfile (CMD respeta $PORT)
+    plan: starter # "free" no admite disco persistente para clips/uploads
+    region: oregon
+    autoDeploy: true
+    healthCheckPath: /health
+    disk:
+      name: clipsai-storage
+      mountPath: /var/data
+      sizeGB: 10
+    envVars:
+      - key: DATABASE_URL # postgres:// de Render se normaliza en app/database.py
+        fromDatabase:
+          name: clipsai-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: APP_ENV
+        value: production
+      - key: STORAGE_CLIPS_DIR
+        value: /var/data/clips
+      - key: UPLOAD_DIR
+        value: /var/data/uploads
+      # Origen CORS del frontend (Vercel) y URL pública de este servicio (callbacks OAuth)
+      - key: FRONTEND_URL
+        sync: false
+      - key: PUBLIC_BACKEND_URL
+        sync: false
+      # LLM — selección semántica de clips (prioridad Anthropic → OpenRouter → OpenAI → DeepSeek)
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      # OAuth 2.0 — YouTube (Google Data API v3)
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false
+      # OAuth 2.0 — Instagram (Meta Graph API)
+      - key: INSTAGRAM_CLIENT_ID
+        sync: false
+      - key: INSTAGRAM_CLIENT_SECRET
+        sync: false
+      - key: INSTAGRAM_REDIRECT_URI
+        sync: false
+      - key: FACEBOOK_CLIENT_ID
+        sync: false
+      - key: FACEBOOK_CLIENT_SECRET
+        sync: false
+      # OAuth 2.0 — TikTok (Content Posting API, PKCE)
+      - key: TIKTOK_CLIENT_KEY
+        sync: false
+      - key: TIKTOK_CLIENT_SECRET
+        sync: false
+      - key: TIKTOK_REDIRECT_URI
+        sync: false
+
+databases:
+  - name: clipsai-db
+    plan: basic-256mb
+    databaseName: clipsai
+    user: clipsai
+    postgresVersion: "15"

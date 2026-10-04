@@ -8,6 +8,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 import logging
+import os
+import re
 
 from .config import get_settings
 from .database import Base, engine
@@ -49,6 +51,55 @@ except Exception:
     stream_router = None  # type: ignore
 
 _settings = get_settings()
+
+
+# CORS (Issue 47 — despliegue en la nube): base local + FRONTEND_URL /
+# FRONTEND_REDIRECT_URL / CORS_EXTRA_ORIGINS desde el entorno, y regex para
+# produccion (*.vercel.app, *.ngrok-free.dev, *.clipsai.xyz).
+_CORS_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+_CORS_HEADERS = [
+    "Authorization",
+    "Content-Type",
+    "ngrok-skip-browser-warning",
+    "X-Requested-With",
+    "Accept",
+    "Origin",
+]
+_CORS_ORIGIN_REGEX = r"https://.*\.(ngrok-free\.dev|clipsai\.xyz|vercel\.app)"
+
+
+def _build_cors_origins() -> list[str]:
+    origins = [
+        "https://api.clipsai.xyz",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+    ]
+    extras: list[str] = []
+    for value in (
+        _settings.frontend_url,
+        _settings.frontend_redirect_url,
+        os.getenv("CORS_EXTRA_ORIGINS", ""),
+    ):
+        if value:
+            extras.extend(str(value).split(","))
+    for extra in extras:
+        origin = extra.strip().rstrip("/")
+        if origin and origin not in origins:
+            origins.append(origin)
+    return origins
+
+
+_CORS_ORIGINS = _build_cors_origins()
+
+
+def _origin_is_allowed(origin: str) -> bool:
+    if not origin:
+        return False
+    return origin in _CORS_ORIGINS or re.match(_CORS_ORIGIN_REGEX, origin) is not None
 
 
 @asynccontextmanager
@@ -169,20 +220,11 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://api.clipsai.xyz",
-        "https://decorator-excretory-satin.ngrok-free.dev",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:3001",
-        "http://127.0.0.1:3001",
-    ],
-    allow_origin_regex=r"https://.*\.(ngrok-free\.dev|clipsai\.xyz)",
+    allow_origins=_CORS_ORIGINS,
+    allow_origin_regex=_CORS_ORIGIN_REGEX,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "ngrok-skip-browser-warning", "X-Requested-With", "Accept", "Origin"],
+    allow_methods=_CORS_METHODS,
+    allow_headers=_CORS_HEADERS,
 )
 
 
@@ -193,25 +235,11 @@ async def handle_options_preflight(request, call_next):  # type: ignore[no-untyp
 
         response = Response(status_code=200)
         origin = request.headers.get("origin", "")
-        allowed = [
-            "https://api.clipsai.xyz",
-            "https://decorator-excretory-satin.ngrok-free.dev",
-            "http://localhost:3000",
-            "http://127.0.0.1:3000",
-            "http://localhost:5173",
-            "http://127.0.0.1:5173",
-            "http://localhost:3001",
-            "http://127.0.0.1:3001",
-        ]
-        if origin in allowed or origin.endswith(".ngrok-free.dev") or origin.endswith(".clipsai.xyz"):
+        if _origin_is_allowed(origin):
             response.headers["Access-Control-Allow-Origin"] = origin
-        elif origin:
-            response.headers["Access-Control-Allow-Origin"] = origin
-        else:
-            response.headers["Access-Control-Allow-Origin"] = "https://api.clipsai.xyz"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, ngrok-skip-browser-warning, X-Requested-With, Accept, Origin"
-        response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = ", ".join(_CORS_METHODS)
+        response.headers["Access-Control-Allow-Headers"] = ", ".join(_CORS_HEADERS)
         response.headers["Access-Control-Expose-Headers"] = "*"
         response.headers["Vary"] = "Origin"
         return response
