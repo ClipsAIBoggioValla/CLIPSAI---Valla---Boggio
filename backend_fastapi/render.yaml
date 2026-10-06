@@ -71,4 +71,3 @@ databases:
     plan: basic-256mb
     databaseName: clipsai
     user: clipsai
-    postgresVersion: "15"
