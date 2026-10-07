@@ -486,7 +486,7 @@ backend/
 | Modo anónimo | `VITE_ALLOW_ANONYMOUS=true` permite Layout sin user | idem en guard |
 | Build | `tsc --noEmit` / `tsc -b && vite build` | `vue-tsc --noEmit` |
 
-**Rutas (ambos):** `/` landing pública (Issue 32, sin auth; con sesión activa redirige a `/dashboard`), `/auth`, `/login→/auth`, `/dashboard`, `/clips`, `/library` (Vue; React alias borrado a `/dashboard`), `/upload`, `/jobs/:jobId`, `/settings`, `/dashboard/integrations`, `/settings/integrations`, `/404` (Vue), `*→/dashboard` (React).
+**Rutas (ambos):** `/` landing pública (Issue 32, sin auth; con sesión activa redirige a `/dashboard`), `/politica-de-privacidad` + `/terminos-y-condiciones` + `/eliminacion-de-datos` páginas legales (Issue 33, públicas), `/auth`, `/login→/auth`, `/dashboard`, `/clips`, `/library` (Vue; React alias borrado a `/dashboard`), `/upload`, `/jobs/:jobId`, `/settings`, `/dashboard/integrations`, `/settings/integrations`, `/404` (Vue), `*→/dashboard` (React).
 
 ### 10.2 Páginas clave
 
@@ -498,7 +498,8 @@ backend/
 - **Integraciones:** `IntegrationsPage`/`IntegrationsView` + `settings/IntegrationsSettings` — conectar/desconectar YouTube/Instagram/TikTok vía `/auth/social/*/connect`, badge `Conectado` + `Ver post` (Issue 28).
 - **Settings:** avatar 56px, `PUT /users/me`, change-password, preferencias theme/export_format.
 - **Layout:** Sidebar `#080C14` fixed 280px (80px minimized con fix `dropdown-menu-profile` fixed left 88px), Navbar sticky con búsqueda → `/clips?q=`, Footer, `ProtectedRoute`.
-- **Landing (Issue 32):** `LandingPage.tsx` / `LandingView.vue` en `/` — hero con CTA `Probar gratis → /auth`, "Cómo funciona" con 3 tabs interactivos (cargar → análisis IA → publicación), "Sobre nosotros" (motor IA, análisis de audio, scoring de viralidad), features grid (9:16, subtítulos ASS, autopublicación) y footer con enlaces legales (`/privacy`, `/terms`, `/data-deletion`). SEO: `index.html` con title/description/canonical/og/twitter + `robots.txt` + `sitemap.xml` + `og-clipsai.png`. Lighthouse SEO 100/100.
+- **Landing (Issue 32):** `LandingPage.tsx` / `LandingView.vue` en `/` — hero con CTA `Probar gratis → /auth`, "Cómo funciona" con 3 tabs interactivos (cargar → análisis IA → publicación), "Sobre nosotros" (motor IA, análisis de audio, scoring de viralidad), features grid (9:16, subtítulos ASS, autopublicación) y footer con enlaces legales (`/politica-de-privacidad`, `/terminos-y-condiciones`, `/eliminacion-de-datos`). SEO: `index.html` con title/description/canonical/og/twitter + `robots.txt` + `sitemap.xml` + `og-clipsai.png`. Lighthouse SEO 100/100.
+- **Legales (Issue 33):** `pages/legal/` + `views/legal/` — `PrivacyPage`/`PrivacyView` (`/politica-de-privacidad`), `TermsPage`/`TermsView` (`/terminos-y-condiciones`), `DataDeletionPage`/`DataDeletionView` (`/eliminacion-de-datos`). Layout compartido `LegalLayout` + `legal.css`. Contenido: datos recopilados, uso, compartidos, seguridad, derechos, contacto, plazo de eliminación (30 días), revocación OAuth.
 
 ### 10.3 Deuda conocida en UI
 
@@ -725,9 +726,9 @@ Fuente detallada: [`ISSUES.md`](./ISSUES.md) (sincronizada con GitHub, Sep 2026)
 
 | Estado | Cantidad | Lista |
 |--------|----------|-------|
-| ✅ Completado | 20 | 1, 2, 3, 4, 5, 7, 14, 17, 18, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 32 (+ PR #34 Spark) |
+| ✅ Completado | 21 | 1, 2, 3, 4, 5, 7, 14, 17, 18, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 32, 33 (+ PR #34 Spark) |
 | ⚠️ Parcial | 2 | 6 (Express ~90-100%, pulidos menores), 13 (seguridad/compose) |
-| ⏳ Pendiente | 4 | 31, 33, 34, 35 (GitHub #51, #53–#55) |
+| ⏳ Pendiente | 3 | 31, 34, 35 (GitHub #51, #54–#55) |
 | ↩️ Cerradas vía otras | 3 | 8, 9, 10/11/12 → Issues 27/28/29 |
 
 ### 17.2 Estado por área
@@ -743,14 +744,13 @@ Fuente detallada: [`ISSUES.md`](./ISSUES.md) (sincronizada con GitHub, Sep 2026)
 | OAuth + Publish real | ✅ | Issues 22–28 — YouTube/Instagram/TikTok |
 | Docs OpenAPI | ✅ | FastAPI `/docs` + Express `/docs` + `/openapi.json` |
 | Seguridad | ⚠️ | key filtrada, rate-limit ausente |
-| Pendientes activas | ⏳ | SSE publish UI (31), legales (33), video muestra (34), deuda UI (35) |
+| Pendientes activas | ⏳ | SSE publish UI (31), video muestra (34), deuda UI (35) |
 
 ### 17.3 Issues pendientes (abiertas en GitHub)
 
 | # | Título | Criterio clave |
 |---|--------|----------------|
 | 31 | SSE estado de publicación en UI | UI `PUBLISHING→PUBLISHED` sin reload (endpoint SSE ya existe) |
-| 33 | Páginas legales `/privacy /terms /data-deletion` | requerido para validación Meta/Google/TikTok |
 | 34 | Video de muestra en `/upload` | `POST /videos/sample 201` sin multipart |
 | 35 | Deuda técnica UI | eliminar `LibraryPage`/`LibraryView` duplicados, `axios` muerto, `any` en tags, `passlib` |
 
