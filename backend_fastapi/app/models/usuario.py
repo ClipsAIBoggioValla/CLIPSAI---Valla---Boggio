@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, String, func
+from sqlalchemy import DateTime, String, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -23,7 +23,7 @@ class Usuario(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
-        server_default=func.uuid_generate_v4(),
+        server_default=text("gen_random_uuid()"),
     )
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
