@@ -42,7 +42,7 @@ async function apiGet<T>(path: string): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json", "ngrok-skip-browser-warning": "true" };
   const auth = getAuthHeader();
   if (auth) Object.assign(headers, auth);
-  const base = (import.meta as any)?.env?.VITE_API_URL || "http://localhost:8000";
+  const base = (import.meta as any)?.env?.VITE_API_URL || "https://clipsai-backend.onrender.com";
   const res = await fetch(`${base.replace(/\/$/, "")}${path}`, { headers, credentials: "include" });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -59,7 +59,7 @@ async function apiDelete(path: string): Promise<void> {
   const headers: Record<string, string> = { Accept: "application/json", "ngrok-skip-browser-warning": "true" };
   const auth = getAuthHeader();
   if (auth) Object.assign(headers, auth);
-  const base = (import.meta as any)?.env?.VITE_API_URL || "http://localhost:8000";
+  const base = (import.meta as any)?.env?.VITE_API_URL || "https://clipsai-backend.onrender.com";
   const res = await fetch(`${base.replace(/\/$/, "")}${path}`, { method: "DELETE", headers, credentials: "include" });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
