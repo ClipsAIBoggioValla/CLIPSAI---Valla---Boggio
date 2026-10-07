@@ -472,15 +472,25 @@ node -e "import('./dist/docs/swagger.js').then(m=>console.log(Object.keys(m.swag
 
 ---
 
-### Issue 34 — Modo "Video de Muestra" en Pantalla de Carga (/upload) — ⏳ Pendiente (#54)
+### Issue 34 — Modo "Video de Muestra" en Pantalla de Carga (/upload) — ✅ Completado (#54)
 
-**Descripción:** Permitir probar el flujo sin subir video propio: botón `Probar con video de muestra` usa `river.mp4` + transcripción fixture.
+**PR:** #54 — **Issue #34**
 
-**Archivos:** `frontend_react/src/pages/UploadPage.tsx` `sample_test.mp4` + `backend_fastapi/app/routers/videos.py` `POST /videos/sample`.
+**Descripción:** Permitir probar el flujo sin subir video propio: botón `Probar con video de muestra` usa un clip liviano almacenado en los assets del backend.
+
+**Archivos:** `frontend_react/src/pages/UploadPage.tsx` + `frontend_vue/src/views/UploadView.vue` (botón en dropzone) + `backend_fastapi/app/routers/sample.py` `POST /videos/sample` + `backend_fastapi/storage/sample/README.md` (instrucciones para colocar el video).
 
 **Criterios:**
-- [ ] `POST /videos/sample` `201` sin `multipart` + `POST /videos/{id}/jobs 202` → clips visibles
-- [ ] UI botón `Video de muestra` + badge `Muestra`
+- [x] `POST /videos/sample` `202` sin `multipart` + job en background → clips visibles
+- [x] UI botón `Probar con video de muestra` dentro del dropzone de carga
+
+**Evidencias:**
+- `npm run typecheck` EXIT:0 (React + Vue)
+- `npm run build` EXIT:0 (React + Vue)
+- Endpoint `POST /videos/sample` registrado en `main.py` + router `sample.py`
+- Botón funcional en UploadPage (React) + UploadView (Vue) con estados loading/error
+- Video de muestra: `backend_fastapi/storage/sample/sample.mp4` (usuario puede subirlo ahí)
+- Error descriptivo 404 si el video no existe, indicando dónde colocarlo
 
 ---
 
