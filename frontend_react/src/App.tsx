@@ -8,6 +8,9 @@ import UploadPage from '@/pages/UploadPage'
 import JobStatusPage from '@/pages/JobStatusPage'
 import IntegrationsPage from '@/pages/IntegrationsPage'
 import IntegrationsSettings from '@/pages/settings/IntegrationsSettings'
+import PrivacyPage from '@/pages/legal/PrivacyPage'
+import TermsPage from '@/pages/legal/TermsPage'
+import DataDeletionPage from '@/pages/legal/DataDeletionPage'
 import Layout from '@/components/Layout'
 import { useAuth } from '@/context/AuthContext'
 
@@ -38,6 +41,10 @@ export default function App() {
       <Route path="/" element={<LandingPage />} />
       <Route path="/auth" element={<AuthPage />} />
       <Route path="/login" element={<Navigate to="/auth" replace />} />
+      {/* Páginas legales (Issue 33) — públicas, requeridas por Meta/Google/TikTok */}
+      <Route path="/politica-de-privacidad" element={<PrivacyPage />} />
+      <Route path="/terminos-y-condiciones" element={<TermsPage />} />
+      <Route path="/eliminacion-de-datos" element={<DataDeletionPage />} />
       <Route element={<ProtectedLayout />}>
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/clips" element={<ClipLibraryPage />} />

@@ -451,16 +451,24 @@ node -e "import('./dist/docs/swagger.js').then(m=>console.log(Object.keys(m.swag
 
 ---
 
-### Issue 33 — Páginas Legales para Validación de APIs (/privacy, /terms, /data-deletion) — ⏳ Pendiente (#53)
+### Issue 33 — Páginas Legales para Validación de APIs (/politica-de-privacidad, /terminos-y-condiciones, /eliminacion-de-datos) — ✅ Completado (#53)
+
+**PR:** #53 — **Issue #33**
 
 **Descripción:** Requerido para validación Meta/Google/TikTok: privacy policy, términos y data deletion.
 
-**Archivos:** `frontend_react/src/pages/PrivacyPage.tsx` `/privacy`, `TermsPage.tsx` `/terms`, `DataDeletionPage.tsx` `/data-deletion` (Vue idem).
+**Archivos:** `frontend_react/src/pages/legal/PrivacyPage.tsx` `/politica-de-privacidad`, `TermsPage.tsx` `/terminos-y-condiciones`, `DataDeletionPage.tsx` `/eliminacion-de-datos` + `frontend_react/src/components/legal/LegalLayout.tsx` + `frontend_react/src/styles/legal.css` (Vue idem: `frontend_vue/src/views/legal/*.vue` + `frontend_vue/src/components/legal/LegalLayout.vue` + `frontend_vue/src/assets/legal.css`).
 
 **Criterios:**
-- [ ] `GET /privacy` `200` con política + contacto
-- [ ] `GET /terms` `200` + `GET /data-deletion` instrucciones borrado
-- [ ] Enlace en footer `Layout.tsx` + `Layout.vue`
+- [x] `GET /politica-de-privacidad` `200` con política + contacto
+- [x] `GET /terminos-y-condiciones` `200` + `GET /eliminacion-de-datos` instrucciones borrado
+- [x] Enlace en footer `LandingFooter.tsx` + `LandingFooter.vue` (rutas actualizadas en `landingData.ts`)
+
+**Evidencias:**
+- `npm run typecheck` EXIT:0 (React + Vue)
+- `npm run build` EXIT:0 (React + Vue)
+- Rutas registradas en `App.tsx` (React) + `router/index.ts` (Vue) como públicas (`meta: { public: true }`)
+- Contenido legal completo: datos recopilados, uso, compartidos, seguridad, derechos, contacto, plazo de eliminación (30 días), revocación OAuth
 
 ---
 
