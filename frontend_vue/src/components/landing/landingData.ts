@@ -240,21 +240,20 @@ export interface LandingFooterColumn {
 }
 
 /**
- * Páginas legales de la plataforma.
- * Los destinos los implementa la Issue 33; el footer ya los publica porque
+ * Páginas legales de la plataforma (Issue 33).
  * Meta, Google y TikTok las exigen para revisar la app.
  */
 export const LANDING_LEGAL_LINKS: LandingFooterLink[] = [
-  { label: 'Política de privacidad', href: '/privacy' },
-  { label: 'Términos y condiciones', href: '/terms' },
-  { label: 'Eliminación de datos', href: '/data-deletion' },
+  { label: 'Política de privacidad', href: '/politica-de-privacidad' },
+  { label: 'Términos y condiciones', href: '/terminos-y-condiciones' },
+  { label: 'Eliminación de datos', href: '/eliminacion-de-datos' },
 ]
 
 /** Etiquetas cortas para la barra inferior del footer. */
 export const LANDING_LEGAL_SHORT: LandingFooterLink[] = [
-  { label: 'Privacidad', href: '/privacy' },
-  { label: 'Términos', href: '/terms' },
-  { label: 'Eliminación de datos', href: '/data-deletion' },
+  { label: 'Privacidad', href: '/politica-de-privacidad' },
+  { label: 'Términos', href: '/terminos-y-condiciones' },
+  { label: 'Eliminación de datos', href: '/eliminacion-de-datos' },
 ]
 
 /** Footer: enlaces legales (Issue 33) + producto. */

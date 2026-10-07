@@ -8,6 +8,10 @@ const router = createRouter({
     // y revisores de las APIs de redes sociales. Con sesión activa, LandingView
     // redirige a /dashboard.
     { path: '/', name: 'landing', component: () => import('@/views/LandingView.vue'), meta: { public: true } },
+    // Páginas legales (Issue 33): públicas, requeridas por Meta/Google/TikTok
+    { path: '/politica-de-privacidad', name: 'privacy', component: () => import('@/views/legal/PrivacyView.vue'), meta: { public: true } },
+    { path: '/terminos-y-condiciones', name: 'terms', component: () => import('@/views/legal/TermsView.vue'), meta: { public: true } },
+    { path: '/eliminacion-de-datos', name: 'data-deletion', component: () => import('@/views/legal/DataDeletionView.vue'), meta: { public: true } },
     { path: '/auth', name: 'auth', component: () => import('@/views/AuthView.vue') },
     { path: '/dashboard', name: 'dashboard', component: () => import('@/views/DashboardView.vue'), meta: { requiresAuth: true } },
     { path: '/clips', name: 'clips', component: () => import('@/views/ClipLibraryView.vue'), meta: { requiresAuth: true } },
