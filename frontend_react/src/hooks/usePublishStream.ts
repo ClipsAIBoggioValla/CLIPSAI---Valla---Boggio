@@ -12,7 +12,7 @@ export interface UsePublishStreamResult {
 
 const RAW_BASE: string =
   ((import.meta as unknown as { env?: Record<string, string> })?.env?.VITE_API_URL ?? '').trim()
-const API_BASE_URL = (RAW_BASE || 'http://localhost:8000').replace(/\/$/, '')
+const API_BASE_URL = (RAW_BASE || 'https://clipsai-backend.onrender.com').replace(/\/$/, '')
 
 function getToken(): string | null {
   try {
