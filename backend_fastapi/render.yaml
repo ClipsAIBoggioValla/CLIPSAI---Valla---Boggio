@@ -4,7 +4,9 @@
 services:
   - type: web
     name: clipsai-backend
-    runtime: docker # construye desde backend_fastapi/Dockerfile (CMD respeta $PORT)
+    runtime: docker # CMD respeta $PORT
+    dockerfilePath: backend_fastapi/Dockerfile
+    dockerContext: backend_fastapi
     plan: starter # "free" no admite disco persistente para clips/uploads
     region: oregon
     autoDeploy: true
