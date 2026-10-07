@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
-import { RouterLink, useRouter } from 'vue-router'
-import { useAuthStore } from '@/stores/auth'
+import { RouterLink } from 'vue-router'
 import LandingAbout from '@/components/landing/LandingAbout.vue'
 import LandingFeatures from '@/components/landing/LandingFeatures.vue'
 import LandingFooter from '@/components/landing/LandingFooter.vue'
@@ -16,14 +15,10 @@ import { applyLandingSeo } from '@/components/landing/landingSeo'
  * - No requiere autenticación: es la anteportada para usuarios anónimos y para los
  *   revisores de Meta / Google / TikTok, que necesitan una URL pública con aviso
  *   de privacidad y contacto.
- * - Con sesión activa se redirige a `/dashboard` para no interrumpir el trabajo.
+ * - Accible también con sesión activa: no redirige a /dashboard.
  */
-const auth = useAuthStore()
-const router = useRouter()
-
 onMounted(() => {
   applyLandingSeo()
-  if (!auth.isLoading && auth.isAuthenticated) router.replace('/dashboard')
 })
 </script>
 
