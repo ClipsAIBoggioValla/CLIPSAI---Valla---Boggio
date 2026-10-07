@@ -1,5 +1,6 @@
 node_modules/
 .env
+.env.local
 frontend_react/.env
 
 # Build artifacts
