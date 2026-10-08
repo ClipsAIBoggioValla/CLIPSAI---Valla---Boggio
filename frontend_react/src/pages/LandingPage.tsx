@@ -1,6 +1,5 @@
 import { useEffect } from 'react'
-import { Link, Navigate } from 'react-router-dom'
-import { useAuth } from '@/context/AuthContext'
+import { Link } from 'react-router-dom'
 import LandingAbout from '@/components/landing/LandingAbout'
 import LandingFeatures from '@/components/landing/LandingFeatures'
 import LandingFooter from '@/components/landing/LandingFooter'
@@ -15,18 +14,12 @@ import { applyLandingSeo } from '@/components/landing/landingSeo'
  * - No requiere autenticación: es la anteportada para usuarios anónimos y para los
  *   revisores de Meta / Google / TikTok, que necesitan una URL pública con aviso
  *   de privacidad y contacto.
- * - Con sesión activa se redirige a `/dashboard` para no interrumpir el trabajo.
+ * - Accible también con sesión activa: no redirige a /dashboard.
  */
 export default function LandingPage() {
-  const { user, isLoading } = useAuth()
-
   useEffect(() => {
     applyLandingSeo()
   }, [])
-
-  if (!isLoading && user) {
-    return <Navigate to="/dashboard" replace />
-  }
 
   return (
     <div id="top" className="landing">

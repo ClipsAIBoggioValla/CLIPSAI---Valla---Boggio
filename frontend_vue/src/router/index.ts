@@ -64,10 +64,10 @@ router.beforeEach((to) => {
     return '/login'
   }
   if ((to.path === '/auth' || to.path === '/login') && auth.isAuthenticated && !auth.isLoading) {
-    return '/upload'
+    return '/dashboard'
   }
   if ((to.path === '/auth' || to.path === '/login') && hasToken && auth.isAuthenticated) {
-    return '/upload'
+    return '/dashboard'
   }
 })
 
