@@ -113,21 +113,23 @@ def run_subtitle_pipeline(clip_id: uuid.UUID | str) -> None:
 
         from ..services.ass_generator import write_ass_file
         from ..services.ffmpeg_service import burn_subtitles
-        from ..services.whisper_service import extract_audio_wav, transcribe_wav
-
-        tmp_wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-        tmp_wav.close()
-        wav_path = tmp_wav.name
-        tmp_wav_created = True
+        from ..services.runpod_service import is_runpod_configured
+        from ..services.whisper_service import extract_audio_wav, transcribe_video, transcribe_wav
 
         tmp_ass = tempfile.NamedTemporaryFile(suffix=".ass", delete=False)
         tmp_ass.close()
         ass_path = tmp_ass.name
         tmp_ass_created = True
 
-        extract_audio_wav(video_path, wav_path)
-
-        segments = transcribe_wav(wav_path, language="es")
+        if is_runpod_configured():
+            segments = transcribe_video(video_path, language="es")
+        else:
+            tmp_wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+            tmp_wav.close()
+            wav_path = tmp_wav.name
+            tmp_wav_created = True
+            extract_audio_wav(video_path, wav_path)
+            segments = transcribe_wav(wav_path, language="es")
 
         if not segments:
             raise RuntimeError("Transcripcion vacia: no se generaron segmentos")
