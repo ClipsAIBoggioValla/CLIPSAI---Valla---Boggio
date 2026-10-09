@@ -21,6 +21,7 @@ const swaggerDefinition = {
   tags: [
     { name: 'infra', description: 'Healthcheck' },
     { name: 'auth', description: 'Registro y login JWT' },
+    { name: 'auth-compat', description: 'Alias de login/registro en la raíz' },
     { name: 'videos', description: 'Subida y listado de videos' },
     { name: 'jobs', description: 'Jobs asíncronos pendiente → processing → completed' },
     { name: 'clips', description: 'Biblioteca, CRUD y descarga' },
@@ -29,6 +30,7 @@ const swaggerDefinition = {
     { name: 'stats', description: 'Resumen dashboard' },
     { name: 'users', description: 'Perfil y preferencias' },
     { name: 'publish', description: 'Publicación a redes' },
+    { name: 'social', description: 'Integraciones OAuth2 (YouTube, Instagram, TikTok)' },
   ],
   components: {
     securitySchemes: {
@@ -149,9 +151,6 @@ const swaggerDefinition = {
           duration: { type: 'number', nullable: true },
           has_ass: { type: 'boolean' },
           has_hook: { type: 'boolean' },
-          tags: { type: 'array', items: { type: 'string' }, nullable: true },
-          storage_path: { type: 'string', description: 'Ruta en disco del archivo del clip' },
-          status: { type: 'string', example: 'ready' },
           published_platform: { type: 'string', nullable: true },
           social_post_id: { type: 'string', nullable: true },
           social_post_url: { type: 'string', nullable: true },
@@ -160,36 +159,6 @@ const swaggerDefinition = {
           social_network: { type: 'string', nullable: true },
           created_at: { type: 'string', format: 'date-time' },
           updated_at: { type: 'string', format: 'date-time' },
-        },
-      },
-      RetrimRequest: {
-        type: 'object',
-        required: ['start_time', 'end_time'],
-        properties: {
-          start_time: { type: 'number', minimum: 0, example: 10 },
-          end_time: { type: 'number', exclusiveMinimum: 5, example: 45, description: 'Debe ser > start_time. Duración resultante entre 5 y 90 segundos.' },
-        },
-      },
-      RetrimResponse: {
-        type: 'object',
-        properties: {
-          clip_id: { type: 'string', format: 'uuid' },
-          start_time: { type: 'number' },
-          end_time: { type: 'number' },
-          duration: { type: 'number', description: 'end_time - start_time' },
-          status: { type: 'string' },
-          file_path: { type: 'string', description: 'Ruta del nuevo archivo generado por FFmpeg' },
-        },
-      },
-      JobStreamEvent: {
-        type: 'object',
-        description: 'Evento SSE emitido en cada cambio de estado del job',
-        properties: {
-          progress: { type: 'integer', example: 55 },
-          status: { type: 'string', enum: ['pending', 'scoring', 'completed', 'failed'] },
-          message: { type: 'string', example: 'Procesando con IA' },
-          job_id: { type: 'string', format: 'uuid' },
-          error: { type: 'string', nullable: true, description: 'Presente solo si el job falló' },
         },
       },
       StatsSummaryResponse: {
@@ -221,6 +190,22 @@ const swaggerDefinition = {
           platform: { type: 'string', enum: ['tiktok', 'instagram', 'youtube', 'webhook'], example: 'tiktok' },
           caption: { type: 'string', nullable: true, maxLength: 500, example: '¡River! #RiverPlate' },
           webhook_override_url: { type: 'string', format: 'uri', nullable: true },
+        },
+      },
+      SocialStatus: {
+        type: 'object',
+        properties: {
+          youtube: { $ref: '#/components/schemas/SocialProviderStatus' },
+          instagram: { $ref: '#/components/schemas/SocialProviderStatus' },
+          tiktok: { $ref: '#/components/schemas/SocialProviderStatus' },
+        },
+      },
+      SocialProviderStatus: {
+        type: 'object',
+        properties: {
+          connected: { type: 'boolean' },
+          username: { type: 'string', nullable: true },
+          expires_at: { type: 'string', format: 'date-time', nullable: true },
         },
       },
       Error: { type: 'object', properties: { detail: { type: 'string' } } },
@@ -280,10 +265,9 @@ const swaggerDefinition = {
     },
     '/registro': {
       post: {
-        tags: ['auth'],
-        deprecated: true,
+        tags: ['auth-compat'],
         summary: 'Registro de usuario (alias raíz)',
-        description: 'Alias de `POST /auth/registro`. El router de auth también se monta en `/`. Se mantiene por compatibilidad con clientes v1.',
+        description: 'Alias de compatibilidad de `POST /auth/registro` (paridad con `_compat_auth` en `main.py`).',
         security: [],
         requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/UsuarioCreate' } } } },
         responses: {
@@ -295,37 +279,15 @@ const swaggerDefinition = {
     },
     '/login': {
       post: {
-        tags: ['auth'],
-        deprecated: true,
+        tags: ['auth-compat'],
         summary: 'Login JSON (alias raíz)',
-        description: 'Alias de `POST /auth/login`.',
+        description: 'Alias de compatibilidad de `POST /auth/login` (paridad con `_compat_auth` en `main.py`).',
         security: [],
         requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['email', 'password'], properties: { email: { type: 'string', format: 'email' }, password: { type: 'string' } } } } } },
         responses: {
           '200': { description: 'Token', content: { 'application/json': { schema: { $ref: '#/components/schemas/Token' } } } },
           '401': { description: 'Credenciales inválidas', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
-      },
-    },
-    '/login/form': {
-      post: {
-        tags: ['auth'],
-        deprecated: true,
-        summary: 'Login OAuth2 form (alias raíz)',
-        description: 'Alias de `POST /auth/login/form`.',
-        security: [],
-        requestBody: { required: true, content: { 'application/x-www-form-urlencoded': { schema: { type: 'object', required: ['username', 'password'], properties: { username: { type: 'string', description: 'email' }, password: { type: 'string' } } } } } },
-        responses: { '200': { description: 'Token', content: { 'application/json': { schema: { $ref: '#/components/schemas/Token' } } } } },
-      },
-    },
-    '/me': {
-      get: {
-        tags: ['auth'],
-        deprecated: true,
-        summary: 'Perfil autenticado (alias raíz)',
-        description: 'Alias de `GET /auth/me`.',
-        security: [{ bearerAuth: [] }],
-        responses: { '200': { description: 'Usuario', content: { 'application/json': { schema: { $ref: '#/components/schemas/UsuarioRead' } } } } },
       },
     },
     '/videos': {
@@ -432,25 +394,6 @@ const swaggerDefinition = {
         responses: { '200': { description: 'video/mp4', content: { 'video/mp4': { schema: { type: 'string', format: 'binary' } } } } },
       },
     },
-    '/clips/{clipId}/retrim': {
-      post: {
-        tags: ['clips'],
-        summary: 'Re-trim del clip con FFmpeg',
-        description:
-          'Recorta el clip a un nuevo rango [start_time, end_time) usando FFmpeg, guarda el archivo generado ' +
-          'en `storage/retrims/` y actualiza `start_time`, `end_time` y `file_path` del clip. ' +
-          'La duración resultante debe estar entre 5 y 90 segundos.',
-        security: [{ bearerAuth: [] }],
-        parameters: [{ name: 'clipId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
-        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/RetrimRequest' } } } },
-        responses: {
-          '200': { description: 'Clip re-trimado', content: { 'application/json': { schema: { $ref: '#/components/schemas/RetrimResponse' } } } },
-          '404': { description: 'Clip no encontrado o video origen no disponible', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
-          '422': { description: 'Rango inválido (end_time <= start_time, duración <5s o >90s)', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
-          '500': { description: 'FFmpeg falló o no produjo archivo', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
-        },
-      },
-    },
     '/clips/{clipId}/publicar': {
       post: {
         tags: ['publish'],
@@ -505,22 +448,6 @@ const swaggerDefinition = {
         responses: {
           '202': { description: 'Re-render encolado PROCESSING', content: { 'application/json': { schema: { type: 'object', properties: { detail: { type: 'string' }, clip_id: { type: 'string', format: 'uuid' }, status: { type: 'string', example: 'PROCESSING' } } } } } },
           '409': { description: 'Clip ya en procesamiento' },
-    '/jobs/{jobId}/stream': {
-      get: {
-        tags: ['jobs'],
-        summary: 'SSE stream del estado de un Job',
-        description:
-          'Server-Sent Events que emite un evento en cada cambio de estado del job (cada ~1s). ' +
-          'Cierra con `event: done` al llegar a `completed`/`failed`, o con `event: error` si el job no existe o no pertenece al usuario. ' +
-          'Requiere un cliente SSE: Swagger UI no puede consumirlo.',
-        security: [{ bearerAuth: [] }],
-        parameters: [{ name: 'jobId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
-        responses: {
-          '200': {
-            description: 'Stream SSE de progreso',
-            content: { 'text/event-stream': { schema: { $ref: '#/components/schemas/JobStreamEvent' } } },
-          },
-          '422': { description: 'job_id debe ser UUID válido', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
       },
     },
@@ -600,61 +527,245 @@ const swaggerDefinition = {
         responses: { '200': { description: 'Stats', content: { 'application/json': { schema: { $ref: '#/components/schemas/StatsSummaryResponse' } } } } },
       },
     },
-    '/users/me': {
+    '/videos/sample': {
+      post: {
+        tags: ['videos'],
+        summary: 'Crear job con video de muestra (Issue 34)',
+        description:
+          'Copia `SAMPLE_VIDEO_PATH` (default `backend_fastapi/storage/sample/sample.mp4`) al directorio de uploads, ' +
+          'crea video + job y lo ejecuta en background. Responde 202 con el JobResponse en estado PENDING.',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '202': { description: 'Job creado', content: { 'application/json': { schema: { $ref: '#/components/schemas/JobResponse' } } } },
+          '404': { description: 'Video de muestra no encontrado', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/videos/upload-url': {
+      post: {
+        tags: ['videos'],
+        summary: 'Generar URL prefirmada para subir un video (R2/S3)',
+        description: 'Paridad con `POST /api/videos/upload-url` de FastAPI: presigned `PUT` (900s) usando `AWS_*` y `BUCKET_NAME`.',
+        security: [],
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['file_name', 'file_type'], properties: { file_name: { type: 'string', example: 'video.mp4' }, file_type: { type: 'string', example: 'video/mp4' } } } } } },
+        responses: {
+          '200': { description: 'URL prefirmada y key', content: { 'application/json': { schema: { type: 'object', properties: { upload_url: { type: 'string' }, file_key: { type: 'string' } } } } } },
+          '422': { description: 'Faltan file_name/file_type', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '500': { description: 'Error al generar la presigned URL', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/videos/process': {
+      post: {
+        tags: ['videos'],
+        summary: 'Procesar un video almacenado en R2 mediante RunPod',
+        description: 'Envía exactamente uno de `file_key` o `video_url` a RunPod Serverless. Con `file_key` se genera una presigned GET (3600s).',
+        security: [],
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { file_key: { type: 'string' }, video_url: { type: 'string' }, transcription_url: { type: 'string', nullable: true }, transcription_text: { type: 'string', nullable: true }, video_id: { type: 'string', format: 'uuid', nullable: true } } } } } },
+        responses: {
+          '200': { description: 'Resultado RunPod', content: { 'application/json': { schema: { type: 'object', additionalProperties: true } } } },
+          '422': { description: 'Validación (exactamente uno de file_key/video_url)', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '502': { description: 'Error de RunPod', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '504': { description: 'Timeout de RunPod', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/clips/{clipId}/subtitles': {
+      post: {
+        tags: ['clips'],
+        summary: 'Disparar subtitulado burned-in ASS para un clip',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'clipId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          '202': { description: 'Subtitulado encolado PROCESSING', content: { 'application/json': { schema: { type: 'object', properties: { clip_id: { type: 'string', format: 'uuid' }, status: { type: 'string', example: 'PROCESSING' }, message: { type: 'string' } } } } } },
+          '403': { description: 'No autorizado', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '404': { description: 'Clip no encontrado', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '409': { description: 'Clip ya en procesamiento', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/clips/{clipId}/subtitles/status': {
+      get: {
+        tags: ['clips'],
+        summary: 'Consultar estado de subtitulado (proxy a clip status)',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'clipId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: { '200': { description: 'Clip', content: { 'application/json': { schema: { $ref: '#/components/schemas/ClipResponse' } } } } },
+      },
+    },
+    '/auth/social/status': {
+      get: {
+        tags: ['social'],
+        summary: 'Estado de integraciones conectadas',
+        security: [{ bearerAuth: [] }],
+        responses: { '200': { description: 'Estado por plataforma', content: { 'application/json': { schema: { $ref: '#/components/schemas/SocialStatus' } } } } },
+      },
+    },
+    '/auth/social/accounts': {
+      get: {
+        tags: ['social'],
+        deprecated: true,
+        summary: 'Estado de integraciones conectadas (alias)',
+        description: 'Alias de `GET /auth/social/status`.',
+        security: [{ bearerAuth: [] }],
+        responses: { '200': { description: 'Estado por plataforma', content: { 'application/json': { schema: { $ref: '#/components/schemas/SocialStatus' } } } } },
+      },
+    },
+    '/auth/social/{platform}': {
+      delete: {
+        tags: ['social'],
+        summary: 'Desconectar cuenta social',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'platform', in: 'path', required: true, schema: { type: 'string', enum: ['youtube', 'instagram', 'tiktok'] } }],
+        responses: {
+          '200': { description: 'Cuenta desconectada', content: { 'application/json': { schema: { type: 'object', properties: { message: { type: 'string' } } } } } },
+          '400': { description: 'Plataforma no válida', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/auth/social/youtube/connect': {
+      get: { tags: ['social'], summary: 'Obtener URL de autorización OAuth2 de YouTube', security: [{ bearerAuth: [] }], responses: { '200': { description: 'auth_url', content: { 'application/json': { schema: { type: 'object', properties: { auth_url: { type: 'string' } } } } } }, '500': { description: 'GOOGLE_CLIENT_ID no configurado', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } } } },
+    },
+    '/auth/social/youtube/callback': {
+      get: { tags: ['social'], summary: 'Callback OAuth2 de YouTube', security: [], parameters: [{ name: 'code', in: 'query', schema: { type: 'string' } }, { name: 'state', in: 'query', schema: { type: 'string' } }, { name: 'error', in: 'query', schema: { type: 'string' } }], responses: { '302': { description: 'Redirect al frontend con ?integration=youtube&status=success|error' } } },
+    },
+    '/auth/social/instagram/connect': {
+      get: { tags: ['social'], summary: 'Obtener URL de autorización OAuth2 de Instagram (Meta)', security: [{ bearerAuth: [] }], responses: { '200': { description: 'auth_url', content: { 'application/json': { schema: { type: 'object', properties: { auth_url: { type: 'string' }, url: { type: 'string' } } } } } }, '500': { description: 'INSTAGRAM_CLIENT_ID / META_APP_ID no configurado', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } } } },
+    },
+    '/auth/social/instagram/callback': {
+      get: { tags: ['social'], summary: 'Callback OAuth2 de Instagram (Meta)', security: [], parameters: [{ name: 'code', in: 'query', schema: { type: 'string' } }, { name: 'state', in: 'query', schema: { type: 'string' } }, { name: 'error', in: 'query', schema: { type: 'string' } }], responses: { '302': { description: 'Redirect al frontend con ?integration=instagram&status=success|error' } } },
+    },
+    '/auth/social/tiktok/connect': {
+      get: { tags: ['social'], summary: 'Obtener URL de autorización OAuth2 de TikTok', security: [{ bearerAuth: [] }], responses: { '200': { description: 'auth_url', content: { 'application/json': { schema: { type: 'object', properties: { auth_url: { type: 'string' }, url: { type: 'string' } } } } } }, '500': { description: 'TIKTOK_CLIENT_KEY no configurado', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } } } },
+    },
+    '/auth/social/tiktok/callback': {
+      get: { tags: ['social'], summary: 'Callback OAuth2 de TikTok', security: [], parameters: [{ name: 'code', in: 'query', schema: { type: 'string' } }, { name: 'state', in: 'query', schema: { type: 'string' } }, { name: 'error', in: 'query', schema: { type: 'string' } }], responses: { '302': { description: 'Redirect al frontend con ?integration=tiktok&status=success|error' } } },
+    },
+  },
+} as const
+
+/**
+ * Paridad con FastAPI: `users.router` se incluye **sin prefijo** y con `/api`,
+ * y sus rutas ya son `/users/me*` (canónicas) y `/me*` (alias). Express declara
+ * el mismo par de rutas en `users.ts` y monta el router solo con esos 2 prefijos.
+ */
+const USERS_PREFIXES = ['', '/api'] as const
+
+function buildUserMePaths(): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  const profileBody = {
+    type: 'object',
+    properties: {
+      email: { type: 'string', format: 'email' },
+      full_name: { type: 'string' },
+      avatar_url: { type: 'string' },
+      theme_preference: { type: 'string', enum: ['light', 'dark'] },
+    },
+  }
+  const passwordBody = {
+    type: 'object',
+    required: ['current_password', 'new_password'],
+    properties: {
+      current_password: { type: 'string' },
+      new_password: { type: 'string', minLength: 8, maxLength: 128 },
+    },
+  }
+  for (const prefix of USERS_PREFIXES) {
+    // Rutas canónicas `/users/me` — GET + PUT
+    out[`${prefix}/users/me`] = {
       get: {
         tags: ['users'],
         summary: 'Perfil actual',
         security: [{ bearerAuth: [] }],
-        responses: { '200': { description: 'User', content: { 'application/json': { schema: { $ref: '#/components/schemas/UsuarioRead' } } } } },
+        responses: { '200': { description: 'Usuario', content: { 'application/json': { schema: { $ref: '#/components/schemas/UsuarioRead' } } } } },
       },
       put: {
         tags: ['users'],
         summary: 'Actualizar perfil',
         security: [{ bearerAuth: [] }],
-        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { email: { type: 'string', format: 'email' }, full_name: { type: 'string' }, avatar_url: { type: 'string' }, theme_preference: { type: 'string', enum: ['light', 'dark'] } } } } } },
+        requestBody: { required: true, content: { 'application/json': { schema: profileBody } } },
+        responses: { '200': { description: 'Actualizado' } },
+      },
+    }
+    // Alias `/me` — GET + PUT + PATCH
+    out[`${prefix}/me`] = {
+      get: {
+        tags: ['users'],
+        summary: 'Perfil actual (alias)',
+        description: 'Alias de `GET /users/me`.',
+        security: [{ bearerAuth: [] }],
+        responses: { '200': { description: 'Usuario', content: { 'application/json': { schema: { $ref: '#/components/schemas/UsuarioRead' } } } } },
+      },
+      put: {
+        tags: ['users'],
+        summary: 'Actualizar perfil (alias)',
+        description: 'Alias de `PUT /users/me`.',
+        security: [{ bearerAuth: [] }],
+        requestBody: { required: true, content: { 'application/json': { schema: profileBody } } },
         responses: { '200': { description: 'Actualizado' } },
       },
       patch: {
         tags: ['users'],
-        summary: 'Actualizar parcial',
+        summary: 'Actualizar perfil (patch alias)',
+        description: 'Alias parcial de `PUT /users/me`.',
         security: [{ bearerAuth: [] }],
-        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { email: { type: 'string' }, full_name: { type: 'string' } } } } } },
+        requestBody: { required: true, content: { 'application/json': { schema: profileBody } } },
         responses: { '200': { description: 'Actualizado' } },
       },
-    },
-    '/users/me/change-password': {
+    }
+    // Cambio de contraseña — `POST /users/me/change-password` + alias `POST /me/change-password`
+    out[`${prefix}/users/me/change-password`] = {
       post: {
         tags: ['users'],
         summary: 'Cambiar contraseña',
-        description: 'Verifica la contraseña actual y la reemplaza por `new_password` (8-128 caracteres, distinta de la actual).',
+        description: 'Verifica `current_password` y la reemplaza por `new_password` (8-128 caracteres).',
         security: [{ bearerAuth: [] }],
-        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['current_password', 'new_password'], properties: { current_password: { type: 'string' }, new_password: { type: 'string', minLength: 8, maxLength: 128 } } } } } },
+        requestBody: { required: true, content: { 'application/json': { schema: passwordBody } } },
         responses: {
           '200': { description: 'Contraseña actualizada' },
           '400': { description: 'Contraseña actual incorrecta o nueva igual a la actual', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
-          '422': { description: 'Falta current_password/new_password o longitud inválida', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '422': { description: 'Faltan campos o longitud inválida', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
       },
     },
-    '/users/me/password': {
+    out[`${prefix}/me/change-password`] = {
+      post: {
+        tags: ['users'],
+        summary: 'Cambiar contraseña (alias)',
+        description: 'Alias de `POST /users/me/change-password`.',
+        security: [{ bearerAuth: [] }],
+        requestBody: { required: true, content: { 'application/json': { schema: passwordBody } } },
+        responses: {
+          '200': { description: 'Contraseña actualizada' },
+          '400': { description: 'Contraseña actual incorrecta o nueva igual a la actual', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '422': { description: 'Faltan campos o longitud inválida', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    }
+    // Alias PUT — solo sobre `/me/password` (FastAPI no declara `/users/me/password`)
+    out[`${prefix}/me/password`] = {
       put: {
         tags: ['users'],
         summary: 'Cambiar contraseña (alias PUT)',
-        description: 'Alias en `PUT` de `POST /users/me/change-password`. Mismo body y mismo comportamiento.',
+        description: 'Alias en `PUT` de `POST /me/change-password`.',
         security: [{ bearerAuth: [] }],
-        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['current_password', 'new_password'], properties: { current_password: { type: 'string' }, new_password: { type: 'string', minLength: 8, maxLength: 128 } } } } } },
+        requestBody: { required: true, content: { 'application/json': { schema: passwordBody } } },
         responses: {
           '200': { description: 'Contraseña actualizada' },
           '400': { description: 'Contraseña actual incorrecta o nueva igual a la actual', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
-          '422': { description: 'Falta current_password/new_password o longitud inválida', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '422': { description: 'Faltan campos o longitud inválida', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
       },
-    },
-  },
-} as const
+    }
+  }
+  return out
+}
 
 const options = {
-  definition: swaggerDefinition,
+  definition: {
+    ...swaggerDefinition,
+    paths: { ...swaggerDefinition.paths, ...buildUserMePaths() },
+  },
   apis: ['./src/routes/*.ts', './src/controllers/*.ts'],
 }
 

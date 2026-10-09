@@ -8,7 +8,9 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
-    "audit:openapi": "npm run build && node scripts/audit-openapi.mjs"
+    "audit:openapi": "npm run build && node scripts/audit-openapi.mjs",
+  "audit:parity": "npm run build && node scripts/audit-parity.mjs",
+  "audit": "npm run build && npm run audit:openapi && npm run audit:parity"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
