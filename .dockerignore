@@ -1,0 +1,16 @@
+.git
+**/node_modules
+**/dist
+**/__pycache__
+**/.venv*
+**/venv
+**/.env
+**/.env.*
+storage/
+**/storage/
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.wav
+*.mp3

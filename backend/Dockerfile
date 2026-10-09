@@ -25,6 +25,13 @@ RUN pip install --no-cache-dir -r backend/requirements.txt
 RUN python -c "from faster_whisper import WhisperModel; WhisperModel('deepdml/faster-whisper-large-v3-turbo-ct2', device='cpu', compute_type='int8')" \
     && chmod -R a+rX /tmp/huggingface_cache
 
+# CUDA 12 runtime para CTranslate2/faster-whisper en GPU: cuDNN 8 aporta
+# libcudnn_ops_infer.so.8 y cuBLAS/cuda-runtime los sonames CUDA 12 (la base trae CUDA 11.8).
+RUN pip install --no-cache-dir "nvidia-cudnn-cu12==8.*" "nvidia-cublas-cu12==12.*" \
+    && ls /usr/local/lib/python3.10/dist-packages/nvidia/cudnn/lib/libcudnn_ops_infer.so.8
+
+ENV LD_LIBRARY_PATH="/usr/local/lib/python3.10/dist-packages/nvidia/cudnn/lib:/usr/local/lib/python3.10/dist-packages/nvidia/cublas/lib:/usr/local/lib/python3.10/dist-packages/nvidia/cuda_runtime/lib:${LD_LIBRARY_PATH}"
+
 # Copy only runtime code and the marker used to locate the repository root.
 COPY backend/ backend/
 COPY backend_fastapi/app/ backend_fastapi/app/
