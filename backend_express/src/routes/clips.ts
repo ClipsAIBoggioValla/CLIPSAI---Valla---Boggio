@@ -214,13 +214,16 @@ clipsRouter.patch('/:clipId', authMiddleware, async (req: AuthRequest, res) => {
   const userId = req.user!.id
   const clipId = String(req.params.clipId)
   const { title, tags } = req.body as Record<string, unknown>
-  if (title === undefined && tags === undefined) return res.status(400).json({ detail: 'Nada para actualizar' })
-  if (title !== undefined && title !== null && typeof title !== 'string') return res.status(422).json({ detail: 'title debe ser string' })
-  if (tags !== undefined && tags !== null && !Array.isArray(tags)) return res.status(422).json({ detail: 'tags debe ser array' })
 
   const client = await pool.connect()
   try {
+    // Paridad FastAPI (`update_clip`): primero existencia/ownership (404), luego body (400/422).
     await getClipOr404(clipId, String(userId), client)
+
+    if (title === undefined && tags === undefined) return res.status(400).json({ detail: 'Nada para actualizar' })
+    if (title !== undefined && title !== null && typeof title !== 'string') return res.status(422).json({ detail: 'title debe ser string' })
+    if (tags !== undefined && tags !== null && !Array.isArray(tags)) return res.status(422).json({ detail: 'tags debe ser array' })
+
     const updates: string[] = []
     const values: unknown[] = []
     let idx = 1
@@ -495,60 +498,3 @@ clipsRouter.post('/:clipId/re-render', authMiddleware, async (req: AuthRequest, 
   }
 })
 
-clipsRouter.post('/:clipId/retrim', authMiddleware, async (req: AuthRequest, res) => {
-  const userId = req.user!.id
-  const clipId = String(req.params.clipId)
-  const { start_time, end_time } = req.body as Record<string, unknown>
-  const start = typeof start_time === 'number' ? start_time : Number(start_time)
-  const end = typeof end_time === 'number' ? end_time : Number(end_time)
-
-  if (Number.isNaN(start) || Number.isNaN(end) || start < 0 || end <= start) return res.status(422).json({ detail: 'start_time y end_time inválidos, end debe ser > start' })
-  const duration = end - start
-  if (duration < 5) return res.status(422).json({ detail: 'Duración mínima 5s' })
-  if (duration > 90) return res.status(422).json({ detail: 'Duración máxima 90s' })
-
-  const client = await pool.connect()
-  try {
-    const row = await getClipOr404(clipId, String(userId), client)
-    const candidates: string[] = []
-    if (row.file_path) candidates.push(String(row.file_path))
-    if (row.video_filepath) candidates.push(String(row.video_filepath))
-    let src: string | null = null
-    for (const p of candidates) {
-      if (fs.existsSync(path.resolve(p))) { src = path.resolve(p); break }
-    }
-    if (!src) src = candidates[0] ? path.resolve(candidates[0]) : null
-    if (!src || !fs.existsSync(src)) return res.status(404).json({ detail: 'Video origen no encontrado para re-trim' })
-
-    const outDir = path.join(process.cwd(), 'storage', 'retrims')
-    fs.mkdirSync(outDir, { recursive: true })
-    const outPath = path.join(outDir, `${clipId}_retrim_${Math.floor(start)}_${Math.floor(end)}.mp4`)
-
-    const { spawnSync } = await import('child_process')
-    const cmd = spawnSync('ffmpeg', ['-y', '-ss', String(start), '-i', src, '-t', String(duration), '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '18', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', outPath], { timeout: 120000 })
-
-    if (cmd.status !== 0) {
-      const detail = cmd.stderr ? cmd.stderr.toString().slice(0, 600) : 'FFmpeg error'
-      return res.status(500).json({ detail: `FFmpeg re-trim falló: ${detail}` })
-    }
-    if (!fs.existsSync(outPath)) return res.status(500).json({ detail: 'Re-trim no produjo archivo' })
-
-    const r = await client.query('UPDATE clips SET start_time = $1, end_time = $2, file_path = $3, updated_at = NOW() WHERE id = $4 RETURNING id, start_time, end_time, file_path, status', [start, end, outPath, clipId])
-    const updated = r.rows[0] as Record<string, unknown>
-    return res.json({
-      clip_id: String(updated.id),
-      start_time: Number(updated.start_time),
-      end_time: Number(updated.end_time),
-      duration,
-      status: (updated.status as string) ?? 'ready',
-      file_path: updated.file_path as string,
-    })
-  } catch (e: unknown) {
-    const err = e as { status?: number; detail?: string }
-    if (err?.status) return res.status(err.status).json({ detail: err.detail })
-    console.error('POST /clips/:id/retrim error', e)
-    return res.status(500).json({ detail: 'Error interno' })
-  } finally {
-    client.release()
-  }
-})

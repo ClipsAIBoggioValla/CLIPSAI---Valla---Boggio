@@ -439,34 +439,58 @@ backend/
 
 ---
 
-## 9. Backend Express (espejo ~100%)
+## 9. Backend Express (espejo — paridad 1:1 verificada)
 
-**Estructura:** `src/app.ts` (cors, mounts, Swagger) + `src/db/index.ts` (pg.Pool, normaliza `postgresql+psycopg2://`) + `src/middleware/auth.ts` (jwt.verify HS256, mensajes "Token expirado/inválido") + `src/docs/swagger.ts` (OpenAPI 3.0, Issue 30).
+**Estructura:** `src/app.ts` (cors, mounts, Swagger) + `src/db/index.ts` (pg.Pool, normaliza `postgresql+psycopg2://`) + `src/middleware/auth.ts` (jwt.verify HS256, mensajes "Token expirado/inválido") + `src/docs/swagger.ts` (OpenAPI 3.0, Issue 30) + `src/services/s3.ts` (presign SigV4 manual, sin aws-sdk) + `src/services/runpod.ts` (polling `/runsync`) + `src/routes/subtitles.ts`, `src/routes/socialAuth.ts`, `src/routes/apiVideos.ts`.
 
 | Ruta | Implementación |
 |------|----------------|
 | `POST /auth/registro` `201/409` | bcryptjs truncate72 |
 | `POST /auth/login`, `/auth/login/form` | HS256 60/1440min |
 | `GET /auth/me` | authMiddleware |
+| `POST /login`, `POST /registro` (raíz) | `compatAuthRouter` — alias de `_compat_auth` |
 | `POST /videos` (multer diskStorage, mp4/mov/avi + txt/srt, 500MB) `201` | `routes/videos.ts` |
 | `GET /videos` | lista usuario |
-| `POST /videos/:videoId/jobs` `202` | `setImmediate(runJob)` + `spawnSync python engine.py --json` (selección de proveedor por env) + fallback `buildFallback()` → `completed` |
+| `POST /videos/sample` | video de muestra (`SAMPLE_VIDEO_PATH`) → `runJob` |
+| `POST /videos/:videoId/jobs` `202` | `setImmediate(runJob)` + `spawnSync python engine.py --json` (selección de proveedor por env) |
 | `GET /jobs/:jobId` | status + metadata |
-| `GET /jobs/:jobId/stream` | SSE progreso |
 | `GET /clips` (`q, min_score, sort_by, page, limit, video_id, status`) | `SORT_MAP`, `ILIKE` |
-| `GET/PATCH/DELETE /clips/:clipId` | ownership |
+| `GET/PATCH/DELETE /clips/:clipId` | ownership (404 antes de validar body, como FastAPI) |
 | `GET /clips/:clipId/descarga` | FileResponse / dummy |
-| `POST /clips/:clipId/retrim`, `/re-render` | re-corte / re-render |
+| `POST /clips/:clipId/re-render` | re-render ASS/Hook (necesita ffmpeg) |
+| `POST/GET /clips/:clipId/subtitles` (+ `/status`) | pipeline ASS + fallback a `videos.transcript` |
 | `POST /clips/:clipId/publicar` + `/publish` `202` | `runPublish()` 2s → `PUBLISHED` o webhook real |
-| `GET /clips/:clipId/publish-stream`, `/clips/:clipId/stream` | SSE publicación |
+| `GET /clips/:clipId/publish-stream` | SSE publicación (EventSource vía `?token=`) |
+| `POST /api/videos/upload-url` | presign R2 (`services/s3.ts`, verificado 404 NoSuchKey) |
+| `POST /api/videos/process` | RunPod `/runsync` + `services/runpod.ts` |
+| `GET /auth/social/status` + `/accounts`, `DELETE /{platform}`, `{youtube,instagram,tiktok}/{connect,callback}` | `routes/socialAuth.ts` (9 endpoints OAuth2) |
 | `GET /clips/export`, `/jobs/:jobId/export` (+ `/api/v1` alias) | csv/json |
 | `GET /metrics`, `/api/metrics` | cálculo idéntico FastAPI |
 | `GET /stats/summary` | idem |
-| `GET/PUT/PATCH /users/me`, `POST /users/me/change-password`, `PUT /me/password` | bcryptjs |
-| `GET /docs`, `GET /openapi.json` | swagger-ui-express, 18 paths (Issue 30) |
+| `GET/PUT /users/me`, alias `GET/PUT/PATCH /me`, `POST /users/me/change-password` + `/me/change-password`, `PUT /me/password` (también con prefijo `/api`) | bcryptjs |
+| `GET /docs`, `/docs/oauth2-redirect`, `/redoc`, `/openapi.json`, `/api-docs`, `/api-docs.json` | swagger-ui-express + spec OpenAPI 3.0 (Issue 30) |
 | `GET /health` | `{status:ok}` |
 
-**Divergencias:** Swagger en ambos (paridad tras Issue 30); SSE de jobs/publish en ambos; `re-render/retrim` propios de Express; validación de UUID (FastAPI 422 vs Express posible 500 si formato inválido en algunas rutas). Mismo `TOKEN` funciona en `:8000` y `:3001` (misma DB + mismo `JWT_SECRET`).
+**Divergencias:** ninguna en la superficie de API. El montaje en `/api` de `usersRouter` replica los dos prefijos de `include_router` (`''` y `'/api'`), por lo que existen `/users/me` y `/api/users/me` (y sus alias `/me`). Único superset deliberado: `/api-docs` y `/api-docs.json` (criterio de aceptación de Issue 14). Mismo `TOKEN` funciona en `:8000` y `:3001` (misma DB + mismo `JWT_SECRET`).
+
+**Verificación (comandos):**
+```bash
+cd backend_express
+npm run typecheck              # tsc --noEmit
+npm run audit:openapi          # 56 rutas montadas = 56 documentadas
+npm run audit:parity           # FastAPI 60 ≈ Express 62 (paridad 1:1)
+```
+
+`scripts/audit-parity.mjs` compara el inventario real de FastAPI (`scripts/fastapi-routes.json`,
+snapshot autoritativo) contra las rutas que Express monta en `app.ts` + `routes/*.ts`. Regenerar el
+snapshot (source actual, no la imagen stale):
+```bash
+docker compose run --rm --no-deps -v "$(pwd)/backend_fastapi/app:/app/app:ro" -T backend_fastapi python -c "
+import json
+from app.main import app
+print(json.dumps([{'path': r.path, 'methods': sorted(m for m in getattr(r,'methods',[]) or [])} for r in app.routes]))
+" > backend_express/scripts/fastapi-routes.json
+```
 
 **Comandos:** `npm run dev` (tsx watch), `npm run build`, `npm run typecheck`, `npm start`.
 
@@ -712,6 +736,7 @@ Red `clipsai-net` bridge; volumen nombrado `clipsai_postgres_data`. `down` conse
 - Typecheck frontends: `npm run typecheck` (React `tsc --noEmit`, Vue `vue-tsc --noEmit`).
 - Build: `npm run build` → `dist/`.
 - Express: `npm run typecheck`, `curl /health`, `curl /docs`.
+- **Paridad backends (Issue 6):** `cd backend_express && npm run audit:openapi && npm run audit:parity`.
 - Infra: `docker compose logs -f`, `docker compose ps`, `curl :8000/health`, `curl :8000/docs`.
 - Pipeline Issue 29: `test_issue_29_pipeline.py` (ffprobe 9:16, ASS PlayRes, fallback).
 - Landing Issue 32: `npm run build` + `npx lighthouse http://localhost:3000/ --only-categories=seo` (SEO 100/100) + `curl /robots.txt` + `curl /sitemap.xml`.
@@ -727,8 +752,8 @@ Fuente detallada: [`ISSUES.md`](./ISSUES.md) (sincronizada con GitHub, Sep 2026)
 
 | Estado | Cantidad | Lista |
 |--------|----------|-------|
-| ✅ Completado | 22 | 1, 2, 3, 4, 5, 7, 14, 17, 18, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 32, 33, 34 (+ PR #34 Spark) |
-| ⚠️ Parcial | 2 | 6 (Express ~90-100%, pulidos menores), 13 (seguridad/compose) |
+| ✅ Completado | 23 | 1, 2, 3, 4, 5, 6, 7, 14, 17, 18, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 32, 33, 34 (+ PR #34 Spark) |
+| ⚠️ Parcial | 1 | 13 (seguridad/compose) |
 | ⏳ Pendiente | 2 | 31, 35 (GitHub #51, #55) |
 | ↩️ Cerradas vía otras | 3 | 8, 9, 10/11/12 → Issues 27/28/29 |
 
@@ -738,12 +763,12 @@ Fuente detallada: [`ISSUES.md`](./ISSUES.md) (sincronizada con GitHub, Sep 2026)
 |------|--------|---------|
 | Infra DB + Docker | ✅ | Postgres 15 + volumen + healthcheck + DDL idempotente + 6 servicios compose |
 | Motor IA | ✅ | `main.py` + wrapper `engine.py` + `engine_subprocess.py` |
-| FastAPI | ✅ | ~40 rutas, auth, videos/jobs/clips, publish, subtitles, social, export, metrics, docs |
-| Express | ✅ ~95% | mismas entidades + Swagger + SSE; sin `social_auth` (solo FastAPI) |
+| FastAPI | ✅ | 76 rutas montadas, auth, videos/jobs/clips, publish, subtitles, social, export, metrics, docs |
+| Express | ✅ 100% | paridad 1:1 verificada (`npm run audit:parity`): subida, jobs, clips, publish, subtítulos, social OAuth, presign R2, RunPod + Swagger |
 | React / Vue | ✅ ~95% | auth, upload, jobs, dashboard, biblioteca, settings, integraciones, landing pública |
 | Subtítulos + Hook | ✅ | Issue 29 — `ENABLE_ASS_HOOK=True` en `jobs` |
 | OAuth + Publish real | ✅ | Issues 22–28 — YouTube/Instagram/TikTok |
-| Docs OpenAPI | ✅ | FastAPI `/docs` + Express `/docs` + `/openapi.json` |
+| Docs OpenAPI | ✅ | FastAPI `/docs` + Express `/docs`, `/openapi.json`, `/redoc` |
 | Seguridad | ⚠️ | key filtrada, rate-limit ausente |
 | Pendientes activas | ⏳ | SSE publish UI (31), deuda UI (35) |
 
