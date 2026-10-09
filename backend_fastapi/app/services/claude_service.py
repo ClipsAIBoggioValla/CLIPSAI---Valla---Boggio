@@ -32,10 +32,9 @@ for _idx in (3, 2, 1, 0):
             pass
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
-ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022").strip() or os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514").strip()
-# Compat: si .env trae claude-sonnet-4, usarlo; si no, default haiku/sonnet
-if not ANTHROPIC_MODEL:
-    ANTHROPIC_MODEL = "claude-3-5-sonnet-20241022"
+# Modelo primario: CLAUDE_MODEL (nuevo) con fallback a ANTHROPIC_MODEL (legacy) y default seguro.
+CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "").strip() or os.getenv("ANTHROPIC_MODEL", "").strip() or "claude-3-5-sonnet-latest"
+CLAUDE_FALLBACK_MODEL = "claude-3-haiku-20240307"
 ANTHROPIC_VERSION = os.getenv("ANTHROPIC_VERSION", "2023-06-01").strip()
 ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages"
 
@@ -246,7 +245,20 @@ VALIDACION:
 """
 
 
-def _call_anthropic(prompt: str, sentence_ids: list[str]) -> str:
+def _is_model_not_found_error(exc: Exception) -> bool:
+    """Detecta error 404 / modelo inexistente de Anthropic para fallback."""
+    err_type = type(exc).__name__.lower()
+    err_msg = str(exc).lower()
+    if "notfounderror" in err_type or "not_found_error" in err_msg:
+        return True
+    if "model not found" in err_msg or "invalid model" in err_msg or "model_not_found" in err_msg:
+        return True
+    if "404" in err_msg and "authentication" not in err_msg:
+        return True
+    return False
+
+
+def _call_anthropic_with_model(prompt: str, sentence_ids: list[str], model: str) -> str:
     key = _get_key()
     if not key:
         logger.error("Error en API de Claude: ANTHROPIC_API_KEY no configurada (revisar .env y docker-compose.yml ANTHROPIC_API_KEY)")
@@ -258,8 +270,6 @@ def _call_anthropic(prompt: str, sentence_ids: list[str]) -> str:
         import anthropic  # type: ignore
 
         client = anthropic.Anthropic(api_key=key, timeout=TIMEOUT)
-        # Usar modelo configurado (sonnet o haiku)
-        model = ANTHROPIC_MODEL or "claude-3-5-sonnet-20241022"
         # anthropic SDK usa max_tokens y messages — envuelto en try/except con timeout
         try:
             msg = client.messages.create(
@@ -315,7 +325,7 @@ def _call_anthropic(prompt: str, sentence_ids: list[str]) -> str:
     # Fallback requests directo
     headers = {"x-api-key": key, "anthropic-version": ANTHROPIC_VERSION, "content-type": "application/json"}
     body: dict[str, Any] = {
-        "model": ANTHROPIC_MODEL or "claude-3-5-sonnet-20241022",
+        "model": model,
         "max_tokens": 4096,
         "messages": [{"role": "user", "content": prompt}],
         "tools": [tool],
@@ -361,6 +371,20 @@ def _call_anthropic(prompt: str, sentence_ids: list[str]) -> str:
         time.sleep(2 * attempt)
     logger.error(f"Error en API de Claude: fallo tras reintentos {last_err}")
     raise RuntimeError(f"Error en Claude: fallo tras reintentos {last_err}")
+
+
+def _call_anthropic(prompt: str, sentence_ids: list[str]) -> str:
+    """Intenta con CLAUDE_MODEL y, si el modelo no existe (404), reintenta con haiku."""
+    try:
+        return _call_anthropic_with_model(prompt, sentence_ids, CLAUDE_MODEL)
+    except Exception as primary_err:
+        if not _is_model_not_found_error(primary_err):
+            raise
+        logger.warning(
+            "Claude modelo '%s' no disponible (%s); reintentando con fallback '%s'",
+            CLAUDE_MODEL, primary_err, CLAUDE_FALLBACK_MODEL,
+        )
+        return _call_anthropic_with_model(prompt, sentence_ids, CLAUDE_FALLBACK_MODEL)
 
 
 def _parse_and_validate(raw: str) -> list[dict[str, Any]]:
