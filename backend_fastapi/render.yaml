@@ -24,6 +24,22 @@ services:
         generateValue: true
       - key: APP_ENV
         value: production
+      # RunPod Serverless procesa jobs cuando ambas variables están configuradas.
+      - key: RUNPOD_API_KEY
+        sync: false
+      - key: RUNPOD_ENDPOINT_ID
+        sync: false
+      # R2/S3 almacena temporalmente el video para que el worker RunPod pueda descargarlo.
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_ENDPOINT_URL
+        sync: false
+      - key: AWS_REGION
+        value: auto
+      - key: BUCKET_NAME
+        value: clipsai-videos
       - key: STORAGE_CLIPS_DIR
         value: /var/data/clips
       - key: UPLOAD_DIR

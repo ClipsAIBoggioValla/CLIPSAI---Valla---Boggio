@@ -278,6 +278,33 @@ def transcribe_video(
     keep_wav: bool = False,
 ) -> list[TranscriptionSegment]:
     video_source = _validate_video_source(video_path)
+    from .runpod_service import is_runpod_configured, process_local_video_via_runpod
+
+    if is_runpod_configured():
+        result = process_local_video_via_runpod(video_source)
+        remote_segments = result.get("transcription_segments")
+        if not isinstance(remote_segments, list) or not remote_segments:
+            raise RuntimeError(
+                "RunPod no devolvió segmentos de transcripción; actualiza el worker para evitar cargar Whisper localmente en Render."
+            )
+        normalized_segments: list[TranscriptionSegment] = []
+        for segment in remote_segments:
+            if not isinstance(segment, dict):
+                continue
+            try:
+                start = float(segment["start"])
+                end = float(segment["end"])
+                text = str(segment.get("text", "")).strip()
+            except (KeyError, TypeError, ValueError):
+                continue
+            if text and end > start:
+                normalized_segments.append(
+                    {"start": start, "end": end, "text": text, "words": []}
+                )
+        if not normalized_segments:
+            raise RuntimeError("RunPod devolvió segmentos de transcripción en un formato inválido")
+        return normalized_segments
+
     # Verificación previa de pista de audio antes de Whisper (FFprobe)
     if not _has_audio_track(str(video_source)):
         raise ValueError("El video subido no contiene audio o no se detectó voz interpretable para generar subtítulos.")

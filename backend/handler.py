@@ -148,15 +148,28 @@ def process_video_job(job: dict[str, Any]) -> dict[str, Any]:
         # model initialization happen only for an actual processing request.
         from backend_fastapi.app.services.engine import run_clip_engine
 
-        result = run_clip_engine(str(video_path), str(transcript_path))
+        result = run_clip_engine(str(video_path), str(transcript_path), allow_runpod=False)
         clips = result.get("clips") or []
+        transcription_segments: list[dict[str, Any]] = []
+        for segment in result.get("transcription_segments") or []:
+            if not isinstance(segment, dict):
+                continue
+            try:
+                start = float(segment["start"])
+                end = float(segment["end"])
+                text = str(segment.get("text", "")).strip()
+            except (KeyError, TypeError, ValueError):
+                continue
+            if text and end > start:
+                transcription_segments.append({"start": start, "end": end, "text": text})
         return {
             "status": "COMPLETED",
             "video_id": video_id,
             "engine": result.get("engine", "clipsai"),
             "clips": [_serialize_clip(clip) for clip in clips],
             "clip_count": len(clips),
-            "transcription_segments_count": len(result.get("transcription_segments") or []),
+            "transcription_segments_count": len(transcription_segments),
+            "transcription_segments": transcription_segments,
         }
 
 

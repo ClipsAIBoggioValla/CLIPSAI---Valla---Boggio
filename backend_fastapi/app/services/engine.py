@@ -332,11 +332,42 @@ def ensure_wav_audio(video_path: str) -> str:
     return wav_path
 
 
-def run_clip_engine(video_path: str, transcription_path: str, progress_callback: Any | None = None) -> dict[str, Any]:
+def run_clip_engine(
+    video_path: str,
+    transcription_path: str,
+    progress_callback: Any | None = None,
+    *,
+    allow_runpod: bool = True,
+) -> dict[str, Any]:
     vp = _validate_video_source(video_path)
     tp = Path(transcription_path)
     if not tp.exists():
         raise FileNotFoundError(f"Transcripcion no encontrada: {transcription_path}")
+
+    if allow_runpod:
+        from .runpod_service import is_runpod_configured, process_local_video_via_runpod
+
+        if is_runpod_configured():
+            logging.getLogger(__name__).info("RunPod configurado; delegando transcripción y análisis fuera de Render")
+            result = process_local_video_via_runpod(
+                vp,
+                transcription_path=tp if tp.is_file() else None,
+            )
+            segments = result.get("transcription_segments")
+            if not isinstance(segments, list) or not segments:
+                raise RuntimeError(
+                    "RunPod no devolvió segmentos de transcripción; actualiza el worker para que los incluya "
+                    "y evitar cargar Whisper localmente en Render."
+                )
+            result.setdefault("engine", "runpod")
+            result.setdefault("video", str(vp))
+            result.setdefault("transcription", str(tp) if tp.is_file() else "")
+            if progress_callback is not None:
+                try:
+                    progress_callback(35)
+                except Exception as exc:
+                    logging.getLogger(__name__).warning("Callback de progreso RunPod falló: %s", exc)
+            return result
 
     current_file = Path(__file__).resolve()
     root = None
@@ -403,8 +434,6 @@ def run_clip_engine(video_path: str, transcription_path: str, progress_callback:
     except Exception:
         pass
 
-    import logging
-    import re
     _log = logging.getLogger(__name__)
 
     def _parse_transcript_native(text: str) -> list[dict]:
