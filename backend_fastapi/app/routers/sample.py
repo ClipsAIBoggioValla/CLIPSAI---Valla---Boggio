@@ -20,7 +20,7 @@ from ..deps import CurrentUser, DbSession
 from ..models import Job, JobStatus, Video
 from ..schemas import JobResponse
 
-router = APIRouter(tags=["videos"])
+router = APIRouter(prefix="/videos", tags=["videos"])
 
 
 def _get_sample_video_path() -> Path:

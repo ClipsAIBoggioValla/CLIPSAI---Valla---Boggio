@@ -19,7 +19,8 @@ const { swaggerSpec } = await import(path.join(root, 'dist/docs/swagger.js'))
 
 /** Montajes de routers según `app.use(...)` en src/app.ts. */
 const MOUNTS = [
-  { file: 'auth.ts', router: 'authRouter', prefixes: ['', '/auth'] },
+  { file: 'auth.ts', router: 'authRouter', prefixes: ['/auth'] },
+  { file: 'auth.ts', router: 'compatAuthRouter', prefixes: [''] },
   { file: 'videos.ts', router: 'videosRouter', prefixes: ['/videos'] },
   { file: 'jobs.ts', router: 'jobsRouter', prefixes: [''] },
   { file: 'export.ts', router: 'exportRouter', prefixes: [''] },
@@ -27,7 +28,10 @@ const MOUNTS = [
   { file: 'stats.ts', router: 'statsRouter', prefixes: ['/stats'] },
   { file: 'clips.ts', router: 'clipsRouter', prefixes: ['/clips'] },
   { file: 'publish.ts', router: 'publishRouter', prefixes: [''] },
-  { file: 'users.ts', router: 'usersRouter', prefixes: ['/users'] },
+  { file: 'users.ts', router: 'usersRouter', prefixes: ['', '/api'] },
+  { file: 'subtitles.ts', router: 'subtitlesRouter', prefixes: ['/clips'] },
+  { file: 'socialAuth.ts', router: 'socialAuthRouter', prefixes: ['/auth/social'] },
+  { file: 'apiVideos.ts', router: 'apiVideosRouter', prefixes: ['/api/videos'] },
 ]
 
 const METHODS = 'get|post|put|patch|delete'

@@ -135,8 +135,14 @@ services:
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-20250514}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      UPLOAD_DIR: ${UPLOAD_DIR:-/storage/uploads}
+      SAMPLE_VIDEO_PATH: ${SAMPLE_VIDEO_PATH:-}
     ports:
       - "${BACKEND_EXPRESS_PORT:-3001}:3001"
+    volumes:
+      # Storage compartido con backend_fastapi (mismos archivos subidos/renderizados).
+      - ./storage:/app/storage
+      - ./storage:/storage
     depends_on:
       db:
         condition: service_healthy

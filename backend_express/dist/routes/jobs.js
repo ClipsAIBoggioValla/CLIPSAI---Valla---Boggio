@@ -1,6 +1,72 @@
 import { Router } from 'express';
 import { pool } from '../db/index.js';
 import { authMiddleware } from '../middleware/auth.js';
+export async function runJob(jobId) {
+    // Esta función se usa internamente y también se exporta para uso en videos.ts (sample)
+    const client = await pool.connect();
+    try {
+        await client.query("UPDATE jobs SET status = 'processing', updated_at = NOW() WHERE id = $1", [jobId]);
+        const jobRes = await client.query('SELECT video_id FROM jobs WHERE id = $1', [jobId]);
+        if (jobRes.rows.length === 0)
+            return;
+        const videoId = jobRes.rows[0].video_id;
+        const videoRes = await client.query('SELECT file_path, transcription_filepath, transcript FROM videos WHERE id = $1', [videoId]);
+        if (videoRes.rows.length === 0)
+            throw new Error('Video asociado no encontrado');
+        const video = videoRes.rows[0];
+        const videoPath = video.file_path;
+        const transcriptionPath = video.transcription_filepath || '';
+        // Modo 100% real — sin fallback, error se propaga a FAILED
+        const result = await runClipEngine(videoPath, transcriptionPath);
+        let clipsPayload = Array.isArray(result.clips)
+            ? result.clips
+            : Array.isArray(result)
+                ? result
+                : [];
+        if (clipsPayload.length === 0) {
+            throw new Error('El engine real no devolvió clips (0 clips) — verificar transcripción y LLM (modo 100% real, sin fallback)');
+        }
+        const fresh = await client.query('SELECT id FROM jobs WHERE id = $1', [jobId]);
+        if (fresh.rows.length === 0)
+            return;
+        await client.query('UPDATE jobs SET result_metadata = $1::jsonb, status = $2, error_message = NULL, updated_at = NOW() WHERE id = $3', [
+            JSON.stringify(result),
+            'completed',
+            jobId,
+        ]);
+        for (const item of clipsPayload) {
+            if (typeof item !== 'object' || item === null)
+                continue;
+            const title = item.title || item.titulo || item.titulo_sugerido || 'Clip';
+            const startRaw = item.start_time ?? item.inicio ?? 0;
+            const endRaw = item.end_time ?? item.fin ?? 10;
+            let start = parseTimeToSeconds(startRaw);
+            let end = parseTimeToSeconds(endRaw);
+            if (end <= start)
+                end = start + 30;
+            const score = item.score !== undefined && item.score !== null ? Number(item.score) : null;
+            const tags = Array.isArray(item.tags) ? item.tags : item.tags ? [String(item.tags)] : null;
+            const storage = item.storage_path || item.file_path || '';
+            await client.query('INSERT INTO clips (video_id, job_id, title, start_time, end_time, score, tags, file_path, status) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9)', [videoId, jobId, String(title).slice(0, 255), start, end, score, tags ? JSON.stringify(tags) : null, storage, 'ready']);
+        }
+        console.log(`[jobs:express] job ${jobId} completado 100% real ${clipsPayload.length} clips`);
+    }
+    catch (err) {
+        const stack = err instanceof Error ? err.stack ?? '' : '';
+        console.error(`[jobs:express] fallo irrecuperable job=${jobId} — modo 100% real sin fallback`, err, stack ? `\nStack: ${stack}` : '');
+        let rawMsg = err instanceof Error ? String(err.message).trim() : String(err).trim();
+        if (!rawMsg || rawMsg === '4' || rawMsg.match(/^exit code/i)) {
+            rawMsg = err instanceof Error && err.stack ? err.stack.slice(0, 1500) : 'Error desconocido (exit code 4 / signal)';
+        }
+        try {
+            await client.query('UPDATE jobs SET status = $1, error_message = $2, updated_at = NOW() WHERE id = $3', ['failed', rawMsg, jobId]);
+        }
+        catch { }
+    }
+    finally {
+        client.release();
+    }
+}
 export const jobsRouter = Router();
 function isValidUuid(v) {
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
@@ -46,8 +112,30 @@ function getProvider() {
 }
 async function runClipEngine(videoPath, transcriptionPath) {
     const fs = await import('fs');
-    if (!fs.existsSync(videoPath) || !fs.existsSync(transcriptionPath)) {
-        throw new Error('Video o transcripción no encontrada');
+    // Verificación de ruta física antes de Whisper/FFmpeg (evitar ENOENT y código 4)
+    if (!videoPath || !videoPath.trim()) {
+        throw new Error('Ruta de video vacía — verificar video.filepath en BD');
+    }
+    if (!fs.existsSync(videoPath)) {
+        throw new Error(`Video no encontrado en disco: ${videoPath} (os.path.exists=False)`);
+    }
+    try {
+        const st = fs.statSync(videoPath);
+        if (st.size === 0)
+            throw new Error(`Video vacío (0 bytes): ${videoPath}`);
+    }
+    catch (e) {
+        if (e instanceof Error && e.message.includes('Video'))
+            throw e;
+        // ignorar stat warning
+    }
+    if (!transcriptionPath || !transcriptionPath.trim()) {
+        // Transcripción puede venir de transcript BD pero Express la requiere como archivo — validar
+        console.warn(`[engine:express] transcriptionPath vacío — verificar video.transcription_filepath`);
+        throw new Error(`Transcripción no encontrada: transcriptionPath vacío para video ${videoPath}`);
+    }
+    if (!fs.existsSync(transcriptionPath)) {
+        throw new Error(`Transcripción no encontrada en disco: ${transcriptionPath}`);
     }
     const provider = getProvider();
     console.log(`[engine:express] provider=${provider} ANTHROPIC=${!!process.env.ANTHROPIC_API_KEY} OPENAI=${!!process.env.OPENAI_API_KEY} OPENROUTER=${!!process.env.OPENROUTER_API_KEY}`);
@@ -79,163 +167,38 @@ async function runClipEngine(videoPath, transcriptionPath) {
                 }
             }
             else {
-                const stderr = res.stderr || '';
-                console.error(`[engine:express] spawn fallo status=${res.status} stderr=${String(stderr).slice(0, 500)}`);
+                const stderr = res.stderr || String(res.error || '') || '';
+                const stdout = res.stdout || '';
+                console.error(`[engine:express] spawn fallo status=${res.status} stderr=${String(stderr).slice(0, 800)} stdout=${String(stdout).slice(0, 500)}`);
+                // Propagar error descriptivo en lugar de solo código "4"
+                const detail = stderr.trim() ? stderr.trim().slice(0, 800) : stdout.trim() ? stdout.trim().slice(0, 800) : `exit code ${res.status}`;
+                throw new Error(`FFmpeg/engine spawn falló (code=${res.status}): ${detail}`);
             }
+        }
+        else {
+            throw new Error(`engine.py no encontrado en ${enginePath} — verificar despliegue`);
         }
     }
     catch (e) {
-        console.error('[engine:express] spawn exception', e);
+        console.error('[engine:express] spawn exception', e, e instanceof Error ? e.stack : '');
+        if (e instanceof Error && (e.message.includes('spawn falló') || e.message.includes('engine.py no encontrado')))
+            throw e;
     }
-    // Intento directo Anthropic/OpenRouter si python falló y hay key
+    // Intento directo Anthropic/OpenRouter si python falló y hay key — log con traceback
     if (provider !== 'none') {
         try {
-            console.log(`[engine:express] intento LLM directo provider=${provider} no implementado full, usando fallback transcript-based`);
+            console.log(`[engine:express] intento LLM directo provider=${provider} no implementado full`);
         }
         catch (e) {
-            console.error('[engine:express] LLM directo fallo', e);
+            console.error('[engine:express] LLM directo fallo', e, e instanceof Error ? e.stack : '');
         }
     }
-    // Fallback determinístico transcript-based (no deja FAILED)
-    await new Promise((r) => setTimeout(r, 800));
-    let preview = '';
-    try {
-        const fs2 = await import('fs');
-        preview = fs2.readFileSync(transcriptionPath, 'utf-8').slice(0, 120);
-    }
-    catch { }
-    console.warn('[engine:express] fallback simulado aplicado');
-    return {
-        clips: [
-            { inicio: '00:00:10', fin: '00:00:45', titulo: 'Clip destacado 1 (fallback)', score: 7.5, transcript_preview: preview },
-            { inicio: '00:01:00', fin: '00:01:35', titulo: 'Clip destacado 2 (fallback)', score: 7.0 },
-        ],
-        engine: 'fallback',
-        provider,
-        fallback: true,
-    };
+    // Modo 100% real — sin fallback de prueba. Error descriptivo con causa raíz
+    throw new Error(`Engine real no disponible o falló — verificar ANTHROPIC_API_KEY, engine.py y que video/transcripción existan (provider=${provider}). Revisar logs spawn previos para código de salida.`);
 }
-function buildFallback(videoId, preview) {
-    return {
-        clips: [
-            { inicio: '00:00:10', fin: '00:00:45', titulo: 'Clip destacado 1 (fallback)', score: 7.5, transcript_preview: preview.slice(0, 120) },
-            { inicio: '00:01:00', fin: '00:01:35', titulo: 'Clip destacado 2 (fallback)', score: 7.0 },
-        ],
-        engine: 'fallback',
-        fallback: true,
-    };
-}
-async function runJob(jobId) {
-    const client = await pool.connect();
-    try {
-        await client.query("UPDATE jobs SET status = 'processing', updated_at = NOW() WHERE id = $1", [jobId]);
-        const jobRes = await client.query('SELECT video_id FROM jobs WHERE id = $1', [jobId]);
-        if (jobRes.rows.length === 0)
-            return;
-        const videoId = jobRes.rows[0].video_id;
-        const videoRes = await client.query('SELECT file_path, transcription_filepath, transcript FROM videos WHERE id = $1', [videoId]);
-        if (videoRes.rows.length === 0)
-            throw new Error('Video asociado no encontrado');
-        const video = videoRes.rows[0];
-        const videoPath = video.file_path;
-        const transcriptionPath = video.transcription_filepath || '';
-        let result;
-        try {
-            result = await runClipEngine(videoPath, transcriptionPath);
-        }
-        catch (e) {
-            console.error(`[jobs:express] runClipEngine exception job=${jobId}`, e);
-            const preview = video.transcript || '';
-            console.warn(`[jobs:express] fallback aplicado job=${jobId}`);
-            result = buildFallback(videoId, preview);
-            result.fallback_error = e instanceof Error ? e.message : String(e);
-        }
-        let clipsPayload = Array.isArray(result.clips)
-            ? result.clips
-            : Array.isArray(result)
-                ? result
-                : [];
-        if (clipsPayload.length === 0) {
-            console.warn(`[jobs:express] 0 clips devueltos job=${jobId}, usando fallback`);
-            const preview = video.transcript || '';
-            result = buildFallback(videoId, preview);
-            clipsPayload = result.clips || [];
-        }
-        const fresh = await client.query('SELECT id FROM jobs WHERE id = $1', [jobId]);
-        if (fresh.rows.length === 0)
-            return;
-        await client.query('UPDATE jobs SET result_metadata = $1::jsonb, status = $2, error_message = NULL, updated_at = NOW() WHERE id = $3', [
-            JSON.stringify(result),
-            'completed',
-            jobId,
-        ]);
-        for (const item of clipsPayload) {
-            if (typeof item !== 'object' || item === null)
-                continue;
-            const title = item.title || item.titulo || item.titulo_sugerido || 'Clip';
-            const startRaw = item.start_time ?? item.inicio ?? 0;
-            const endRaw = item.end_time ?? item.fin ?? 10;
-            let start = parseTimeToSeconds(startRaw);
-            let end = parseTimeToSeconds(endRaw);
-            if (end <= start)
-                end = start + 30;
-            const score = item.score !== undefined && item.score !== null ? Number(item.score) : null;
-            const tags = Array.isArray(item.tags) ? item.tags : item.tags ? [String(item.tags)] : null;
-            const storage = item.storage_path || item.file_path || '';
-            await client.query('INSERT INTO clips (video_id, job_id, title, start_time, end_time, score, tags, file_path, status) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9)', [videoId, jobId, String(title).slice(0, 255), start, end, score, tags ? JSON.stringify(tags) : null, storage, 'ready']);
-        }
-        if (result.fallback) {
-            console.warn(`[jobs:express] job ${jobId} completado via fallback`);
-        }
-        else {
-            console.log(`[jobs:express] job ${jobId} completado ${clipsPayload.length} clips`);
-        }
-    }
-    catch (err) {
-        console.error(`[jobs:express] fallo irrecuperable job=${jobId}`, err);
-        try {
-            const preview = '';
-            const fallback = buildFallback('', preview);
-            fallback.fatal_error = err instanceof Error ? err.message : String(err);
-            const jRes = await pool.query('SELECT video_id FROM jobs WHERE id = $1', [jobId]);
-            const vid = jRes.rows[0]?.video_id;
-            await pool.query('UPDATE jobs SET result_metadata = $1::jsonb, status = $2, error_message = NULL, updated_at = NOW() WHERE id = $3', [
-                JSON.stringify(fallback),
-                'completed',
-                jobId,
-            ]);
-            const clips = fallback.clips || [];
-            for (const item of clips) {
-                const title = item.titulo || 'Clip fallback';
-                const start = parseTimeToSeconds(item.inicio);
-                const end = parseTimeToSeconds(item.fin);
-                await pool.query('INSERT INTO clips (video_id, job_id, title, start_time, end_time, score, tags, file_path, status) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9)', [
-                    vid || '00000000-0000-0000-0000-000000000000',
-                    jobId,
-                    String(title).slice(0, 255),
-                    start,
-                    end,
-                    7.0,
-                    null,
-                    '',
-                    'ready',
-                ]);
-            }
-            console.warn(`[jobs:express] job ${jobId} recuperado via fallback tras error fatal`);
-            return;
-        }
-        catch (e2) {
-            console.error(`[jobs:express] fallback fatal también falló job=${jobId}`, e2);
-        }
-        const msg = err instanceof Error ? err.message : String(err);
-        try {
-            await pool.query("UPDATE jobs SET status = 'failed', error_message = $1, updated_at = NOW() WHERE id = $2", [msg.slice(0, 2000), jobId]);
-        }
-        catch { }
-    }
-    finally {
-        client.release();
-    }
+function buildFallback(_videoId, _preview) {
+    // Deshabilitado en modo 100% real — no genera clips sintéticos
+    throw new Error('buildFallback deshabilitado en modo 100% real');
 }
 jobsRouter.post('/videos/:videoId/jobs', authMiddleware, async (req, res) => {
     const userId = req.user.id;
@@ -301,64 +264,4 @@ jobsRouter.get('/jobs/:jobId', authMiddleware, async (req, res) => {
         console.error('GET /jobs/:jobId error', err);
         return res.status(500).json({ detail: 'Error interno' });
     }
-});
-jobsRouter.get('/jobs/:jobId/stream', authMiddleware, async (req, res) => {
-    const userId = req.user.id;
-    const jobId = String(req.params.jobId);
-    if (!isValidUuid(jobId))
-        return res.status(422).json({ detail: 'job_id debe ser UUID válido' });
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
-    // @ts-ignore
-    if (typeof res.flushHeaders === 'function')
-        res.flushHeaders();
-    const STATUS_MAP = {
-        pending: { progress: 0, status: 'pending', message: 'En cola' },
-        processing: { progress: 55, status: 'scoring', message: 'Procesando con IA' },
-        completed: { progress: 100, status: 'completed', message: 'Completado' },
-        failed: { progress: 100, status: 'failed', message: 'Falló' },
-    };
-    let lastStatus = null;
-    const interval = setInterval(async () => {
-        try {
-            const r = await pool.query('SELECT j.status, j.error_message, v.usuario_id FROM jobs j JOIN videos v ON j.video_id = v.id WHERE j.id = $1', [jobId]);
-            if (r.rows.length === 0) {
-                res.write(`event: error\ndata: ${JSON.stringify({ detail: 'Job no encontrado' })}\n\n`);
-                clearInterval(interval);
-                res.end();
-                return;
-            }
-            const row = r.rows[0];
-            if (String(row.usuario_id) !== String(userId)) {
-                res.write(`event: error\ndata: ${JSON.stringify({ detail: 'No autorizado' })}\n\n`);
-                clearInterval(interval);
-                res.end();
-                return;
-            }
-            const raw = String(row.status);
-            if (raw === lastStatus)
-                return;
-            lastStatus = raw;
-            const mapped = STATUS_MAP[raw.toLowerCase()] ?? { progress: 0, status: raw, message: raw };
-            const payload = { progress: mapped.progress, status: mapped.status, message: mapped.message, job_id: jobId };
-            if (row.error_message)
-                payload.error = row.error_message;
-            res.write(`data: ${JSON.stringify(payload)}\n\n`);
-            if (raw.toLowerCase() === 'completed' || raw.toLowerCase() === 'failed') {
-                res.write('event: done\ndata: {}\n\n');
-                clearInterval(interval);
-                res.end();
-            }
-        }
-        catch (e) {
-            console.error('SSE stream error', e);
-            clearInterval(interval);
-            res.end();
-        }
-    }, 1000);
-    req.on('close', () => {
-        clearInterval(interval);
-    });
 });
