@@ -32,9 +32,14 @@ for _idx in (3, 2, 1, 0):
             pass
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
+ANTHROPIC_WORKSPACE_ID = os.getenv("ANTHROPIC_WORKSPACE_ID", "").strip()
 # Modelo primario: CLAUDE_MODEL (nuevo) con fallback a ANTHROPIC_MODEL (legacy) y default seguro.
-CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "").strip() or os.getenv("ANTHROPIC_MODEL", "").strip() or "claude-3-5-sonnet-latest"
-CLAUDE_FALLBACK_MODEL = "claude-3-haiku-20240307"
+CLAUDE_MODEL = (
+    os.getenv("CLAUDE_MODEL", "").strip()
+    or os.getenv("ANTHROPIC_MODEL", "").strip()
+    or "claude-3-5-sonnet-20241022"
+)
+CLAUDE_FALLBACK_MODEL = os.getenv("CLAUDE_FALLBACK_MODEL", "").strip() or "claude-3-haiku-20240307"
 ANTHROPIC_VERSION = os.getenv("ANTHROPIC_VERSION", "2023-06-01").strip()
 ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages"
 
@@ -269,7 +274,10 @@ def _call_anthropic_with_model(prompt: str, sentence_ids: list[str], model: str)
     try:
         import anthropic  # type: ignore
 
-        client = anthropic.Anthropic(api_key=key, timeout=TIMEOUT)
+        sdk_kwargs: dict[str, Any] = {"api_key": key, "timeout": TIMEOUT}
+        if ANTHROPIC_WORKSPACE_ID:
+            sdk_kwargs["default_headers"] = {"anthropic-workspace-id": ANTHROPIC_WORKSPACE_ID}
+        client = anthropic.Anthropic(**sdk_kwargs)
         # anthropic SDK usa max_tokens y messages — envuelto en try/except con timeout
         try:
             msg = client.messages.create(
@@ -324,6 +332,8 @@ def _call_anthropic_with_model(prompt: str, sentence_ids: list[str], model: str)
 
     # Fallback requests directo
     headers = {"x-api-key": key, "anthropic-version": ANTHROPIC_VERSION, "content-type": "application/json"}
+    if ANTHROPIC_WORKSPACE_ID:
+        headers["anthropic-workspace-id"] = ANTHROPIC_WORKSPACE_ID
     body: dict[str, Any] = {
         "model": model,
         "max_tokens": 4096,
