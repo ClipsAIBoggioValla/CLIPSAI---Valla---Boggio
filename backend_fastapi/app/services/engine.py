@@ -3,13 +3,34 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 from typing import Any
+
+
+def _validate_video_source(video_path: str | Path) -> Path:
+    source = Path(video_path)
+    if not source.is_file():
+        raise FileNotFoundError(
+            f"El archivo de video fuente no existe o no es un archivo: {source}. "
+            "La descarga o subida del video falló; vuelve a subirlo o verifica la URL de origen."
+        )
+    try:
+        size = source.stat().st_size
+    except OSError as exc:
+        raise FileNotFoundError(
+            f"No se pudo leer el archivo de video fuente {source}. "
+            "La descarga o subida del video pudo haber fallado."
+        ) from exc
+    if size <= 0:
+        raise ValueError(
+            f"El archivo de video fuente está vacío (0 bytes): {source}. "
+            "La descarga o subida del video falló; vuelve a subirlo o verifica la URL de origen."
+        )
+    return source
 
 
 def _ends_with_strong_punctuation(word_text: str) -> bool:
@@ -213,9 +234,10 @@ def _select_clip_hook(
 
 def extract_audio_to_wav(video_path: str) -> str:
     """Extracción forzada de audio a WAV PCM 16kHz mono vía FFmpeg subprocess."""
+    source = _validate_video_source(video_path)
     try:
         probe = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type", "-of", "default=noprint_wrappers=1:nokey=1", video_path],
+            ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type", "-of", "default=noprint_wrappers=1:nokey=1", str(source)],
             capture_output=True, text=True, timeout=10,
         )
         types = [t.strip().lower() for t in probe.stdout.strip().splitlines() if t.strip()]
@@ -225,8 +247,8 @@ def extract_audio_to_wav(video_path: str) -> str:
         raise
     except Exception:
         pass
-    wav_path = str(Path(tempfile.gettempdir()) / f"extracted_{Path(video_path).stem}.wav")
-    cmd = ["ffmpeg", "-y", "-i", video_path, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", wav_path]
+    wav_path = str(Path(tempfile.gettempdir()) / f"extracted_{source.stem}.wav")
+    cmd = ["ffmpeg", "-y", "-i", str(source), "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", wav_path]
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
     except subprocess.TimeoutExpired as exc:
@@ -245,11 +267,10 @@ def extract_audio_to_wav(video_path: str) -> str:
 
 
 def ensure_wav_audio(video_path: str) -> str:
-    if not os.path.exists(video_path):
-        raise RuntimeError(f"El archivo de video NO existe en la ruta del contenedor: {video_path}")
-    wav_path = str(Path(tempfile.gettempdir()) / f"{Path(video_path).stem}_extracted.wav")
+    source = _validate_video_source(video_path)
+    wav_path = str(Path(tempfile.gettempdir()) / f"{source.stem}_extracted.wav")
     cmd = [
-        "ffmpeg", "-y", "-i", video_path,
+        "ffmpeg", "-y", "-i", str(source),
         "-vn",
         "-map", "0:a:0?",
         "-acodec", "pcm_s16le",
@@ -264,7 +285,7 @@ def ensure_wav_audio(video_path: str) -> str:
     fb_res = None
     if res.returncode != 0 or not Path(wav_path).exists() or Path(wav_path).stat().st_size == 0:
         fallback_cmd = [
-            "ffmpeg", "-y", "-i", video_path,
+            "ffmpeg", "-y", "-i", str(source),
             "-vn", "-ac", "1", "-ar", "16000",
             wav_path
         ]
@@ -282,7 +303,7 @@ def ensure_wav_audio(video_path: str) -> str:
         fb_stderr = fb_res.stderr if fb_res else "no fallback"
         raise RuntimeError(
             f"FFmpeg generó 0 bytes en Docker. "
-            f"Ruta video: {video_path} (Existe: {os.path.exists(video_path)}). "
+            f"Ruta video: {source} (Existe: {source.is_file()}). "
             f"FFmpeg stderr: {res.stderr} | Fallback stderr: {fb_stderr}"
         )
     # Diagnóstico de Audio con volumedetect (requerido por prompt)
@@ -312,10 +333,8 @@ def ensure_wav_audio(video_path: str) -> str:
 
 
 def run_clip_engine(video_path: str, transcription_path: str, progress_callback: Any | None = None) -> dict[str, Any]:
-    vp = Path(video_path)
+    vp = _validate_video_source(video_path)
     tp = Path(transcription_path)
-    if not vp.exists():
-        raise FileNotFoundError(f"Video no encontrado: {video_path}")
     if not tp.exists():
         raise FileNotFoundError(f"Transcripcion no encontrada: {transcription_path}")
 

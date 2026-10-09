@@ -80,12 +80,30 @@ def _has_audio_track(video_path: str) -> bool:
         return True
 
 
-def extract_audio_wav(video_path: str, wav_path: str | None = None) -> str:
-    if not os.path.exists(video_path):
-        raise RuntimeError(f"El archivo de video NO existe en la ruta del contenedor: {video_path}")
+def _validate_video_source(video_path: str) -> Path:
     src = Path(video_path)
     if not src.is_file():
-        raise FileNotFoundError(f"Video no encontrado: {video_path}")
+        raise FileNotFoundError(
+            f"El archivo de video fuente no existe o no es un archivo: {video_path}. "
+            "La descarga o subida del video falló; vuelve a subirlo o verifica la URL de origen."
+        )
+    try:
+        size = src.stat().st_size
+    except OSError as exc:
+        raise FileNotFoundError(
+            f"No se pudo leer el archivo de video fuente {video_path}. "
+            "La descarga o subida del video pudo haber fallado."
+        ) from exc
+    if size <= 0:
+        raise ValueError(
+            f"El archivo de video fuente está vacío (0 bytes): {video_path}. "
+            "La descarga o subida del video falló; vuelve a subirlo o verifica la URL de origen."
+        )
+    return src
+
+
+def extract_audio_wav(video_path: str, wav_path: str | None = None) -> str:
+    src = _validate_video_source(video_path)
     # Verificación previa de pista de audio antes de extraer (requerido por prompt)
     if not _has_audio_track(video_path):
         raise ValueError("El video subido no contiene audio o no se detectó voz interpretable para generar subtítulos.")
@@ -177,7 +195,7 @@ def transcribe_wav(
             "faster-whisper no instalado. Instalar con: pip install faster-whisper"
         ) from exc
     try:
-        model = WhisperModel(resolved_model, device=device, compute_type=compute_type, local_files_only=True)
+        model = WhisperModel(resolved_model, device=device, compute_type=compute_type, local_files_only=False)
     except Exception as exc:
         raise RuntimeError(f"No se pudo cargar modelo Whisper '{resolved_model}' ({device}/{compute_type}): {exc}") from exc
     # Diagnóstico y verificación de audio antes de Whisper (requerido por prompt)
@@ -259,13 +277,14 @@ def transcribe_video(
     model_name: str = "large-v3-turbo",
     keep_wav: bool = False,
 ) -> list[TranscriptionSegment]:
+    video_source = _validate_video_source(video_path)
     # Verificación previa de pista de audio antes de Whisper (FFprobe)
-    if not _has_audio_track(video_path):
+    if not _has_audio_track(str(video_source)):
         raise ValueError("El video subido no contiene audio o no se detectó voz interpretable para generar subtítulos.")
     wav_path: str | None = None
     try:
         # Extrae WAV temporal a 16kHz mono antes de Whisper (evita fallos lectura directa MP4)
-        wav_path = extract_audio_wav(video_path)
+        wav_path = extract_audio_wav(str(video_source))
         segments = transcribe_wav(wav_path, language=language, model_name=model_name)
         if not segments:
             raise ValueError("El video subido no contiene audio o no se detectó voz interpretable para generar subtítulos.")
