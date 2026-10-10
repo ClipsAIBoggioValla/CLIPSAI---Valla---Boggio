@@ -4,13 +4,16 @@ import swaggerUi from 'swagger-ui-express';
 import { swaggerSpec, swaggerUiOptions } from './docs/swagger.js';
 import { statsRouter } from './routes/stats.js';
 import { clipsRouter } from './routes/clips.js';
+import { subtitlesRouter } from './routes/subtitles.js';
 import { usersRouter } from './routes/users.js';
 import { exportRouter } from './routes/export.js';
 import { metricsRouter } from './routes/metrics.js';
-import { authRouter } from './routes/auth.js';
+import { authRouter, compatAuthRouter } from './routes/auth.js';
 import { videosRouter } from './routes/videos.js';
+import { apiVideosRouter } from './routes/apiVideos.js';
 import { jobsRouter } from './routes/jobs.js';
 import { publishRouter } from './routes/publish.js';
+import { socialAuthRouter } from './routes/socialAuth.js';
 export function createApp() {
     const app = express();
     app.use(cors({
@@ -52,6 +55,20 @@ export function createApp() {
     app.use('/api-docs', swaggerUi.serve, swaggerUiHandler);
     app.get('/openapi.json', (_req, res) => res.json(swaggerSpec));
     app.get('/api-docs.json', (_req, res) => res.json(swaggerSpec));
+    // Paridad FastAPI: `/redoc` y `/docs/oauth2-redirect` ( viewers alternativos del mismo spec).
+    app.get('/redoc', (_req, res) => {
+        res.type('html').send('<!DOCTYPE html><html><head><title>ClipsAI Express API — ReDoc</title>' +
+            '<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">' +
+            '<style>body{margin:0}</style></head><body>' +
+            '<redoc spec-url="/openapi.json"></redoc>' +
+            '<script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js"></script>' +
+            '</body></html>');
+    });
+    app.get('/docs/oauth2-redirect', (_req, res) => {
+        res.type('html').send('<!DOCTYPE html><html><head><title>OAuth2 Redirect</title>' +
+            '<script>window.onload=function(){if(window.opener&&window.opener.swaggerUIRedirectOauth2){' +
+            'window.opener.swaggerUIRedirectOauth2(window.location.hash)}}</script></head><body></body></html>');
+    });
     /**
      * @openapi
      * /health:
@@ -73,15 +90,21 @@ export function createApp() {
      */
     app.get('/health', (_req, res) => res.json({ status: 'ok' }));
     app.use('/auth', authRouter);
-    app.use(authRouter);
+    app.use('/auth/social', socialAuthRouter);
+    app.use(compatAuthRouter);
     app.use('/videos', videosRouter);
+    app.use('/api/videos', apiVideosRouter);
     app.use('/', jobsRouter);
     app.use('/', exportRouter);
     app.use('/', metricsRouter);
     app.use('/stats', statsRouter);
     app.use('/clips', clipsRouter);
+    app.use('/clips', subtitlesRouter);
     app.use('/', publishRouter);
-    app.use('/users', usersRouter);
-    app.use('/api/users', usersRouter);
+    // Paridad con FastAPI: `users.router` se incluye sin prefijo y con `/api`
+    // (sus rutas ya son `/users/me*` y `/me*`), exponiendo `/users/me`, `/me`,
+    // `/api/users/me` y `/api/me`.
+    app.use(usersRouter);
+    app.use('/api', usersRouter);
     return app;
 }

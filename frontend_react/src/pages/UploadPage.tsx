@@ -5,6 +5,7 @@ import { ApiError, type RunPodProcessResponse } from '@/types/api'
 
 type UploadState = 'idle' | 'uploading' | 'creating_job'
 type DirectUploadState = 'idle' | 'uploading' | 'processing' | 'success' | 'error'
+type SampleState = 'idle' | 'loading' | 'error'
 
 function fileErrorMessage(err: unknown): string {
   if (err instanceof ApiError) return err.detail
@@ -23,6 +24,8 @@ export default function UploadPage() {
   const [directUploadError, setDirectUploadError] = useState<string | null>(null)
   const [directUploadKey, setDirectUploadKey] = useState<string | null>(null)
   const [directUploadResult, setDirectUploadResult] = useState<RunPodProcessResponse | null>(null)
+  const [sampleState, setSampleState] = useState<SampleState>('idle')
+  const [sampleError, setSampleError] = useState<string | null>(null)
 
   useEffect(() => {
     try {
@@ -33,6 +36,7 @@ export default function UploadPage() {
 
   const isUploading = status === 'uploading' || status === 'creating_job'
   const isDirectUploadBusy = directUploadState === 'uploading' || directUploadState === 'processing'
+  const isSampleBusy = sampleState === 'loading'
 
   function onVideoChange(e: ChangeEvent<HTMLInputElement>) {
     setVideoFile(e.target.files?.[0] ?? null)
@@ -60,6 +64,23 @@ export default function UploadPage() {
     } catch (err: unknown) {
       setDirectUploadError(fileErrorMessage(err))
       setDirectUploadState('error')
+    }
+  }
+
+  /** Issue 34: iniciar job con video de muestra sin subir archivo. */
+  async function handleSampleJob() {
+    setSampleState('loading')
+    setSampleError(null)
+    try {
+      const job = await videoService.createSampleJob()
+      const jobId = job.job_id ?? job.id
+      try {
+        localStorage.setItem('clipsai_active_job_id', jobId)
+      } catch {}
+      navigate(`/jobs/${jobId}`, { replace: false })
+    } catch (err: unknown) {
+      setSampleError(fileErrorMessage(err))
+      setSampleState('error')
     }
   }
 
@@ -142,8 +163,29 @@ export default function UploadPage() {
                 <i className="bi bi-check-circle-fill" /> {(videoFile.size / 1024 / 1024).toFixed(1)} MB
               </span>
             )}
-            <input type="file" accept=".mp4,.mov,.avi,video/mp4,video/quicktime" onChange={onVideoChange} className="hidden" disabled={isUploading || isDirectUploadBusy} />
+            <input type="file" accept=".mp4,.mov,.avi,video/mp4,video/quicktime" onChange={onVideoChange} className="hidden" disabled={isUploading || isDirectUploadBusy || isSampleBusy} />
           </label>
+          {/* Issue 34: botón para probar con video de muestra */}
+          <div className="mt-3">
+            <button
+              type="button"
+              onClick={handleSampleJob}
+              disabled={isUploading || isDirectUploadBusy || isSampleBusy}
+              className="btn-custom btn-custom-light w-full justify-center disabled:opacity-50"
+            >
+              {sampleState === 'loading' ? (
+                <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-[#B4F105]" /> Preparando video de muestra...</>
+              ) : (
+                <><i className="bi bi-play-circle" /> Probar con video de muestra</>
+              )}
+            </button>
+            {sampleState === 'error' && sampleError && (
+              <p role="alert" className="text-xs text-red-400 mt-2">{sampleError}</p>
+            )}
+            <p className="text-xs text-[#94A3B8] mt-2 text-center">
+              Usa un clip liviano de ejemplo para evaluar el flujo completo sin subir archivos pesados.
+            </p>
+          </div>
         </div>
 
         <div>

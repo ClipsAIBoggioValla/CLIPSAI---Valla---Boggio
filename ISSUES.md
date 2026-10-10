@@ -132,11 +132,40 @@
 
 ---
 
-### Issue 6 — Backend #2 (Express): paridad completa con FastAPI — ⚠️ Parcial → ✅ ~90% tras Issue 30
+### Issue 6 — Backend #2 (Express): paridad completa con FastAPI — ✅ 100% (Verificado)
 
 **Descripción:** Reimplementar mismos endpoints/contratos contra misma DB.
 
-**Estado actualizado tras Issues 21/30:** `backend_express/src/app.ts` + `routes/auth|videos|jobs|clips|export|metrics|stats|users|publish`, `db/index.ts` (Pool normaliza `postgresql+psycopg2://`), `middleware/auth.ts` OK. Swagger `/docs` implementado (#50). Restan pulidos `retrim`/`stream` y `Dockerfile` entry en compose (parcial).
+**Estado actualizado (2026-10-09):** paridad **1:1 verificada ruta por ruta** contra el inventario
+real de FastAPI. `backend_express/src/app.ts` + `routes/*
+|apiVideos|auth|clips|export|jobs|metrics|publish|socialAuth|stats|subtitles|users|videos`,
+`services/s3.ts` (SigV4 presign manual sin aws-sdk), `services/runpod.ts` (polling `/runsync`).
+
+**Evidencia (comandos ejecutados):**
+
+```
+cd backend_express
+npm run audit:openapi   → Rutas montadas 56 | Documentadas 56 → PARIDAD OK
+npm run audit:parity    → FastAPI 60 | Express 62 | Documentadas 56 → PARIDAD 1:1 OK
+```
+
+- `scripts/audit-parity.mjs` compara el inventario FastAPI (`scripts/fastapi-routes.json`,
+  snapshot autoritativo de 76 entradas) contra las rutas reales de Express. **0 faltantes, 0 extra.**
+- El snapshot se regenera desde la imagen de FastAPI montando el source actual:
+  `docker compose run --rm --no-deps -v "$(pwd)/backend_fastapi/app:/app/app:ro" -T backend_fastapi python -c "..."`
+- Verificación HTTP de las 5 brechas antes ausentes: `POST /videos/sample`, `POST /api/videos/upload-url`
+  (presign R2 verificado con **HTTP 404 NoSuchKey** ⇒ firma válida), `POST /api/videos/process`,
+  `POST/GET /clips/{id}/subtitles`, `GET /auth/social/status` (+ 8 endpoints OAuth2 más).
+- Bugs de paridad corregidos: `isValidUuid` de `publish.ts` tenía un regex mal formado (rechazaba UUIDs
+  válidos); `PATCH /clips/{id}` validaba el body antes de comprobar existencia (400 en vez de 404).
+- Rutas eliminadas por no existir en FastAPI (`retrim_router`/`stream_router` son `None`, el módulo
+  `backend/api/routes` no existe): `GET /jobs/{id}/stream`, `GET /clips/{id}/stream`,
+  `POST /clips/{id}/retrim`, `POST /login/form` raíz, `PATCH /users/me`, `PATCH /api/users/me`,
+  `PUT /users/me/password`, `PUT /api/users/me/password`. Ahora devuelven 404 como FastAPI.
+- `usersRouter` se monta solo con prefijos `''` y `/api` (igual que `include_router`), declarando rutas
+  canónicas `/users/me*` + alias `/me*`.
+- Docs alineados: Express ahora sirve `/docs`, `/docs/oauth2-redirect`, `/redoc`, `/openapi.json`
+  (más `/api-docs` y `/api-docs.json`, que conserva por el criterio de la Issue 14).
 
 **Dependencias:** 3,4,5.
 
@@ -472,15 +501,25 @@ node -e "import('./dist/docs/swagger.js').then(m=>console.log(Object.keys(m.swag
 
 ---
 
-### Issue 34 — Modo "Video de Muestra" en Pantalla de Carga (/upload) — ⏳ Pendiente (#54)
+### Issue 34 — Modo "Video de Muestra" en Pantalla de Carga (/upload) — ✅ Completado (#54)
 
-**Descripción:** Permitir probar el flujo sin subir video propio: botón `Probar con video de muestra` usa `river.mp4` + transcripción fixture.
+**PR:** #54 — **Issue #34**
 
-**Archivos:** `frontend_react/src/pages/UploadPage.tsx` `sample_test.mp4` + `backend_fastapi/app/routers/videos.py` `POST /videos/sample`.
+**Descripción:** Permitir probar el flujo sin subir video propio: botón `Probar con video de muestra` usa un clip liviano almacenado en los assets del backend.
+
+**Archivos:** `frontend_react/src/pages/UploadPage.tsx` + `frontend_vue/src/views/UploadView.vue` (botón en dropzone) + `backend_fastapi/app/routers/sample.py` `POST /videos/sample` + `backend_fastapi/storage/sample/README.md` (instrucciones para colocar el video).
 
 **Criterios:**
-- [ ] `POST /videos/sample` `201` sin `multipart` + `POST /videos/{id}/jobs 202` → clips visibles
-- [ ] UI botón `Video de muestra` + badge `Muestra`
+- [x] `POST /videos/sample` `202` sin `multipart` + job en background → clips visibles
+- [x] UI botón `Probar con video de muestra` dentro del dropzone de carga
+
+**Evidencias:**
+- `npm run typecheck` EXIT:0 (React + Vue)
+- `npm run build` EXIT:0 (React + Vue)
+- Endpoint `POST /videos/sample` registrado en `main.py` + router `sample.py`
+- Botón funcional en UploadPage (React) + UploadView (Vue) con estados loading/error
+- Video de muestra: `backend_fastapi/storage/sample/sample.mp4` (usuario puede subirlo ahí)
+- Error descriptivo 404 si el video no existe, indicando dónde colocarlo
 
 ---
 
