@@ -19,7 +19,7 @@ function isValidAvatarUrl(v: string): boolean {
   return v.startsWith('http://') || v.startsWith('https://')
 }
 
-usersRouter.get('/me', authMiddleware, async (req: AuthRequest, res) => {
+async function handleGetMe(req: AuthRequest, res: import('express').Response) {
   const userId = req.user!.id
   try {
     const r = await pool.query('SELECT id, email, full_name, avatar_url, theme_preference, created_at FROM usuarios WHERE id = $1', [userId])
@@ -37,7 +37,12 @@ usersRouter.get('/me', authMiddleware, async (req: AuthRequest, res) => {
     } catch {}
     return res.status(500).json({ detail: 'Error interno' })
   }
-})
+}
+
+// Paridad con FastAPI (users.py): rutas canónicas `/users/me*` + alias `/me*`.
+// El router se monta con prefijos '' y '/api' (igual que `include_router`).
+usersRouter.get('/users/me', authMiddleware, handleGetMe)
+usersRouter.get('/me', authMiddleware, handleGetMe)
 
 function buildUpdateHandler() {
   return async (req: AuthRequest, res: import('express').Response) => {
@@ -121,8 +126,11 @@ function buildUpdateHandler() {
   }
 }
 
-usersRouter.put('/me', authMiddleware, buildUpdateHandler())
-usersRouter.patch('/me', authMiddleware, buildUpdateHandler())
+// PUT `/users/me` (canónica) + alias `/me`; PATCH solo sobre `/me` (paridad FastAPI).
+const updateHandler = buildUpdateHandler()
+usersRouter.put('/users/me', authMiddleware, updateHandler)
+usersRouter.put('/me', authMiddleware, updateHandler)
+usersRouter.patch('/me', authMiddleware, updateHandler)
 
 async function handleChangePassword(req: AuthRequest, res: import('express').Response) {
   const userId = req.user!.id
@@ -146,5 +154,6 @@ async function handleChangePassword(req: AuthRequest, res: import('express').Res
   }
 }
 
+usersRouter.post('/users/me/change-password', authMiddleware, handleChangePassword)
 usersRouter.post('/me/change-password', authMiddleware, handleChangePassword)
 usersRouter.put('/me/password', authMiddleware, handleChangePassword)

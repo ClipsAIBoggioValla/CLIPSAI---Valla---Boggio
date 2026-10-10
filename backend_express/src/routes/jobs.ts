@@ -2,6 +2,74 @@ import { Router } from 'express'
 import { pool } from '../db/index.js'
 import { authMiddleware, type AuthRequest } from '../middleware/auth.js'
 
+export async function runJob(jobId: string): Promise<void> {
+  // Esta función se usa internamente y también se exporta para uso en videos.ts (sample)
+  const client = await pool.connect()
+  try {
+    await client.query("UPDATE jobs SET status = 'processing', updated_at = NOW() WHERE id = $1", [jobId])
+    const jobRes = await client.query('SELECT video_id FROM jobs WHERE id = $1', [jobId])
+    if (jobRes.rows.length === 0) return
+    const videoId = jobRes.rows[0].video_id as string
+    const videoRes = await client.query('SELECT file_path, transcription_filepath, transcript FROM videos WHERE id = $1', [videoId])
+    if (videoRes.rows.length === 0) throw new Error('Video asociado no encontrado')
+    const video = videoRes.rows[0] as Record<string, unknown>
+    const videoPath = video.file_path as string
+    const transcriptionPath = (video.transcription_filepath as string) || ''
+
+    // Modo 100% real — sin fallback, error se propaga a FAILED
+    const result: Record<string, unknown> = await runClipEngine(videoPath, transcriptionPath)
+
+    let clipsPayload: Record<string, unknown>[] = Array.isArray((result as Record<string, unknown>).clips)
+      ? ((result as Record<string, unknown>).clips as Record<string, unknown>[])
+      : Array.isArray(result)
+        ? (result as unknown as Record<string, unknown>[])
+        : []
+
+    if (clipsPayload.length === 0) {
+      throw new Error('El engine real no devolvió clips (0 clips) — verificar transcripción y LLM (modo 100% real, sin fallback)')
+    }
+
+    const fresh = await client.query('SELECT id FROM jobs WHERE id = $1', [jobId])
+    if (fresh.rows.length === 0) return
+
+    await client.query('UPDATE jobs SET result_metadata = $1::jsonb, status = $2, error_message = NULL, updated_at = NOW() WHERE id = $3', [
+      JSON.stringify(result),
+      'completed',
+      jobId,
+    ])
+
+    for (const item of clipsPayload) {
+      if (typeof item !== 'object' || item === null) continue
+      const title = (item.title as string) || (item.titulo as string) || (item.titulo_sugerido as string) || 'Clip'
+      const startRaw = (item.start_time as unknown) ?? (item.inicio as unknown) ?? 0
+      const endRaw = (item.end_time as unknown) ?? (item.fin as unknown) ?? 10
+      let start = parseTimeToSeconds(startRaw)
+      let end = parseTimeToSeconds(endRaw)
+      if (end <= start) end = start + 30
+      const score = item.score !== undefined && item.score !== null ? Number(item.score) : null
+      const tags = Array.isArray(item.tags) ? item.tags : item.tags ? [String(item.tags)] : null
+      const storage = (item.storage_path as string) || (item.file_path as string) || ''
+      await client.query(
+        'INSERT INTO clips (video_id, job_id, title, start_time, end_time, score, tags, file_path, status) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9)',
+        [videoId, jobId, String(title).slice(0, 255), start, end, score, tags ? JSON.stringify(tags) : null, storage, 'ready']
+      )
+    }
+    console.log(`[jobs:express] job ${jobId} completado 100% real ${clipsPayload.length} clips`)
+  } catch (err: unknown) {
+    const stack = err instanceof Error ? err.stack ?? '' : ''
+    console.error(`[jobs:express] fallo irrecuperable job=${jobId} — modo 100% real sin fallback`, err, stack ? `\nStack: ${stack}` : '')
+    let rawMsg = err instanceof Error ? String(err.message).trim() : String(err).trim()
+    if (!rawMsg || rawMsg === '4' || rawMsg.match(/^exit code/i)) {
+      rawMsg = err instanceof Error && err.stack ? err.stack.slice(0, 1500) : 'Error desconocido (exit code 4 / signal)'
+    }
+    try {
+      await client.query('UPDATE jobs SET status = $1, error_message = $2, updated_at = NOW() WHERE id = $3', ['failed', rawMsg, jobId])
+    } catch {}
+  } finally {
+    client.release()
+  }
+}
+
 export const jobsRouter = Router()
 
 function isValidUuid(v: string): boolean {
@@ -120,88 +188,6 @@ function buildFallback(_videoId: string, _preview: string): Record<string, unkno
   throw new Error('buildFallback deshabilitado en modo 100% real')
 }
 
-async function runJob(jobId: string): Promise<void> {
-  const client = await pool.connect()
-  try {
-    await client.query("UPDATE jobs SET status = 'processing', updated_at = NOW() WHERE id = $1", [jobId])
-    const jobRes = await client.query('SELECT video_id FROM jobs WHERE id = $1', [jobId])
-    if (jobRes.rows.length === 0) return
-    const videoId = jobRes.rows[0].video_id as string
-    const videoRes = await client.query('SELECT file_path, transcription_filepath, transcript FROM videos WHERE id = $1', [videoId])
-    if (videoRes.rows.length === 0) throw new Error('Video asociado no encontrado')
-    const video = videoRes.rows[0] as Record<string, unknown>
-    const videoPath = video.file_path as string
-    const transcriptionPath = (video.transcription_filepath as string) || ''
-
-    // Modo 100% real — sin fallback, error se propaga a FAILED
-    const result: Record<string, unknown> = await runClipEngine(videoPath, transcriptionPath)
-
-    let clipsPayload: Record<string, unknown>[] = Array.isArray((result as Record<string, unknown>).clips)
-      ? ((result as Record<string, unknown>).clips as Record<string, unknown>[])
-      : Array.isArray(result)
-        ? (result as unknown as Record<string, unknown>[])
-        : []
-
-    if (clipsPayload.length === 0) {
-      throw new Error('El engine real no devolvió clips (0 clips) — verificar transcripción y LLM (modo 100% real, sin fallback)')
-    }
-
-    const fresh = await client.query('SELECT id FROM jobs WHERE id = $1', [jobId])
-    if (fresh.rows.length === 0) return
-
-    await client.query('UPDATE jobs SET result_metadata = $1::jsonb, status = $2, error_message = NULL, updated_at = NOW() WHERE id = $3', [
-      JSON.stringify(result),
-      'completed',
-      jobId,
-    ])
-
-    for (const item of clipsPayload) {
-      if (typeof item !== 'object' || item === null) continue
-      const title = (item.title as string) || (item.titulo as string) || (item.titulo_sugerido as string) || 'Clip'
-      const startRaw = (item.start_time as unknown) ?? (item.inicio as unknown) ?? 0
-      const endRaw = (item.end_time as unknown) ?? (item.fin as unknown) ?? 10
-      let start = parseTimeToSeconds(startRaw)
-      let end = parseTimeToSeconds(endRaw)
-      if (end <= start) end = start + 30
-      const score = item.score !== undefined && item.score !== null ? Number(item.score) : null
-      const tags = Array.isArray(item.tags) ? item.tags : item.tags ? [String(item.tags)] : null
-      const storage = (item.storage_path as string) || (item.file_path as string) || ''
-      await client.query(
-        'INSERT INTO clips (video_id, job_id, title, start_time, end_time, score, tags, file_path, status) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9)',
-        [videoId, jobId, String(title).slice(0, 255), start, end, score, tags ? JSON.stringify(tags) : null, storage, 'ready']
-      )
-    }
-    console.log(`[jobs:express] job ${jobId} completado 100% real ${clipsPayload.length} clips`)
-  } catch (err: unknown) {
-    // FIX: Capturar e imprimir Traceback completo en lugar de solo str(err) == "4"
-    const stack = err instanceof Error ? err.stack ?? '' : ''
-    console.error(`[jobs:express] fallo irrecuperable job=${jobId} — modo 100% real sin fallback`, err, stack ? `\nStack: ${stack}` : '')
-    let rawMsg = err instanceof Error ? String(err.message).trim() : String(err).trim()
-    let descriptive = rawMsg
-    if (!rawMsg || rawMsg === '4' || rawMsg.length <= 4) {
-      descriptive = `${err instanceof Error ? err.name : 'Error'}: ${rawMsg || 'error sin mensaje'} — Fallo en pipeline Job ${jobId}. Posibles causas: segments vacío (Whisper sin audio), filepath no existe, o FFmpeg args inválidos. Stack: ${stack.slice(0,1500)}`
-    } else {
-      descriptive = `${err instanceof Error ? err.name + ': ' : ''}${rawMsg}${stack ? `\n${stack.slice(0,1200)}` : ''}`
-    }
-    if (stack.includes('segments') && (stack.includes('RangeError') || stack.includes('index') || rawMsg.includes('index'))) {
-      descriptive = `No se detectaron segmentos de audio suficientes en el video — Whisper devolvió lista vacía. Job ${jobId}: ${rawMsg}${stack ? `\n${stack.slice(0,1200)}` : ''}`
-    }
-    // Validación de arrays vacíos: mensaje descriptivo si clips vacíos
-    if (rawMsg.includes('0 clips') || rawMsg.includes('no devolvió clips')) {
-      descriptive = `No se detectaron segmentos de audio suficientes en el video — engine devolvió 0 clips. Job ${jobId}: verificar transcripción y audio. ${rawMsg}`
-    }
-    try {
-      const tbMeta = JSON.stringify({ error: descriptive.slice(0,2000), error_type: err instanceof Error ? err.name : 'Unknown', traceback: stack.slice(0,3000), engine: 'real', failed: true })
-      await pool.query("UPDATE jobs SET status = 'failed', error_message = $1, result_metadata = $2::jsonb, updated_at = NOW() WHERE id = $3", [descriptive.slice(0, 2000), tbMeta, jobId])
-      console.info(`[jobs:express] job ${jobId} marcado FAILED con mensaje descriptivo`)
-    } catch (dbErr) {
-      console.error(`[jobs:express] error al marcar FAILED job=${jobId}`, dbErr)
-    }
-  } finally {
-    client.release()
-  }
-}
-
 jobsRouter.post('/videos/:videoId/jobs', authMiddleware, async (req: AuthRequest, res) => {
   const userId = req.user!.id
   const videoId = String(req.params.videoId)
@@ -261,62 +247,3 @@ jobsRouter.get('/jobs/:jobId', authMiddleware, async (req: AuthRequest, res) => 
   }
 })
 
-jobsRouter.get('/jobs/:jobId/stream', authMiddleware, async (req: AuthRequest, res) => {
-  const userId = req.user!.id
-  const jobId = String(req.params.jobId)
-  if (!isValidUuid(jobId)) return res.status(422).json({ detail: 'job_id debe ser UUID válido' })
-
-  res.setHeader('Content-Type', 'text/event-stream')
-  res.setHeader('Cache-Control', 'no-cache')
-  res.setHeader('Connection', 'keep-alive')
-  res.setHeader('X-Accel-Buffering', 'no')
-  // @ts-ignore
-  if (typeof (res as unknown as { flushHeaders?: () => void }).flushHeaders === 'function') (res as unknown as { flushHeaders: () => void }).flushHeaders()
-
-  const STATUS_MAP: Record<string, { progress: number; status: string; message: string }> = {
-    pending: { progress: 0, status: 'pending', message: 'En cola' },
-    processing: { progress: 55, status: 'scoring', message: 'Procesando con IA' },
-    completed: { progress: 100, status: 'completed', message: 'Completado' },
-    failed: { progress: 100, status: 'failed', message: 'Falló' },
-  }
-
-  let lastStatus: string | null = null
-  const interval = setInterval(async () => {
-    try {
-      const r = await pool.query('SELECT j.status, j.error_message, v.usuario_id FROM jobs j JOIN videos v ON j.video_id = v.id WHERE j.id = $1', [jobId])
-      if (r.rows.length === 0) {
-        res.write(`event: error\ndata: ${JSON.stringify({ detail: 'Job no encontrado' })}\n\n`)
-        clearInterval(interval)
-        res.end()
-        return
-      }
-      const row = r.rows[0] as Record<string, unknown>
-      if (String(row.usuario_id) !== String(userId)) {
-        res.write(`event: error\ndata: ${JSON.stringify({ detail: 'No autorizado' })}\n\n`)
-        clearInterval(interval)
-        res.end()
-        return
-      }
-      const raw = String(row.status)
-      if (raw === lastStatus) return
-      lastStatus = raw
-      const mapped = STATUS_MAP[raw.toLowerCase()] ?? { progress: 0, status: raw, message: raw }
-      const payload: Record<string, unknown> = { progress: mapped.progress, status: mapped.status, message: mapped.message, job_id: jobId }
-      if (row.error_message) payload.error = row.error_message
-      res.write(`data: ${JSON.stringify(payload)}\n\n`)
-      if (raw.toLowerCase() === 'completed' || raw.toLowerCase() === 'failed') {
-        res.write('event: done\ndata: {}\n\n')
-        clearInterval(interval)
-        res.end()
-      }
-    } catch (e) {
-      console.error('SSE stream error', e)
-      clearInterval(interval)
-      res.end()
-    }
-  }, 1000)
-
-  req.on('close', () => {
-    clearInterval(interval)
-  })
-})

@@ -96,6 +96,11 @@ export const videoService = {
     const raws = await http.get<(VideoUploadResponse & { filename?: string; title?: string })[]>('/videos')
     return raws.map(normalizeVideo)
   },
+  /** Issue 34: crear job con video de muestra sin subir archivo. */
+  async createSampleJob(): Promise<JobResponse> {
+    const raw = await http.post<JobResponse & { id?: string; job_id?: string }>('/videos/sample', JSON.stringify({}))
+    return normalizeJob(raw as JobResponse & { id?: string; job_id?: string })
+  },
 }
 
 export const jobService = {

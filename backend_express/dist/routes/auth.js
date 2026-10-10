@@ -24,7 +24,7 @@ function createAccessToken(sub) {
 function isValidEmail(email) {
     return typeof email === 'string' && email.includes('@') && email.length <= 255;
 }
-authRouter.post('/registro', async (req, res) => {
+async function handleRegistro(req, res) {
     const { email, password, full_name, fullName } = req.body;
     const emailStr = typeof email === 'string' ? email.trim() : '';
     const pwdStr = typeof password === 'string' ? password : '';
@@ -51,6 +51,17 @@ authRouter.post('/registro', async (req, res) => {
         console.error('POST /auth/registro error', err);
         return res.status(500).json({ detail: 'Error interno' });
     }
+}
+authRouter.post('/registro', handleRegistro);
+/**
+ * Alias de compatibilidad en raíz — paridad con `_compat_auth` de `main.py`.
+ * FastAPI expone solo `POST /login` y `POST /registro` (sin `/login/form`).
+ */
+export const compatAuthRouter = Router();
+compatAuthRouter.post('/registro', handleRegistro);
+compatAuthRouter.post('/login', async (req, res) => {
+    const { email, password } = req.body;
+    return handleLogin(email, password, res);
 });
 async function handleLogin(emailRaw, pwdRaw, res) {
     const email = typeof emailRaw === 'string' ? emailRaw.trim() : '';
