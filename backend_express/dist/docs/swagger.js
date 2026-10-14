@@ -158,6 +158,36 @@ const swaggerDefinition = {
                     updated_at: { type: 'string', format: 'date-time' },
                 },
             },
+            RetrimRequest: {
+                type: 'object',
+                required: ['start_time', 'end_time'],
+                properties: {
+                    start_time: { type: 'number', minimum: 0, example: 10 },
+                    end_time: { type: 'number', exclusiveMinimum: 5, example: 45, description: 'Debe ser > start_time. Duración resultante entre 5 y 90 segundos.' },
+                },
+            },
+            RetrimResponse: {
+                type: 'object',
+                properties: {
+                    clip_id: { type: 'string', format: 'uuid' },
+                    start_time: { type: 'number' },
+                    end_time: { type: 'number' },
+                    duration: { type: 'number', description: 'end_time - start_time' },
+                    status: { type: 'string' },
+                    file_path: { type: 'string', description: 'Ruta del nuevo archivo generado por FFmpeg' },
+                },
+            },
+            JobStreamEvent: {
+                type: 'object',
+                description: 'Evento SSE emitido en cada cambio de estado del job',
+                properties: {
+                    progress: { type: 'integer', example: 55 },
+                    status: { type: 'string', enum: ['pending', 'scoring', 'completed', 'failed'] },
+                    message: { type: 'string', example: 'Procesando con IA' },
+                    job_id: { type: 'string', format: 'uuid' },
+                    error: { type: 'string', nullable: true, description: 'Presente solo si el job falló' },
+                },
+            },
             StatsSummaryResponse: {
                 type: 'object',
                 properties: {
@@ -422,6 +452,25 @@ const swaggerDefinition = {
                 },
             },
         },
+        '/clips/{clipId}/retrim': {
+            post: {
+                tags: ['clips'],
+                summary: 'Re-trim del clip con FFmpeg',
+                description: 'Recorta el clip a un nuevo rango [start_time, end_time) usando FFmpeg, guarda el archivo generado ' +
+                    'en `storage/retrims/` y actualiza `start_time`, `end_time` y `file_path` del clip. ' +
+                    'La duración resultante debe estar entre 5 y 90 segundos. Ruta provista por `backend/api/routes/retrim.py` ' +
+                    '(`GET /jobs/{jobId}/stream` y esta ruta existen cuando FastAPI puede importar ese paquete).',
+                security: [{ bearerAuth: [] }],
+                parameters: [{ name: 'clipId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+                requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/RetrimRequest' } } } },
+                responses: {
+                    '200': { description: 'Clip re-trimado', content: { 'application/json': { schema: { $ref: '#/components/schemas/RetrimResponse' } } } },
+                    '404': { description: 'Clip no encontrado o video origen no disponible', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+                    '422': { description: 'Rango inválido (end_time <= start_time, duración <5s o >90s)', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+                    '500': { description: 'FFmpeg falló o no produjo archivo', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+                },
+            },
+        },
         '/clips/{clipId}/re-render': {
             post: {
                 tags: ['clips'],
@@ -445,6 +494,24 @@ const swaggerDefinition = {
                 responses: {
                     '202': { description: 'Re-render encolado PROCESSING', content: { 'application/json': { schema: { type: 'object', properties: { detail: { type: 'string' }, clip_id: { type: 'string', format: 'uuid' }, status: { type: 'string', example: 'PROCESSING' } } } } } },
                     '409': { description: 'Clip ya en procesamiento' },
+                },
+            },
+        },
+        '/jobs/{jobId}/stream': {
+            get: {
+                tags: ['jobs'],
+                summary: 'SSE stream del estado de un Job',
+                description: 'Server-Sent Events que emite un evento en cada cambio de estado del job (cada ~1s). ' +
+                    'Cierra con `event: done` al llegar a `completed`/`failed`, o con `event: error` si el job no existe o no pertenece al usuario. ' +
+                    'Requiere un cliente SSE: Swagger UI no puede consumirlo. Ruta provista por `backend/api/routes/stream.py`.',
+                security: [{ bearerAuth: [] }],
+                parameters: [{ name: 'jobId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+                responses: {
+                    '200': {
+                        description: 'Stream SSE de progreso',
+                        content: { 'text/event-stream': { schema: { $ref: '#/components/schemas/JobStreamEvent' } } },
+                    },
+                    '422': { description: 'job_id debe ser UUID válido', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
                 },
             },
         },
