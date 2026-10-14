@@ -30,6 +30,21 @@ apiClient.interceptors.request.use((config) => {
   return config
 })
 
+/**
+ * Política ÚNICA de 401 — estandarizada en React y Vue (Issue 35).
+ *
+ * - `/jobs/*`: polling en segundo plano → reintento silencioso (lo resuelve `useJobPolling`).
+ * - rutas terminadas en `/me`: verificación inicial de sesión → NO se destruye la sesión,
+ *   porque otra pestaña puede estar refrescándola. Es el mismo criterio que documentan los
+ *   stores de auth.
+ * - cualquier otro 401: la sesión dejó de ser válida → limpiar token y volver a `/login`.
+ */
+function shouldRedirectOn401(url: string): boolean {
+  if (url.includes('/jobs/')) return false
+  if (/(^|\/)(users\/)?me\/?$/.test(url)) return false
+  return true
+}
+
 apiClient.interceptors.response.use(
   (res) => res,
   (error) => {
@@ -42,23 +57,17 @@ apiClient.interceptors.response.use(
         detail = data.detail.map((e) => `${e.loc.join('.')}: ${e.msg}`).join(' | ')
       else if (typeof error.response.data === 'string' && error.response.data)
         detail = (error.response.data as string).slice(0, 500)
-      // Para polling de jobs (/jobs/:id) no redirigir ni mostrar alerta intrusiva en 401;
-      // useJobPolling manejará reintento silencioso en segundo plano
-      const url = (error.config?.url ?? '') as string
-      const isJobPolling = url.includes('/jobs/')
-      if ((status === 401 || detail.toLowerCase().includes('not authenticated')) && !isJobPolling) {
+
+      // Política única de 401 (idéntica al cliente de React).
+      if (status === 401 && shouldRedirectOn401(error.config?.url ?? '')) {
         try {
           localStorage.removeItem(TOKEN_KEY)
         } catch {}
-        const path = typeof window !== 'undefined' ? window.location.pathname : ''
-        if (path !== '/login' && path !== '/auth') {
-          import('@/router').then((m) => m.default.push('/login').catch(() => { window.location.href = '/login' })).catch(() => { window.location.href = '/login' })
+        if (typeof window !== 'undefined' && window.location.pathname !== '/login' && window.location.pathname !== '/auth') {
+          window.location.href = '/login'
         }
       }
-      // Para jobs, no limpiar token automáticamente para permitir reintento
-      if (isJobPolling && status === 401) {
-        console.warn('[apiClient] 401 en polling job, sin redirigir, reintento silencioso')
-      }
+
       return Promise.reject(new ApiError(status, detail, data))
     }
     if (error instanceof Error) return Promise.reject(new ApiError(0, error.message))

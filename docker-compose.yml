@@ -62,8 +62,10 @@ services:
   # ----------------------------------------------------------------------------
   backend_fastapi:
     build:
-      context: ./backend_fastapi
-      dockerfile: Dockerfile
+      # Contexto raíz (ver .dockerignore): la imagen necesita `backend/` para montar
+      # los routers opcionales `backend/api/routes/{retrim,stream}.py`.
+      context: .
+      dockerfile: backend_fastapi/Dockerfile
     container_name: clipsai-backend-fastapi
     restart: unless-stopped
     env_file:

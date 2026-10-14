@@ -15,12 +15,19 @@ RUN apt-get update \
     && ffprobe -version \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt ./
+COPY backend_fastapi/requirements.txt ./
 RUN pip install -r requirements.txt
 RUN python -c "from faster_whisper import WhisperModel; WhisperModel('deepdml/faster-whisper-large-v3-turbo-ct2', device='cpu', compute_type='int8')"
 RUN chmod -R a+rX /tmp/huggingface_cache
 
-COPY app ./app
+COPY backend_fastapi/app ./app
+# Paquete `backend/` (worker RunPod): `app/main.py` importa condicionalmente
+# `backend.api.routes.retrim` y `backend.api.routes.stream`.
+COPY backend ./backend
+# Alias `backend_fastapi.*` -> `app.*` para que esos routers resuelvan sus imports
+# dentro de la imagen. Sin esto la superficie de la API dependía del layout
+# (60 rutas en Docker vs 62 desde la raíz del repo).
+COPY backend_fastapi/docker-sitecustomize.py /usr/local/lib/python3.11/site-packages/sitecustomize.py
 
 # Storage persistente para clips renderizados (ASS + Hook) — Issue #29
 RUN mkdir -p /app/storage/clips /app/storage/uploads \

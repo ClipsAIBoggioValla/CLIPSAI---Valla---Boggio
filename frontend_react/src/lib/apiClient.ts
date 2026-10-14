@@ -43,6 +43,33 @@ async function parseError(res: Response): Promise<ApiError> {
   return new ApiError(res.status, detail, raw)
 }
 
+/**
+ * Política ÚNICA de 401 — estandarizada en React y Vue (Issue 35).
+ *
+ * - `/jobs/*`: polling en segundo plano → reintento silencioso (lo resuelve `useJobPolling`).
+ * - rutas terminadas en `/me`: verificación inicial de sesión → NO se destruye la sesión,
+ *   porque otra pestaña puede estar refrescándola. Es el mismo criterio que documentan los
+ *   stores de auth.
+ * - cualquier otro 401: la sesión dejó de ser válida → limpiar token y volver a `/login`.
+ */
+function shouldRedirectOn401(path: string): boolean {
+  if (path.includes('/jobs/')) return false
+  if (/(^|\/)(users\/)?me\/?$/.test(path)) return false
+  return true
+}
+
+function handleUnauthorized(path: string): void {
+  if (!shouldRedirectOn401(path)) return
+  try {
+    localStorage.removeItem(TOKEN_KEY)
+  } catch {
+    /* ignore */
+  }
+  if (typeof window !== 'undefined' && window.location.pathname !== '/login' && window.location.pathname !== '/auth') {
+    window.location.href = '/login'
+  }
+}
+
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
   body?: BodyInit | null
@@ -79,7 +106,11 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
   } finally {
     if (timeoutId !== undefined) window.clearTimeout(timeoutId)
   }
-  if (!res.ok) throw await parseError(res)
+  if (!res.ok) {
+    const apiError = await parseError(res)
+    if (res.status === 401) handleUnauthorized(path)
+    throw apiError
+  }
   if (res.status === 204) return undefined as unknown as T
   const text = await res.text()
   if (!text) return undefined as unknown as T
