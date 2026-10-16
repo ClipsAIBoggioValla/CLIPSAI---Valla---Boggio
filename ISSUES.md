@@ -158,10 +158,13 @@ npm run audit:parity    → FastAPI 60 | Express 62 | Documentadas 56 → PARIDA
   `POST/GET /clips/{id}/subtitles`, `GET /auth/social/status` (+ 8 endpoints OAuth2 más).
 - Bugs de paridad corregidos: `isValidUuid` de `publish.ts` tenía un regex mal formado (rechazaba UUIDs
   válidos); `PATCH /clips/{id}` validaba el body antes de comprobar existencia (400 en vez de 404).
-- Rutas eliminadas por no existir en FastAPI (`retrim_router`/`stream_router` son `None`, el módulo
-  `backend/api/routes` no existe): `GET /jobs/{id}/stream`, `GET /clips/{id}/stream`,
-  `POST /clips/{id}/retrim`, `POST /login/form` raíz, `PATCH /users/me`, `PATCH /api/users/me`,
-  `PUT /users/me/password`, `PUT /api/users/me/password`. Ahora devuelven 404 como FastAPI.
+- Rutas que la auditoría inicial marcó como "extra" en Express y que **sí existen en FastAPI**
+  (`retrim`/`stream` se importan condicionalmente desde `backend/api/routes`, que vive en la raíz
+  del repo — ver *Issue 35 bis*). Al hacer determinista la superficie de FastAPI en Docker, esas
+  rutas se **restauraron** en Express. Se eliminaron solo las que FastAPI no tiene en ningún layout:
+  `GET /clips/{id}/stream` (alias 307 que solo existía en Express; los frontends usan
+  `/clips/{id}/publish-stream`), `POST /login/form` raíz, `PATCH /users/me`, `PATCH /api/users/me`,
+  `PUT /users/me/password`, `PUT /api/users/me/password`.
 - `usersRouter` se monta solo con prefijos `''` y `/api` (igual que `include_router`), declarando rutas
   canónicas `/users/me*` + alias `/me*`.
 - Docs alineados: Express ahora sirve `/docs`, `/docs/oauth2-redirect`, `/redoc`, `/openapi.json`
@@ -523,16 +526,72 @@ node -e "import('./dist/docs/swagger.js').then(m=>console.log(Object.keys(m.swag
 
 ---
 
-### Issue 35 — Refactorización y Limpieza de Deuda Técnica en UI — ⏳ Pendiente (#55)
+### Issue 35 — Refactorización y Limpieza de Deuda Técnica en UI — ✅ Completado (#55)
 
 **Descripción:** Eliminar duplicados `LibraryPage==ClipLibraryPage` (4 ficheros), `axios` muerto en React, `useUploadAndProcess` muerto, `passlib[bcrypt]` muerto, `recharts` vs CSS barras, `any` en `Clip.tags`.
 
-**Archivos:** `frontend_react/src/pages/LibraryPage.tsx` (eliminar), `frontend_vue/src/views/LibraryView.vue` (eliminar), `backend_fastapi/requirements.txt`, `backend_fastapi/app/models/clip.py` `tags: dict`.
+**Alcance extra (pedido por el usuario):** estandarizar el manejo de errores en las llamadas a la API.
+
+**Archivos:**
+- Eliminados: `frontend_react/src/pages/LibraryPage.tsx` (muerto, ninguna ruta lo importaba), `frontend_vue/src/views/LibraryView.vue` (duplicado de `ClipLibraryView.vue`, ruta `/library` sin ningún enlace), `frontend_react/src/pages/settings/IntegrationsSettings.tsx` (duplicado de `IntegrationsPage.tsx`, reimplementaba `apiGet`/`apiDelete` con `let http: any = null`), `frontend_react/src/hooks/useUploadAndProcess.ts` (muerto).
+- Modificados: `frontend_react/package.json` (+ `package-lock.json`), `frontend_react/src/pages/DashboardPage.tsx`, `frontend_react/src/lib/apiClient.ts`, `frontend_vue/src/api/client.ts`, `frontend_react/src/App.tsx`, `frontend_vue/src/router/index.ts`, `frontend_vue/src/components/Navbar.vue`, `backend_fastapi/app/models/clip.py`.
 
 **Criterios:**
-- [ ] `git grep -r "LibraryPage"` solo 2 archivos (no 4)
-- [ ] `npm run typecheck` + `npm run build` ambos frontends verde
-- [ ] `pytest -q` + `tsc --noEmit` verde
+- [x] `git grep -rl "LibraryPage"` → **2 archivos** (`App.tsx`, `ClipLibraryPage.tsx`); antes 4.
+- [x] `npm run typecheck` + `npm run build` verde en **ambos** frontends (React 313 kB / Vue 174 kB).
+- [x] `tsc --noEmit` verde (backend Express + FastAPI compila).
+- [x] `pytest -q`: la suite `backend_fastapi/tests/test_e2e_pipeline.py` (3 tests, mock `FakeS3Client`) pasa con la imagen desplegada:
+  ```
+  docker run --rm -v "$(pwd):/repo:ro" -w /repo \
+    -e DATABASE_URL="postgresql+psycopg2://clipsai:clipsai@db:5432/clipsai" \
+    clipsai---valla---boggio-backend_fastapi:latest \
+    sh -c "pip install -q pytest httpx && python -m pytest -q backend_fastapi/tests/"
+  # 3 passed
+  ```
+  `pytest` no estaba en `requirements.txt` original; se instala efímeramente en el contenedor (no se modificó la imagen).
+
+**Realizado:**
+- **Dependencias muertas:** desinstalado `axios` y `recharts` de React (`-682` líneas del lockfile). `recharts` se reemplazó por **barras CSS idénticas a las de Vue** en `DashboardPage.tsx` (distribución por plataforma/score + actividad reciente), eliminando la divergencia visual y el bundle de ~400 kB.
+- **Manejo de errores estandarizado:** `apiClient.ts` (React) y `api/client.ts` (Vue) comparten la **misma política** de fallo de sesión, con el mismo comentario y la misma lógica:
+  - `/jobs/*` → reintento silencioso (lo resuelve `useJobPolling`).
+  - rutas terminadas en `/me` → no se destruye la sesión (otra pestaña puede refrescarla).
+  - cualquier otro fallo de sesión → limpiar token + volver a `/login`.
+  - Se aceptan **401 y 403 "Not authenticated"** porque FastAPI devuelve 403 al faltar el header (OAuth2 `auto_error=True`) y Express 401. Verificado con tabla de equivalencia (14 rutas × 2 clientes).
+- **`Clip.tags`:** el modelo decía `Mapped[list[Any] | None]`, pero `jobs.py` guarda un **dict** (`base_tags` con `has_ass`/`has_hook`/`hook`/`ass`/`_render`) y solo guarda una lista cuando no hay metadata. Corregido a `Mapped[dict[str, Any] | list[Any] | None]`, alineado con `app/schemas/clip.py:83`. **Solo tipado: la columna JSONB no cambia (sin migración).** `_clip_has_ass`/`_clip_has_hook` y el PATCH de re-render de `clips.py` ya hacían `isinstance(tags, dict)`.
+- **`passlib[bcrypt]`:** ya estaba ausente de `requirements.txt` (`bcrypt==4.1.2` y `security/hashing.py` documenta evitar passlib). Sin cambios.
+- **`__pycache__`/`*.pyc`:** ya estaban en `.gitignore`. Sin cambios.
+- **Paridad de backends preservada:** la superficie FastAPI ↔ Express se mantuvo en **1:1** (`npm run audit:parity` → 62 rutas, 0 diferencias). Ver *Issue 6* para el detalle de `retrim`/`stream`.
+
+**Evidencias:**
+```
+cd frontend_react && npm run typecheck && npm run build   # EXIT 0
+cd frontend_vue  && npm run typecheck && npm run build    # EXIT 0
+cd backend_express && npm run audit                       # spec 58=58 · paridad FastAPI 62 = Express 64 ✓
+git grep -rl "LibraryPage" -- 'frontend_react/*'          # 2 archivos
+```
+- React bundle: `dist/assets/index-*.js` 313 kB (antes recharts ~700 kB).
+- Vue: sin cambios de dependencias (su `axios` sí está en uso).
+
+---
+
+### Issue 35 bis — Paridad determinista de FastAPI en Docker — ✅ Completado
+
+**Problema descubierto durante la Issue 35:** `app/main.py` importa condicionalmente `backend.api.routes.retrim` y `.stream` (`try/except → None`). Ese import solo resolvía desde la raíz del repo, por lo que **la superficie de FastAPI dependía del layout**: 62 rutas desde la raíz vs 60 en Docker (`backend/` no se copiaba en la imagen y `backend_fastapi.app.*` no era importable).
+
+**Solución:** paridad **determinista en ambos layouts**.
+- `backend_fastapi/docker-sitecustomize.py` → instalado como `sitecustomize.py` (auto-importado por `site`): meta-path finder que reenvía `backend_fastapi.*` a `app.*` **reutilizando los mismos objetos módulo** (sin duplicar el registry de SQLAlchemy ni crear un segundo engine).
+- `backend_fastapi/Dockerfile` → `COPY backend ./backend` + el sitecustomize.
+- `.dockerignore` en la raíz (contexto de build de FastAPI pasa a ser `.`) manteniendo el contexto liviano (excluye `node_modules`, frontends, `storage`, media).
+- `docker-compose.yml` → `backend_fastapi.build.context: .`.
+
+**Evidencias:**
+```
+docker run --rm <imagen> python -c "from app.main import app; ..."   # 78 operaciones, incluye retrim + stream
+docker run --rm -v .:/repo:ro <imagen> ...                           # 78 operaciones (raíz del repo)
+POST /clips/{id}/retrim        -> FastAPI 403 / Express 401 (ruta presente en ambos)
+GET  /jobs/{id}/stream         -> FastAPI 403 / Express 401 (ruta presente en ambos)
+```
+- Corregido en el proceso un bug real: la anotación `Mapped[list[Any] | None]` de `Clip.tags` contradecía los datos (ver Issue 35).
 
 ---
 

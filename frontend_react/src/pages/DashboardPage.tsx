@@ -1,6 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, Cell, Legend } from 'recharts'
 import { metricsService, statsService } from '@/services/api'
 import type { MetricsResponse, StatsSummary } from '@/types/api'
 import { ApiError } from '@/types/api'
@@ -73,11 +72,10 @@ export default function DashboardPage() {
     return () => window.clearTimeout(t)
   }, [loading])
 
-  const scoreChartData = stats?.score_distribution.map((d) => ({
-    name: d.label,
-    range: d.range,
-    count: d.count,
-  }))
+  // Barras CSS (paridad con Vue) — sin dependencia de gráficos.
+  const maxCount = stats
+    ? Math.max(1, ...stats.score_distribution.map((d) => d.count))
+    : 1
 
   const barColors: Record<string, string> = {
     Bajo: '#ef4444',
@@ -85,27 +83,25 @@ export default function DashboardPage() {
     Alto: '#10b981',
   }
 
-  const platformData = metrics
-    ? Object.entries(metrics.platform_distribution).map(([platform, count]) => ({
-        platform: platform.charAt(0).toUpperCase() + platform.slice(1),
-        count,
-      }))
+  const platformEntries: { platform: string; count: number }[] = metrics
+    ? Object.entries(metrics.platform_distribution).map(([platform, count]) => ({ platform, count }))
     : []
 
-  const hasPlatformData = platformData.some((d) => d.count > 0)
-
   const platformColors: Record<string, string> = {
-    Tiktok: '#EC4899',
-    Youtube: '#EF4444',
-    Instagram: '#8B5CF6',
+    tiktok: '#EC4899',
+    youtube: '#EF4444',
+    instagram: '#8B5CF6',
   }
 
-  const recentData = metrics?.recent_activity.map((d) => ({
-    date: d.date.slice(5),
-    jobs: d.jobs,
-    clips: d.clips,
-    minutos: d.minutes_processed,
-  }))
+  const hasPlatformData = platformEntries.some((d) => d.count > 0)
+
+  const maxPlatform = platformEntries.length
+    ? Math.max(1, ...platformEntries.map((e) => e.count))
+    : 1
+
+  const maxRecent = metrics
+    ? Math.max(1, ...metrics.recent_activity.map((d) => Math.max(d.jobs, d.clips, d.minutes_processed)))
+    : 1
 
   const isEmpty = metrics && metrics.total_jobs === 0 && metrics.total_clips === 0
 
@@ -250,61 +246,60 @@ export default function DashboardPage() {
                 <p className="text-xs mt-1" style={{ color: '#d1d5db' }}>
                   {hasPlatformData ? 'Clips agrupados por red social objetivo' : 'Conteo de clips agrupados por rango de viralidad'}
                 </p>
-                <div className="h-[280px] mt-6">
-                  <ResponsiveContainer width="100%" height="100%">
-                    {hasPlatformData ? (
-                      <BarChart data={platformData} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                        <XAxis dataKey="platform" stroke="#e5e7eb" fontSize={12} tickLine={false} axisLine={false} />
-                        <YAxis stroke="#e5e7eb" fontSize={12} tickLine={false} axisLine={false} allowDecimals={false} />
-                        <Tooltip
-                          contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #4b5563', borderRadius: '12px' }}
-                          labelStyle={{ color: '#f9fafb', fontWeight: 600 }}
-                          itemStyle={{ color: '#f3f4f6' }}
-                        />
-                        <Legend wrapperStyle={{ fontSize: '12px', color: '#e5e7eb' }} />
-                        <Bar dataKey="count" name="Clips" radius={[8, 8, 0, 0]} barSize={48}>
-                          {platformData.map((entry, idx) => (
-                            <Cell key={`cell-${idx}`} fill={platformColors[entry.platform] ?? '#6366f1'} />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    ) : (
-                      <BarChart data={scoreChartData} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                        <XAxis dataKey="name" stroke="#e5e7eb" fontSize={12} tickLine={false} axisLine={false} />
-                        <YAxis stroke="#e5e7eb" fontSize={12} tickLine={false} axisLine={false} allowDecimals={false} />
-                        <Tooltip
-                          contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #4b5563', borderRadius: '12px' }}
-                          labelStyle={{ color: '#f9fafb', fontWeight: 600 }}
-                          itemStyle={{ color: '#f3f4f6' }}
-                          formatter={(value, _name, item) => {
-                            const range = (item as unknown as { payload: { range: string } }).payload?.range ?? ''
-                            return [`${value ?? 0} clips`, `Rango ${range}`]
-                          }}
-                        />
-                        <Bar dataKey="count" radius={[8, 8, 0, 0]} barSize={48}>
-                          {scoreChartData?.map((entry, idx) => (
-                            <Cell key={`cell-${idx}`} fill={barColors[entry.name] ?? '#6366f1'} />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    )}
-                  </ResponsiveContainer>
+                <div className="mt-6">
+                  {hasPlatformData ? (
+                    <div className="space-y-4">
+                      {platformEntries.map((entry) => (
+                        <div key={entry.platform} className="space-y-1.5">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="font-medium capitalize" style={{ color: platformColors[entry.platform] ?? '#9ca3af' }}>{entry.platform}</span>
+                            <span className="text-gray-400 font-mono">{entry.count} clips</span>
+                          </div>
+                          <div className="h-8 bg-[rgba(255,255,255,0.06)] rounded-full overflow-hidden p-1 border border-[rgba(255,255,255,0.04)]">
+                            <div
+                              className="h-full rounded-full transition-all duration-700 flex items-center justify-end pr-2"
+                              style={{ width: `${(entry.count / maxPlatform) * 100}%`, backgroundColor: platformColors[entry.platform] ?? '#6366f1', minWidth: entry.count > 0 ? '32px' : '0' }}
+                            >
+                              {entry.count > 0 && <span className="text-[11px] font-bold text-white">{entry.count}</span>}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="space-y-4">
+                        {(stats?.score_distribution ?? []).map((item) => (
+                          <div key={item.range} className="space-y-1.5">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="font-medium" style={{ color: barColors[item.label] ?? '#9ca3af' }}>{item.label} ({item.range})</span>
+                              <span className="text-[#94A3B8] font-mono">{item.count} clips</span>
+                            </div>
+                            <div className="h-8 bg-[rgba(255,255,255,0.06)] rounded-full overflow-hidden p-1 border border-[rgba(255,255,255,0.04)]">
+                              <div
+                                className="h-full rounded-full transition-all duration-700 flex items-center justify-end pr-2"
+                                style={{ width: `${(item.count / maxCount) * 100}%`, backgroundColor: barColors[item.label] ?? '#6366f1', minWidth: item.count > 0 ? '32px' : '0' }}
+                              >
+                                {item.count > 0 && <span className="text-[11px] font-bold text-white">{item.count}</span>}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="flex items-center justify-center gap-4 mt-6">
+                        <span className="inline-flex items-center gap-1.5 text-xs text-gray-400">
+                          <span className="h-2.5 w-2.5 rounded-full" style={{ background: '#ef4444' }} /> 0-40 Bajo
+                        </span>
+                        <span className="inline-flex items-center gap-1.5 text-xs text-gray-400">
+                          <span className="h-2.5 w-2.5 rounded-full" style={{ background: '#f59e0b' }} /> 41-70 Medio
+                        </span>
+                        <span className="inline-flex items-center gap-1.5 text-xs text-gray-400">
+                          <span className="h-2.5 w-2.5 rounded-full" style={{ background: '#10b981' }} /> 71-100 Alto
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 </div>
-                {!hasPlatformData && (
-                  <div className="flex items-center justify-center gap-4 mt-2">
-                    <span className="inline-flex items-center gap-1.5 text-xs text-gray-400">
-                      <span className="h-2.5 w-2.5 rounded-full bg-red-500" /> 0-40 Bajo
-                    </span>
-                    <span className="inline-flex items-center gap-1.5 text-xs text-gray-400">
-                      <span className="h-2.5 w-2.5 rounded-full bg-amber-500" /> 41-70 Medio
-                    </span>
-                    <span className="inline-flex items-center gap-1.5 text-xs text-gray-400">
-                      <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> 71-100 Alto
-                    </span>
-                  </div>
-                )}
               </div>
 
               <div className={chartCardClass}>
@@ -312,23 +307,49 @@ export default function DashboardPage() {
                 <p className="text-xs mt-1" style={{ color: '#d1d5db' }}>
                   Últimos 7 días · jobs, clips y minutos procesados
                 </p>
-                <div className="h-[280px] mt-6">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={recentData} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                      <XAxis dataKey="date" stroke="#e5e7eb" fontSize={11} tickLine={false} axisLine={false} />
-                      <YAxis stroke="#e5e7eb" fontSize={12} tickLine={false} axisLine={false} allowDecimals={false} />
-                      <Tooltip
-                        contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #4b5563', borderRadius: '12px' }}
-                        labelStyle={{ color: '#f9fafb', fontWeight: 600 }}
-                        itemStyle={{ color: '#f3f4f6' }}
-                      />
-                      <Legend wrapperStyle={{ fontSize: '11px', color: '#e5e7eb' }} />
-                      <Bar dataKey="jobs" name="Jobs" fill="#8b5cf6" radius={[6, 6, 0, 0]} barSize={14} />
-                      <Bar dataKey="clips" name="Clips" fill="#10b981" radius={[6, 6, 0, 0]} barSize={14} />
-                      <Bar dataKey="minutos" name="Minutos" fill="#f59e0b" radius={[6, 6, 0, 0]} barSize={14} />
-                    </BarChart>
-                  </ResponsiveContainer>
+                <div className="mt-6 space-y-3">
+                  {metrics.recent_activity.map((day) => (
+                    <div key={day.date} className="space-y-1.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-mono text-gray-400">{day.date.slice(5)}</span>
+                        <span className="text-gray-500">{day.jobs} jobs · {day.clips} clips · {day.minutes_processed} min</span>
+                      </div>
+                      <div className="h-8 bg-[rgba(255,255,255,0.06)] rounded-full overflow-hidden p-1 flex gap-1 border border-[rgba(255,255,255,0.04)]">
+                        <div
+                          className="h-full rounded-full bg-violet-500 transition-all flex items-center justify-center"
+                          style={{ width: `${(day.jobs / maxRecent) * 40}%`, minWidth: day.jobs > 0 ? '24px' : '0' }}
+                          title={`${day.jobs} jobs`}
+                        >
+                          {day.jobs > 0 && <span className="text-[10px] font-bold text-white">{day.jobs}</span>}
+                        </div>
+                        <div
+                          className="h-full rounded-full bg-emerald-500 transition-all flex items-center justify-center"
+                          style={{ width: `${(day.clips / maxRecent) * 40}%`, minWidth: day.clips > 0 ? '24px' : '0' }}
+                          title={`${day.clips} clips`}
+                        >
+                          {day.clips > 0 && <span className="text-[10px] font-bold text-white">{day.clips}</span>}
+                        </div>
+                        <div
+                          className="h-full rounded-full bg-amber-500 transition-all flex items-center justify-center"
+                          style={{ width: `${(day.minutes_processed / maxRecent) * 20}%`, minWidth: day.minutes_processed > 0 ? '24px' : '0' }}
+                          title={`${day.minutes_processed} min`}
+                        >
+                          {day.minutes_processed > 0 && <span className="text-[10px] font-bold text-white">{day.minutes_processed}</span>}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex items-center justify-center gap-4 mt-6">
+                  <span className="inline-flex items-center gap-1.5 text-xs text-gray-400">
+                    <span className="h-2.5 w-2.5 rounded-full bg-violet-500" /> Jobs
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 text-xs text-gray-400">
+                    <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> Clips
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 text-xs text-gray-400">
+                    <span className="h-2.5 w-2.5 rounded-full bg-amber-500" /> Min
+                  </span>
                 </div>
               </div>
             </div>

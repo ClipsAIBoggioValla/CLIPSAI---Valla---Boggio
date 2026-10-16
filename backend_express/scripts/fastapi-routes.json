@@ -258,6 +258,12 @@
   ]
  },
  {
+  "path": "/clips/{clip_id}/retrim",
+  "methods": [
+   "POST"
+  ]
+ },
+ {
   "path": "/clips/{clip_id}/subtitles",
   "methods": [
    "POST"
@@ -295,6 +301,12 @@
  },
  {
   "path": "/jobs/{job_id}/export",
+  "methods": [
+   "GET"
+  ]
+ },
+ {
+  "path": "/jobs/{job_id}/stream",
   "methods": [
    "GET"
   ]

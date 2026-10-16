@@ -49,7 +49,12 @@ class Clip(Base):
 
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
 
-    tags: Mapped[list[Any] | None] = mapped_column(JSONB, nullable=True)
+    # Metadata del clip. En la práctica es un dict (base_tags: has_ass/has_hook/hook/ass/
+    # _render); solo queda como lista (tags crudas del engine) cuando no hay metadata, o
+    # None. El modelo histórico decia `list[Any]`, lo que obligaba a todos los consumidores
+    # a defenderse con isinstance(...). La anotacion ahora refleja la forma real y coincide
+    # con `app/schemas/clip.py`. Es solo tipado: la columna JSONB no cambia (sin migracion).
+    tags: Mapped[dict[str, Any] | list[Any] | None] = mapped_column(JSONB, nullable=True)
 
     storage_path: Mapped[str | None] = mapped_column(
         "file_path",

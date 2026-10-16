@@ -1,0 +1,38 @@
+# Contexto de build de `backend_fastapi` (ver docker-compose.yml: context: .).
+# Excluye todo lo que la imagen no necesita para mantener el contexto liviano.
+node_modules
+**/node_modules
+.git
+.github
+.vscode
+.idea
+
+# Frontends y otros backends
+frontend_react
+frontend_vue
+backend_express
+spark-admin-1.0.0
+
+# Artefactos de build y caches
+dist
+**/dist
+**/__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.mypy_cache
+
+# Storage local y media pesada
+storage
+*.mp4
+*.wav
+*.mp3
+
+# Documentación y scripts auxiliares
+scripts
+*.md
+!backend_fastapi/README.md
+
+# Variables de entorno
+.env
+.env.*
