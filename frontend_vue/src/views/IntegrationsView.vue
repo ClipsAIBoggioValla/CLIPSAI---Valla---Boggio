@@ -28,7 +28,6 @@ async function fetchSocialStatus() {
     })()
     const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
     const { data } = await apiClient.get<{ youtube: SocialEntry; instagram: SocialEntry; tiktok: SocialEntry }>('/auth/social/status', { headers })
-    console.log("[DEBUG] Respuesta /auth/social/status:", data)
     social.value = data
   } catch {}
 }
@@ -85,7 +84,6 @@ async function handleConnectInstagram() {
     const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
     const { data } = await apiClient.get<{ auth_url?: string; url?: string }>('/auth/social/instagram/connect', { headers })
     const authUrl = (data as { auth_url?: string; url?: string }).auth_url || (data as { auth_url?: string; url?: string }).url
-    console.log("[DEBUG] Auth URL recibida del backend:", authUrl)
     if (!authUrl) {
       error.value = 'No se recibió auth_url del backend'
       return

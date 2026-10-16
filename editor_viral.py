@@ -258,15 +258,6 @@ def main():
     from pathlib import Path
     
     if len(sys.argv) < 2:
-        print("\nEDITOR DE VIDEOS VIRALES")
-        print("=" * 50)
-        print("Uso:")
-        print("  Todos los clips: python editor_viral.py [carpeta_clips] [carpeta_salida]")
-        print("  Un clip:         python editor_viral.py clips/clip_1.mp4 [carpeta_salida]")
-        print("\nEjemplos:")
-        print("  python editor_viral.py clips clips_editados")
-        print("  python editor_viral.py clips/clip_1.mp4 clips_editados")
-        print("=" * 50)
         sys.exit(1)
     
     clips_input = sys.argv[1]
@@ -274,19 +265,18 @@ def main():
     
     input_path = Path(clips_input)
     if input_path.is_file():
-        print(f"\nProcesando clip individual: {clips_input}")
         editor = VideoEditor(str(input_path.parent), salida_dir)
         resultado = editor.procesar_clip(input_path, 0)
         if resultado:
-            print(f"\nClip procesado: {resultado}")
+            pass
         else:
-            print("\nError al procesar clip")
+            pass
     else:
         editor = VideoEditor(clips_input, salida_dir)
         resultados = editor.procesar_todos()
         for r in resultados:
-            print(f"  - {r}")
 
 
+            pass
 if __name__ == "__main__":
     main()

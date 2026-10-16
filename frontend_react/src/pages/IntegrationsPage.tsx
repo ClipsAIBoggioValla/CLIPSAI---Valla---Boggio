@@ -26,7 +26,6 @@ export default function IntegrationsPage() {
         }
       })()
       const data = await http.get<SocialStatus>('/auth/social/status', token ? { headers: { Authorization: `Bearer ${token}` } } : undefined)
-      console.log("[DEBUG] Respuesta /auth/social/status:", data)
       setSocial(data)
     } catch {}
   }
@@ -86,7 +85,6 @@ export default function IntegrationsPage() {
       const headers = token ? { Authorization: `Bearer ${token}` } : undefined
       const data = await http.get<{ auth_url?: string; url?: string }>('/auth/social/instagram/connect', headers ? { headers } : undefined)
       const authUrl = (data as { auth_url?: string; url?: string }).auth_url || (data as { auth_url?: string; url?: string }).url
-      console.log("[DEBUG] Auth URL recibida del backend:", authUrl)
       if (!authUrl) {
         setError('No se recibió auth_url del backend')
         return
@@ -119,7 +117,6 @@ export default function IntegrationsPage() {
       const headers = token ? { Authorization: `Bearer ${token}` } : undefined
       const data = await http.get<{ auth_url?: string; url?: string }>('/auth/social/tiktok/connect', headers ? { headers } : undefined)
       const authUrl = (data as { auth_url?: string; url?: string }).auth_url || (data as { auth_url?: string; url?: string }).url
-      console.log("[DEBUG] TikTok Auth URL recibida del backend:", authUrl)
       if (!authUrl) {
         setError('No se recibió auth_url del backend')
         return

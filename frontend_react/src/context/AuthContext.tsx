@@ -50,7 +50,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     initialized.current = true
     const initAuth = async () => {
       try {
-        console.log('[InitAuth] Iniciando verificación de sesión...')
         let token: string | null = null
         try {
           token =
@@ -63,7 +62,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         // SI NO HAY TOKEN: Desactivar loading inmediatamente y salir
         if (!token || token === 'null' || token === 'undefined' || token.trim() === '') {
-          console.log('[InitAuth] No hay token en localStorage, saltando verificación.')
           try {
             localStorage.removeItem(TOKEN_KEY)
             localStorage.removeItem('token')
@@ -101,7 +99,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(null)
       } finally {
         // GARANTIZAR que el spinner SIEMPRE se apague
-        console.log('[InitAuth] Finalizando estado de carga.')
         setIsLoading(false)
       }
     }

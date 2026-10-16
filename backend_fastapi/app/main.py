@@ -190,11 +190,9 @@ async def lifespan(app: FastAPI):
                     job.status = "failed"
                     job.error_message = "Proceso interrumpido por reinicio del servidor."
                 db.commit()
-                print(f"[STARTUP] Se marcaron {len(interrupted_jobs)} trabajos huérfanos como 'failed'.")
             else:
-                print("[STARTUP] No hay trabajos huérfanos en 'processing'.")
+                pass
         except Exception as e:
-            print(f"[STARTUP] Error al limpiar jobs huérfanos: {e}")
             try:
                 db.rollback()
             except Exception:
@@ -202,8 +200,8 @@ async def lifespan(app: FastAPI):
         finally:
             db.close()
     except Exception as e:
-        print(f"[STARTUP] Error al limpiar jobs huérfanos: {e}")
 
+        pass
     yield
 
 

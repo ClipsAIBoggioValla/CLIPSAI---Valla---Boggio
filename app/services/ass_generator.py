@@ -192,7 +192,6 @@ def generate_hooked_ass(
             continue
     all_shifted = hook_segs + clip_segs
     all_shifted.sort(key=lambda x: x["start"])
-    print(f"[ass] hook {len(hook_segs)} segs 0->{hook_dur:.1f}s, clip {len(clip_segs)} segs {hook_dur:.1f}->{hook_dur + (clip_end-clip_start):.1f}s, total {len(all_shifted)}")
     return write_ass_file(all_shifted, output_path, title=title)
 
 

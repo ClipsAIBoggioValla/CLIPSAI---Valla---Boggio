@@ -114,7 +114,6 @@ def main() -> None:
     for target in TARGETS:
         target.parent.mkdir(parents=True, exist_ok=True)
         image.save(target, "PNG", optimize=True)
-        print(f"OK {target.relative_to(REPO_ROOT)} ({target.stat().st_size} bytes)")
 
 
 if __name__ == "__main__":

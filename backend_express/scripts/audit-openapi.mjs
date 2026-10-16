@@ -59,21 +59,13 @@ actual.add('GET /health')
 const missing = [...actual].filter(r => !documented.has(r)).sort()
 const ghost = [...documented].filter(r => !actual.has(r)).sort()
 
-console.log(`OpenAPI ${swaggerSpec.openapi} — "${swaggerSpec.info?.title}" v${swaggerSpec.info?.version}`)
-console.log(`Rutas montadas en código: ${actual.size}`)
-console.log(`Rutas documentadas:       ${documented.size}`)
 
 if (missing.length) {
-  console.log(`\nSIN DOCUMENTAR (${missing.length}):`)
-  missing.forEach(r => console.log(`  x ${r}`))
 }
 if (ghost.length) {
-  console.log(`\nFANTASMA — documentada pero sin ruta real (${ghost.length}):`)
-  ghost.forEach(r => console.log(`  ! ${r}`))
 }
 
 if (missing.length || ghost.length) {
   console.error('\nPARIDAD FALLIDA')
   process.exit(1)
 }
-console.log('\nPARIDAD OK — spec y codigo coinciden al 100%')

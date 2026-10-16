@@ -606,7 +606,6 @@ def download_clip(
 
     # Log requerido
     msg = f"[CLIP DESCARGA] Sirviendo archivo real: {ruta_final} (Tamaño: {size} bytes)"
-    print(msg)
     logger.info(msg)
 
     # 3. Respuesta HTTP con media_type video/mp4
