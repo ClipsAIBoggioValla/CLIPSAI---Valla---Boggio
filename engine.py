@@ -118,11 +118,8 @@ def procesar_video(video_path: str, transcripcion_path: str) -> ProcesamientoRes
         >>> resultado = procesar_video("video.mp4", "transcripcion.txt")
         >>> if resultado.exito:
         ...     for clip in resultado.clips:
-        ...         # print(f"Clip: {clip.archivo} ({clip.inicio}-{clip.fin})")
         ... else:
-        ...     # print(f"Error [{resultado.error_tipo}]: {resultado.error}")
         ...     if resultado.error_detalle:
-        ...         # print(f"Detalle: {resultado.error_detalle}")
     """
     # 1. Validaciones de entrada tempranas
     error_validacion = _validar_entradas(video_path, transcripcion_path)
