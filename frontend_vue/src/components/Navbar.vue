@@ -34,7 +34,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
 watch(
   () => route.query.q,
   (q) => {
-    if (route.path === '/clips' || route.path === '/library') {
+    if (route.path === '/clips') {
       const v = (q as string) ?? ''
       if (v !== search.value) search.value = v
     }
@@ -43,7 +43,7 @@ watch(
 
 let debounceTimer: number | undefined
 watch(search, (v) => {
-  if (route.path !== '/clips' && route.path !== '/library') return
+  if (route.path !== '/clips') return
   window.clearTimeout(debounceTimer)
   debounceTimer = window.setTimeout(() => {
     const trimmed = v.trim()
