@@ -59,7 +59,7 @@ const swaggerDefinition = {
       Token: {
         type: 'object',
         properties: {
-          access_token: { type: 'string', example: 'eyJhbGciOiJIUzI1NiJ9...' },
+          access_token: { type: 'string', example: '<jwt-token>' },
           token_type: { type: 'string', example: 'bearer' },
         },
       },
@@ -159,6 +159,36 @@ const swaggerDefinition = {
           social_network: { type: 'string', nullable: true },
           created_at: { type: 'string', format: 'date-time' },
           updated_at: { type: 'string', format: 'date-time' },
+        },
+      },
+      RetrimRequest: {
+        type: 'object',
+        required: ['start_time', 'end_time'],
+        properties: {
+          start_time: { type: 'number', minimum: 0, example: 10 },
+          end_time: { type: 'number', exclusiveMinimum: 5, example: 45, description: 'Debe ser > start_time. Duración resultante entre 5 y 90 segundos.' },
+        },
+      },
+      RetrimResponse: {
+        type: 'object',
+        properties: {
+          clip_id: { type: 'string', format: 'uuid' },
+          start_time: { type: 'number' },
+          end_time: { type: 'number' },
+          duration: { type: 'number', description: 'end_time - start_time' },
+          status: { type: 'string' },
+          file_path: { type: 'string', description: 'Ruta del nuevo archivo generado por FFmpeg' },
+        },
+      },
+      JobStreamEvent: {
+        type: 'object',
+        description: 'Evento SSE emitido en cada cambio de estado del job',
+        properties: {
+          progress: { type: 'integer', example: 55 },
+          status: { type: 'string', enum: ['pending', 'scoring', 'completed', 'failed'] },
+          message: { type: 'string', example: 'Procesando con IA' },
+          job_id: { type: 'string', format: 'uuid' },
+          error: { type: 'string', nullable: true, description: 'Presente solo si el job falló' },
         },
       },
       StatsSummaryResponse: {
@@ -425,6 +455,21 @@ const swaggerDefinition = {
         },
       },
     },
+    '/clips/{clipId}/retrim': {
+      post: {
+        tags: ['clips'],
+        summary: 'Re-trim del clip con FFmpeg',
+        description: 'Recorta el clip a un nuevo rango [start_time, end_time) con FFmpeg. ' +
+          'Ruta provista por `backend/api/routes/retrim.py` (montada en FastAPI cuando el import tiene éxito, incluido en la imagen desplegada).',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'clipId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/RetrimRequest' } } } },
+        responses: {
+          '200': { description: 'Clip re-trimado', content: { 'application/json': { schema: { $ref: '#/components/schemas/RetrimResponse' } } } },
+          '404': { description: 'Clip no encontrado', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
     '/clips/{clipId}/re-render': {
       post: {
         tags: ['clips'],
@@ -448,6 +493,20 @@ const swaggerDefinition = {
         responses: {
           '202': { description: 'Re-render encolado PROCESSING', content: { 'application/json': { schema: { type: 'object', properties: { detail: { type: 'string' }, clip_id: { type: 'string', format: 'uuid' }, status: { type: 'string', example: 'PROCESSING' } } } } } },
           '409': { description: 'Clip ya en procesamiento' },
+        },
+      },
+    },
+    '/jobs/{jobId}/stream': {
+      get: {
+        tags: ['jobs'],
+        summary: 'SSE stream del estado de un Job',
+        description: 'Stream SSE de progreso de un job. Ruta provista por `backend/api/routes/stream.py` ' +
+          'montada en FastAPI cuando el import tiene éxito.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'jobId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          '200': { description: 'stream text/event-stream', content: { 'text/event-stream': { schema: { $ref: '#/components/schemas/JobStreamEvent' } } } },
+          '404': { description: 'Job no encontrado', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
       },
     },

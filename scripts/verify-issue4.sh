@@ -25,7 +25,8 @@ set -Eeuo pipefail
 # -----------------------------------------------------------------------------
 BASE_URL="${BASE_URL:-http://localhost:8000}"
 TEST_EMAIL="${TEST_EMAIL:-testuser@clipsai.dev}"
-TEST_PASSWORD="${TEST_PASSWORD:-Passw0rd!123}"
+TEST_PASSWORD="${TEST_PASSWORD:-}"
+if [ -z "TEST_PASSWORD" ]; then echo "[verify-issue4.sh] ERROR: TEST_PASSWORD environment variable is required (do not hardcode secrets)" >&2; exit 1; fi
 TEST_FULL_NAME="${TEST_FULL_NAME:-Test User}"
 HEALTH_TIMEOUT_SEC="${HEALTH_TIMEOUT_SEC:-30}"
 POLL_TIMEOUT_SEC="${POLL_TIMEOUT_SEC:-30}"

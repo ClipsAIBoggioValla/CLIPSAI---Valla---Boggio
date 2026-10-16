@@ -27,7 +27,8 @@ set -Eeuo pipefail
 BASE_URL="${BASE_URL:-http://localhost:8000}"
 USER1_EMAIL="${USER1_EMAIL:-user1_issue5@test.com}"
 USER2_EMAIL="${USER2_EMAIL:-user2_issue5@test.com}"
-USER_PASSWORD="${USER_PASSWORD:-Passw0rd!123}"
+USER_PASSWORD="${USER_PASSWORD:-}"
+if [ -z "USER_PASSWORD" ]; then echo "[verify-issue5.sh] ERROR: USER_PASSWORD environment variable is required (do not hardcode secrets)" >&2; exit 1; fi
 USER1_NAME="${USER1_NAME:-User One Issue5}"
 USER2_NAME="${USER2_NAME:-User Two Issue5}"
 HEALTH_TIMEOUT_SEC="${HEALTH_TIMEOUT_SEC:-30}"
