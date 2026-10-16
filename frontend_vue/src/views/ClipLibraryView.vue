@@ -46,58 +46,8 @@ function getVideoSrc(clip: ClipListItem): string {
   return `${API_BASE_URL}/clips/${clip.id}/descarga${bust}`
 }
 async function handleDownload(clip: ClipListItem) {
-  const token = (() => { try { return localStorage.getItem('clipsai_token') } catch { return null } })()
-  const bust = `t=${clip.updated_at ? new Date(clip.updated_at as unknown as string).getTime() : Date.now()}`
-  const url = `${API_BASE_URL}/clips/${clip.id}/descarga${token ? `?token=${encodeURIComponent(token)}&${bust}` : `?${bust}`}`
-  try {
-    const headers: Record<string, string> = { 'ngrok-skip-browser-warning': 'true' }
-    if (token) headers['Authorization'] = `Bearer ${token}`
-    const res = await fetch(url, { headers, credentials: 'include' })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const blob = await res.blob()
-    const cd = res.headers.get('Content-Disposition')
-    let filename = `${clip.title || clip.id}.mp4`
-    if (cd) {
-      const m = cd.match(/filename="?([^"]+)"?/)
-      if (m) filename = m[1]
-    }
-    const blobUrl = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = blobUrl
-    a.download = filename
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 1000)
-  } catch {
-    window.open(`${API_BASE_URL}/clips/${clip.id}/descarga`, '_blank')
-  }
+  await clipService.downloadClip(clip)
 }
-
-watch(routeQ, (v) => {
-  if (v !== q.value) {
-    q.value = v
-    debouncedQ.value = v
-  }
-})
-
-watch(routeJobId, () => { page.value = 1 })
-
-watch(debouncedQ, (v) => {
-  const current = (route.query.q as string) ?? ''
-  if (v !== current) {
-    const query: Record<string, string> = { ...(route.query as Record<string, string>) }
-    if (v) query.q = v
-    else delete query.q
-    router.replace({ path: route.path, query })
-  }
-})
-
-let debounceTimer: number | undefined
-watch(q, (v) => {
-  window.clearTimeout(debounceTimer)
-  debounceTimer = window.setTimeout(() => { debouncedQ.value = v }, 350)
-})
 
 watch([debouncedQ, minScore, sortBy], () => {
   page.value = 1

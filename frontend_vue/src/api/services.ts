@@ -137,6 +137,35 @@ export const clipService = {
     const { data } = await apiClient.get<import('@/types/api').ClipResponse[]>(`/clips${qs}`)
     return data
   },
+  downloadUrl(clipId: string): string {
+    const raw: string = (import.meta.env.VITE_API_URL ?? '').trim()
+    const base = (raw || 'http://localhost:8000').replace(/\/$/, '')
+    return `${base}/clips/${clipId}/descarga`
+  },
+  async downloadClip(clip: import('@/types/api').ClipListItem): Promise<void> {
+    try {
+      const token = (() => { try { return localStorage.getItem('clipsai_token') } catch { return null } })()
+      const bust = `t=${clip.updated_at ? new Date(clip.updated_at as unknown as string).getTime() : Date.now()}`
+      const res = await apiClient.get<Blob>(`/clips/${clip.id}/descarga${token ? `?token=${encodeURIComponent(token)}&${bust}` : `?${bust}`}`, { responseType: 'blob' })
+      const cd = (res.headers as Record<string, string>)['content-disposition'] ?? null
+      let filename = `${clip.title || clip.id}.mp4`
+      if (cd) {
+        const m = cd.match(/filename="?([^"]+)"?/)
+        if (m) filename = m[1]
+      }
+      const blob = res.data as unknown as Blob
+      const blobUrl = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = blobUrl
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 5000)
+    } catch {
+      window.open(`${(import.meta.env.VITE_API_URL ?? 'http://localhost:8000').trim().replace(/\/$/, '')}/clips/${clip.id}/descarga`, '_blank')
+    }
+  },
 }
 
 export const jobService = {
