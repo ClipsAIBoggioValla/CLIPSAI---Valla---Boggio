@@ -293,11 +293,11 @@ export default function JobStatusPage() {
                     const fallbackClips = job.result_metadata?.clips ?? []
                     return fallbackClips.length > 0 ? (
                       <div className="grid gap-3 sm:gap-4">
-                        {fallbackClips.map((clip: any, idx: number) => (
+                        {fallbackClips.map((clip: { titulo?: unknown; inicio?: unknown; fin?: unknown }, idx: number) => (
                           <div key={`${clip.titulo}-${idx}`} className="card-spark flex flex-col gap-3" style={{ padding: '1.25rem', opacity: 0.85 }}>
                             <div className="flex items-center gap-2 text-xs text-amber-400"><i className="bi bi-hourglass-split" /> Cargando clips físicos…</div>
-                            <h3 className="text-sm font-bold" style={{ color: 'var(--text-main)' }}>{clip.titulo}</h3>
-                            <p className="text-xs font-mono px-3 py-2 border" style={{ color: 'var(--text-muted-green)', backgroundColor: 'var(--bs-body-bg)', borderColor: 'var(--border-light)' }}>Inicio: {clip.inicio} - Fin: {clip.fin}</p>
+                            <h3 className="text-sm font-bold" style={{ color: 'var(--text-main)' }}>{String(clip.titulo ?? '')}</h3>
+                            <p className="text-xs font-mono px-3 py-2 border" style={{ color: 'var(--text-muted-green)', backgroundColor: 'var(--bs-body-bg)', borderColor: 'var(--border-light)' }}>Inicio: {String(clip.inicio ?? '')} - Fin: {String(clip.fin ?? '')}</p>
                           </div>
                         ))}
                       </div>
