@@ -31,18 +31,39 @@ apiClient.interceptors.request.use((config) => {
 })
 
 /**
- * Política ÚNICA de 401 — estandarizada en React y Vue (Issue 35).
+ * Política ÚNICA de fallo de sesión — estandarizada en React y Vue (Issue 35).
  *
  * - `/jobs/*`: polling en segundo plano → reintento silencioso (lo resuelve `useJobPolling`).
  * - rutas terminadas en `/me`: verificación inicial de sesión → NO se destruye la sesión,
  *   porque otra pestaña puede estar refrescándola. Es el mismo criterio que documentan los
  *   stores de auth.
- * - cualquier otro 401: la sesión dejó de ser válida → limpiar token y volver a `/login`.
+ * - cualquier otro fallo de sesión: limpiar token y volver a `/login`.
  */
 function shouldRedirectOn401(url: string): boolean {
   if (url.includes('/jobs/')) return false
   if (/(^|\/)(users\/)?me\/?$/.test(url)) return false
   return true
+}
+
+/**
+ * Decide si una respuesta es un fallo de sesión. FastAPI devuelve **403**
+ * "Not authenticated" cuando falta el header (OAuth2 `auto_error=True`) y 401 cuando el token
+ * es inválido/vencido; Express siempre 401. Se aceptan ambas formas para que el
+ * comportamiento sea idéntico contra cualquiera de los dos backends.
+ */
+function isSessionFailure(status: number, detail: string): boolean {
+  return status === 401 || (status === 403 && /not authenticated/i.test(detail))
+}
+
+function handleUnauthorized(url: string, status: number, detail: string): void {
+  if (!shouldRedirectOn401(url)) return
+  if (!isSessionFailure(status, detail)) return
+  try {
+    localStorage.removeItem(TOKEN_KEY)
+  } catch {}
+  if (typeof window !== 'undefined' && window.location.pathname !== '/login' && window.location.pathname !== '/auth') {
+    window.location.href = '/login'
+  }
 }
 
 apiClient.interceptors.response.use(
@@ -58,15 +79,8 @@ apiClient.interceptors.response.use(
       else if (typeof error.response.data === 'string' && error.response.data)
         detail = (error.response.data as string).slice(0, 500)
 
-      // Política única de 401 (idéntica al cliente de React).
-      if (status === 401 && shouldRedirectOn401(error.config?.url ?? '')) {
-        try {
-          localStorage.removeItem(TOKEN_KEY)
-        } catch {}
-        if (typeof window !== 'undefined' && window.location.pathname !== '/login' && window.location.pathname !== '/auth') {
-          window.location.href = '/login'
-        }
-      }
+      // Política única de fallo de sesión (idéntica al cliente de React).
+      handleUnauthorized(error.config?.url ?? '', status, detail)
 
       return Promise.reject(new ApiError(status, detail, data))
     }
