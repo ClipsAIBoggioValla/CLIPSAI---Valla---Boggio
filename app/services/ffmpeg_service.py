@@ -71,22 +71,18 @@ def burn_subtitles(
     ]
     try:
         ass_lines = Path(ass).read_text(encoding="utf-8").splitlines()[:5]
-        print(f"[ffmpeg] ASS preview ({ass}):")
         for idx, line in enumerate(ass_lines, 1):
-            print(f"  {idx}: {line}")
+            pass
     except Exception as exc:
-        print(f"[ffmpeg] WARN no se pudo leer ASS preview: {exc}")
+        pass
     try:
         probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", str(src)], capture_output=True, text=True, timeout=10)
         if probe.returncode == 0 and probe.stdout.strip():
             wh = probe.stdout.strip()
-            print(f"[ffmpeg] video dims: {wh} vs ASS PlayRes 1080x1920")
             if wh not in ("1080x1920", "720x1280"):
-                print(f"[ffmpeg] WARN descalce PlayRes vs video - se hara scaling (ScaledBorderAndShadow: yes)")
+                pass
     except Exception as exc:
-        print(f"[ffmpeg] WARN probe dims fallo: {exc}")
-    print(f"[ffmpeg] cmd: {' '.join(cmd)}")
-    print(f"[ffmpeg] vf: {vf} (re-encode libx264, no copy)")
+        pass
     try:
         result = subprocess.run(
             cmd,
@@ -161,7 +157,6 @@ def cut_segment(
         "-movflags", "+faststart",
         str(out),
     ]
-    print(f"[ffmpeg] cut {start_time:.1f}->{end_time:.1f} ({duration:.1f}s) cmd: {' '.join(cmd)}")
     result = subprocess.run(cmd, capture_output=True, check=False, timeout=120)
     if result.returncode != 0:
         err = result.stderr.decode(errors="ignore")[-2000:] if result.stderr else "sin stderr"
@@ -203,7 +198,6 @@ def concat_videos(
             "-movflags", "+faststart",
             str(out),
         ]
-        print(f"[ffmpeg] concat {len(video_paths)} segments cmd: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, check=False, timeout=180)
         if result.returncode != 0:
             err = result.stderr.decode(errors="ignore")[-2500:] if result.stderr else "sin stderr"
@@ -247,7 +241,6 @@ def build_hook_clip(
         cut_segment(src, hook_start, hook_end, hook_tmp)
         cut_segment(src, clip_start, clip_end, clip_tmp)
         concat_videos([hook_tmp, clip_tmp], out)
-        print(f"[ffmpeg] hook clip built: hook {hook_dur:.1f}s + clip {clip_dur:.1f}s = {hook_dur+clip_dur:.1f}s -> {out}")
         return str(out)
     finally:
         for p in (hook_tmp, clip_tmp):

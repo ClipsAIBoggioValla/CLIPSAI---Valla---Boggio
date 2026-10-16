@@ -261,18 +261,15 @@ def save_instagram_tokens(db: Session, user_id: str, tokens: dict[str, Any]) -> 
             dbg_url = f"https://graph.facebook.com/debug_token?input_token={access_token}&access_token={app_token}"
             dbg_resp = requests.get(dbg_url, timeout=10)
             logger.info("[IG DEBUG] debug_token status=%s body=%s", dbg_resp.status_code, dbg_resp.text)
-            print(f"[IG DEBUG] debug_token status={dbg_resp.status_code} body={dbg_resp.text}")
             if dbg_resp.status_code == 200:
                 try:
                     dbg_data = dbg_resp.json()
                     scopes = dbg_data.get("data", {}).get("scopes", [])
                     logger.info("[IG DEBUG] scopes concedidos: %s", scopes)
-                    print(f"[IG DEBUG] scopes concedidos: {scopes}")
                 except Exception:
                     pass
     except Exception as e:
         logger.warning(f"[IG DEBUG] debug_token failed: {e}")
-        print(f"[IG DEBUG] debug_token failed: {e}")
 
     existing: SocialAccount | None = db.execute(
         select(SocialAccount).where(SocialAccount.user_id == uid, func.lower(SocialAccount.platform) == "instagram")

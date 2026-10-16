@@ -303,8 +303,6 @@ def detect_hooks(segments: list[dict[str, Any]], duration_hint: float | None = N
             logger.info("Análisis de virabilidad completado exitosamente vía Claude API")
         else:
             logger.info("Análisis de virabilidad completado exitosamente vía %s API", provider)
-        print(f"[hook] LLM raw {len(raw)} chars via {provider}")
-        print(raw[:1200])
         data = _parse_json_strict(raw)
         clips = _validate_clips(data)
         if not clips:

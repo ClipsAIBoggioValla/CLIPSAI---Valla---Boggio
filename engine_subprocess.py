@@ -160,11 +160,6 @@ def _main_cli():
     parser.add_argument("--python", default="python3", help="Ejecutable Python")
     args = parser.parse_args()
 
-    print(f"Invocando engine via subprocess...")
-    print(f"  Video: {args.video}")
-    print(f"  Transcripción: {args.transcripcion}")
-    print(f"  Timeout: {args.timeout}s")
-    print("-" * 50)
 
     resultado = procesar_video_subprocess(
         args.video,
@@ -173,7 +168,6 @@ def _main_cli():
         python_executable=args.python
     )
 
-    print(json.dumps(resultado.to_dict(), indent=2, ensure_ascii=False))
 
     if not resultado.exito:
         sys.exit(1)

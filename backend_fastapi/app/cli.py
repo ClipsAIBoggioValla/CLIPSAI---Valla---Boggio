@@ -53,7 +53,6 @@ def run_video(video_argument: str) -> list[Path]:
     )
     from .services.engine import run_clip_engine
 
-    print(f"[1/3] Preparando video: {video_path}", flush=True)
     temporary_transcript: Path | None = None
     try:
         # run_clip_engine requiere una ruta de transcripción aunque Whisper la genere
@@ -64,9 +63,8 @@ def run_video(video_argument: str) -> list[Path]:
             temporary_transcript = Path(transcript_file.name)
 
         def report_progress(progress: int = 35) -> None:
-            print(f"[motor] Whisper completado — progreso {progress}%", flush=True)
+            pass
 
-        print("[2/3] Ejecutando Whisper y selección semántica Claude...", flush=True)
         result = run_clip_engine(
             str(video_path),
             str(temporary_transcript),
@@ -85,7 +83,6 @@ def run_video(video_argument: str) -> list[Path]:
 
     job_id = uuid.uuid4()
     generated: list[Path] = []
-    print(f"[3/3] Renderizando {len(clips)} clip(s): recorte → hook → crop 9:16 → ASS", flush=True)
     for index, clip in enumerate(clips):
         if not isinstance(clip, dict):
             logger.warning("Se omite el resultado %s porque no es un objeto de clip", index + 1)
@@ -111,17 +108,11 @@ def run_video(video_argument: str) -> list[Path]:
         )
         path = Path(output_path).resolve()
         generated.append(path)
-        print(
-            f"  Clip {index + 1}/{len(clips)}: {path} "
-            f"(render={metadata.get('render')}, ratio={metadata.get('aspect_ratio', '9:16')})",
-            flush=True,
-        )
 
     if not generated:
         raise RuntimeError("No se generaron archivos MP4")
-    print("Archivos MP4 generados:", flush=True)
     for path in generated:
-        print(path, flush=True)
+        pass
     return generated
 
 
@@ -138,30 +129,23 @@ def command_inspect(args: argparse.Namespace) -> int:
     try:
         job_id = uuid.UUID(args.job_id)
     except ValueError:
-        print(f"ID de Job inválido: {args.job_id}", file=sys.stderr)
         return 2
 
     db = SessionLocal()
     try:
         job = db.get(Job, job_id)
         if job is None:
-            print(f"Job no encontrado: {job_id}", file=sys.stderr)
             return 1
-        print(f"ID:       {job.id}")
-        print(f"Estado:   {str(job.status).upper()}")
-        print(f"Progreso: {job.progress}%")
-        print(f"Creado:   {job.created_at.isoformat() if job.created_at else 'desconocido'}")
         if job.error_message:
-            print(f"Error:\n{job.error_message}")
+            pass
         if str(job.status).lower() == "failed":
             metadata = job.result_metadata if isinstance(job.result_metadata, dict) else {}
             stack_trace = metadata.get("traceback") or metadata.get("stack_trace")
             if stack_trace:
-                print(f"Stack trace:\n{stack_trace}")
+                pass
         return 0
     except SQLAlchemyError as exc:
         logger.exception("No se pudo consultar el Job %s", job_id)
-        print(f"Error de base de datos: {exc}", file=sys.stderr)
         return 1
     finally:
         db.close()
@@ -172,21 +156,16 @@ def command_list(_args: argparse.Namespace) -> int:
     try:
         jobs = db.execute(select(Job).order_by(Job.created_at.desc()).limit(10)).scalars().all()
         if not jobs:
-            print("No hay Jobs registrados.")
             return 0
 
-        print(f"{'ID':36} {'ESTADO':12} {'FECHA':25} ERROR")
-        print("-" * 120)
         for job in jobs:
             created_at = job.created_at.isoformat(timespec="seconds") if isinstance(job.created_at, datetime) else "desconocido"
             error = " ".join(str(job.error_message or "").split())
             if len(error) > 72:
                 error = error[:69] + "..."
-            print(f"{str(job.id):36} {str(job.status).upper():12} {created_at:25} {error}")
         return 0
     except SQLAlchemyError as exc:
         logger.exception("No se pudieron listar los Jobs")
-        print(f"Error de base de datos: {exc}", file=sys.stderr)
         return 1
     finally:
         db.close()

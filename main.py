@@ -76,15 +76,12 @@ def verificar_ffmpeg() -> bool:
 def verificar_dependencias() -> bool:
     """Verifica que las dependencias estén instaladas."""
     if not PYDUB_AVAILABLE:
-        print("Error: pydub no está instalado")
-        print("Ejecuta: pip install pydub")
         return False
     return True
 
 
 def extraer_audio(video_path: str, audio_path: str = "audio.mp3") -> str:
     """Extrae el audio de un video usando FFmpeg."""
-    print("[1/6] Extrayendo audio del video...")
     
     if os.path.exists(audio_path):
         os.remove(audio_path)
@@ -96,7 +93,6 @@ def extraer_audio(video_path: str, audio_path: str = "audio.mp3") -> str:
     
     try:
         subprocess.run(comando, capture_output=True, check=True)
-        print(f"      Audio guardado: {audio_path}")
         return audio_path
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"Error al extraer audio: {e.stderr.decode()}")
@@ -104,10 +100,8 @@ def extraer_audio(video_path: str, audio_path: str = "audio.mp3") -> str:
 
 def analizar_audio_video(audio_path: str = "audio.mp3", max_eventos: int = 30) -> List[Dict]:
     """Analiza el audio usando el módulo audio_analyzer."""
-    print("[2/6] Analizando audio...")
     
     if not AUDIO_ANALYZER_AVAILABLE:
-        print("      audio_analyzer no disponible")
         return []
     
     try:
@@ -118,7 +112,6 @@ def analizar_audio_video(audio_path: str = "audio.mp3", max_eventos: int = 30) -
                 momentos = json.load(f)
             if momentos and "momentos" in momentos:
                 eventos_cluster = momentos["momentos"]
-                print(f"      Momentos virales del clustering: {len(eventos_cluster)}")
                 
                 for mc in eventos_cluster[:5]:
                     eventos.append({
@@ -133,10 +126,8 @@ def analizar_audio_video(audio_path: str = "audio.mp3", max_eventos: int = 30) -
         eventos_top = eventos[:50]
         eventos_top = sorted(eventos_top, key=lambda x: x.get("timestamp", ""))
         
-        print(f"      Eventos detectados: {len(eventos)}, usando top {len(eventos_top)}")
         return eventos_top
     except Exception as e:
-        print(f"      Error en análisis: {e}")
         return []
 
 
@@ -152,7 +143,6 @@ def leer_transcripcion_para_ia(ruta: str, max_chars: int = 6000) -> str:
         contenido = f.read().strip()
     if len(contenido) > max_chars:
         contenido = contenido[:max_chars].rsplit('\n', 1)[0]
-        print(f"      Transcripción truncada para IA: {len(contenido)} caracteres")
     return contenido
 
 
@@ -169,7 +159,6 @@ def formatear_transcripcion(transcripcion_raw: str, salida_path: str = "transcri
     """
     import re
     
-    print("[3.5/6] Formateando transcripción completa...")
     
     lineas_raw = transcripcion_raw.strip().split('\n')
     segmentos = []
@@ -208,7 +197,6 @@ def formatear_transcripcion(transcripcion_raw: str, salida_path: str = "transcri
         segmentos.append((f"{h:02d}:{m:02d}:{s:02d}", texto_pendiente))
     
     if not segmentos:
-        print("      ✗ No se pudieron parsear segmentos")
         return transcripcion_raw
     
     with open(salida_path, "w", encoding="utf-8") as f:
@@ -217,11 +205,9 @@ def formatear_transcripcion(transcripcion_raw: str, salida_path: str = "transcri
     
     ts_primero = segmentos[0][0]
     ts_ultimo = segmentos[-1][0]
-    print(f"      ✓ Transcripción formateada: {salida_path} ({len(segmentos)} segmentos)")
-    print(f"      Rango: {ts_primero} hasta {ts_ultimo}")
     for i, (ts, txt) in enumerate(segmentos[:5]):
-        print(f"        {ts}: {txt[:50]}...")
     
+        pass
     return salida_path
 
 
@@ -240,7 +226,6 @@ def preparar_transcripcion_para_ia(ruta: str = "transcripcion_formatted.txt", ma
     Comprime la transcripción para la IA mientras preserva todos los timestamps.
     Mantiene estructura completa pero elimina redundancias.
     """
-    print("[3.8/6] Preparando transcripción para IA...")
     
     with open(ruta, "r", encoding="utf-8") as f:
         lineas = [l.strip() for l in f.readlines() if l.strip()]
@@ -257,11 +242,9 @@ def preparar_transcripcion_para_ia(ruta: str = "transcripcion_formatted.txt", ma
         return ""
     
     total_segmentos = len(segmentos)
-    print(f"      Total segmentos: {total_segmentos}")
     
     if total_segmentos <= max_segmentos:
         resultado = "\n".join([f"{ts} - {texto}" for ts, texto in segmentos])
-        print(f"      Sin comprimir (≤{max_segmentos} segmentos)")
         return resultado
     
     factor = total_segmentos / max_segmentos
@@ -282,7 +265,6 @@ def preparar_transcripcion_para_ia(ruta: str = "transcripcion_formatted.txt", ma
         segmentos_comprimidos.append((ts, texto))
     
     resultado = "\n".join([f"{ts} - {texto}" for ts, texto in segmentos_comprimidos])
-    print(f"      Comprimida: {len(segmentos_comprimidos)} segmentos (factor {factor:.1f}x)")
     
     return resultado
 
@@ -292,7 +274,6 @@ def enriquecer_datos_para_ia(datos_audio: List[Dict], transcripcion_path: str = 
     Correlaciona eventos de audio con segmentos de transcripción.
     Returns un diccionario con datos enriquecidos para la IA.
     """
-    print("[3.9/6] Enriqueciendo datos para IA...")
     
     with open(transcripcion_path, "r", encoding="utf-8") as f:
         lineas = [l.strip() for l in f.readlines() if l.strip() and " - " in l]
@@ -338,7 +319,6 @@ def enriquecer_datos_para_ia(datos_audio: List[Dict], transcripcion_path: str = 
                 "distancia_segundos": mejor_distancia,
             })
     
-    print(f"      Eventos enriquecidos: {len(eventos_enriquecidos)}")
     
     return {
         "eventos": eventos_enriquecidos,
@@ -472,7 +452,6 @@ def _post_con_retry(url: str, headers: Dict, body: Dict, timeout: int = TIMEOUT,
         except requests.exceptions.RequestException as e:
             if intento == intentos:
                 raise ConnectionError(f"Error de conexión: {e}")
-        print(f"      Intento {intento} falló, reintentando en {2 * intento}s...")
         time.sleep(2 * intento)
 
 
@@ -571,7 +550,6 @@ def obtener_clips_ia(transcripcion: str, datos_audio: List[Dict], datos_enriquec
         proveedor = "OpenAI"
     else:
         proveedor = "DeepSeek"
-    print(f"[4/6] Analizando con IA ({proveedor})...")
 
     prompt = construir_prompt(transcripcion, datos_audio, datos_enriquecidos)
 
@@ -599,22 +577,15 @@ def obtener_clips_ia(transcripcion: str, datos_audio: List[Dict], datos_enriquec
         else:
             raise
 
-    print(f"      Respuesta IA ({len(contenido)} chars)")
-    print(f"      === RESPUESTA COMPLETA ===")
-    print(contenido[:1000])
-    print(f"      === FIN RESPUESTA ===")
     
     json_match = re.search(r'\[[\s\S]*\]', contenido)
     if not json_match:
-        print(f"      Preview: {contenido[:200]}...")
         raise ValueError("No se encontró JSON válido en la respuesta")
     
     clips = parsear_json_tolerante(contenido)
     if not clips:
-        print(f"      JSON inválido, no se pudieron extraer clips")
         raise ValueError("No se pudo parsear la respuesta como JSON")
     
-    print(f"      IA detectó {len(clips)} momentos")
     return clips
 
 
@@ -696,7 +667,6 @@ def parsear_json_tolerante(texto: str) -> List[Dict]:
 
 def validar_clips(clips: List[Dict]) -> List[Dict]:
     """Valida y filtra los clips."""
-    print("[5/6] Validando clips...")
     
     def convertir_ts(ts):
         partes = ts.split(':')
@@ -714,11 +684,9 @@ def validar_clips(clips: List[Dict]) -> List[Dict]:
     
     clips_validos = []
     
-    print(f"      DEBUG: {len(clips)} clips recibidos de IA")
     
     for i, clip in enumerate(clips):
         if "inicio" not in clip or "fin" not in clip:
-            print(f"      DEBUG clip {i+1}: sin inicio/fin")
             continue
         
         score = clip.get("score", 5)
@@ -730,17 +698,14 @@ def validar_clips(clips: List[Dict]) -> List[Dict]:
             inicio_seg = convertir_ts(inicio)
             fin_seg = convertir_ts(fin)
         except Exception as e:
-            print(f"      DEBUG clip {i+1}: error parseo ts: {e}")
             continue
         
         duracion = fin_seg - inicio_seg
         
         if duracion < 30 or duracion > 90:
-            print(f"      DEBUG clip {i+1}: duracion {duracion}s fuera de rango (15-120)")
             continue
         
         if score < 5:
-            print(f"      DEBUG clip {i+1}: score {score} < 5")
             continue
         
         criterio = clip.get("criterio_principal", "otro")
@@ -760,12 +725,10 @@ def validar_clips(clips: List[Dict]) -> List[Dict]:
             "motivo": clip.get("motivo", ""),
             "tipo_contenido": clip.get("tipo_contenido", "otro"),
         })
-        print(f"      Clip {i+1}: {formatear_ts(inicio_seg)} - {formatear_ts(fin_seg)} ({duracion}s) | {criterio} | Score: {score} | {titulo[:40]}")
     
     clips_validos.sort(key=lambda x: x["score"], reverse=True)
     clips_validos = clips_validos[:10]
     
-    print(f"      Clips válidos: {len(clips_validos)}")
     return clips_validos
 
 
@@ -783,10 +746,8 @@ def cortar_clip(video_entrada: str, inicio: str, fin: str, salida: str) -> bool:
     duracion = int(fin_seg - inicio_seg)
     
     if duracion <= 0:
-        print(f"      Duración inválida: {duracion}s (inicio={inicio}, fin={fin})")
         return False
     
-    print(f"      Corte: {inicio} -> {fin} (duración: {duracion}s)")
     
     try:
         comando = [
@@ -803,20 +764,16 @@ def cortar_clip(video_entrada: str, inicio: str, fin: str, salida: str) -> bool:
         ]
         result = subprocess.run(comando, capture_output=True, timeout=120)
         if result.returncode != 0:
-            print(f"      FFmpeg error: {result.stderr.decode()[:200]}")
             return False
         return True
     except subprocess.TimeoutExpired:
-        print(f"      Timeout al cortar clip")
         return False
     except subprocess.CalledProcessError as e:
-        print(f"      Error al cortar: {e.stderr.decode() if e.stderr else e}")
         return False
 
 
 def procesar_clips(video_entrada: str, clips: List[Dict], carpeta: str) -> List[str]:
     """Genera todos los clips."""
-    print("[6/6] Generando clips...")
     
     archivos = []
     info_clips = []
@@ -825,14 +782,12 @@ def procesar_clips(video_entrada: str, clips: List[Dict], carpeta: str) -> List[
         nombre = os.path.join(carpeta, f"clip_{i}.mp4")
         inicio = str(clip["inicio"])
         fin = str(clip["fin"])
-        print(f"      Clip {i}: inicio={inicio}, fin={fin}")
         
         if cortar_clip(video_entrada, inicio, fin, nombre):
             if os.path.exists(nombre):
                 tamano = os.path.getsize(nombre)
-                print(f"      ✓ Guardado: {nombre} ({tamano} bytes)")
             else:
-                print(f"      ✗ Archivo no creado")
+                pass
             archivos.append(nombre)
             info_clips.append({
                 "archivo": nombre,
@@ -846,8 +801,8 @@ def procesar_clips(video_entrada: str, clips: List[Dict], carpeta: str) -> List[
                 "motivo": clip.get("motivo", ""),
             })
         else:
-            print(f"      ✗ Falló")
     
+            pass
     with open(os.path.join(carpeta, "clips_info.json"), "w", encoding="utf-8") as f:
         json.dump(info_clips, f, indent=2, ensure_ascii=False)
     
@@ -856,35 +811,19 @@ def procesar_clips(video_entrada: str, clips: List[Dict], carpeta: str) -> List[
 
 def main():
     """Función principal."""
-    print("=" * 50)
-    print("  CLIP GENERATOR")
-    print("=" * 50)
     
     if len(sys.argv) < 2:
-        print("\nUso:")
-        print("  Con transcripción manual: python main.py video.mp4 transcripcion.txt")
-        print("  Modo automático (Whisper): python main.py video.mp4")
-        print("  Solo mejor clip: python main.py video.mp4 --single")
-        print("  Corte manual: python main.py video.mp4 00:01:00 00:01:30")
-        print("\nEjemplos:")
-        print("  python main.py video.mp4 transcripcion.txt")
-        print("  python main.py video.mp4  (usa Whisper automático)")
-        print("  python main.py video.mp4 --single")
-        print("=" * 50)
         sys.exit(1)
     
     video = sys.argv[1]
     
     if not os.path.exists(video):
-        print(f"\nError: Video '{video}' no encontrado\n")
         sys.exit(1)
     
     if not verificar_ffmpeg():
-        print("\nError: FFmpeg no instalado\n")
         sys.exit(1)
     
     carpeta = crear_carpeta_salida("clips")
-    print(f"\nCarpeta: {os.path.abspath(carpeta)}\n")
     
     modo_whisper = False
     transcripcion_path = None
@@ -897,8 +836,6 @@ def main():
         else:
             inicio = sys.argv[2]
             fin = sys.argv[3]
-            print(f"MODO MANUAL: {inicio} -> {fin}")
-            print("=" * 50)
             
             nombre = os.path.join(carpeta, "clip_single.mp4")
             if cortar_clip(video, inicio, fin, nombre):
@@ -907,12 +844,10 @@ def main():
                     info_clips = [{"archivo": nombre, "inicio": inicio, "fin": fin}]
                     with open(os.path.join(carpeta, "clips_info.json"), "w", encoding="utf-8") as f:
                         json.dump(info_clips, f, indent=2)
-                    print(f"\n✓ Clip guardado: {nombre} ({tamano} bytes)")
-                    print(f"  Editar con: python editor_viral.py {nombre} clips_editados")
                 else:
-                    print("\n✗ Error: archivo no creado")
+                    pass
             else:
-                print("\n✗ Error al cortar clip")
+                pass
             sys.exit(0)
     elif len(sys.argv) >= 3:
         transcripcion_path = sys.argv[2]
@@ -920,18 +855,15 @@ def main():
             modo_single = True
             transcripcion_path = None
         elif not os.path.exists(transcripcion_path):
-            print(f"\nError: Transcripción '{transcripcion_path}' no encontrada\n")
             sys.exit(1)
     else:
         modo_whisper = True
     
-    print("MODO AUTOMÁTICO")
     if modo_single:
-        print("  (Solo el mejor clip)")
+        pass
     if modo_whisper:
-        print("  (Transcripción con Whisper)")
-    print("=" * 50)
     
+        pass
     try:
         audio_path = extraer_audio(video)
         
@@ -939,27 +871,22 @@ def main():
         if AUDIO_ANALYZER_AVAILABLE:
             datos_audio = analizar_audio_video(audio_path)
         else:
-            print("      Saltando análisis de audio (audio_analyzer no instalado)")
         
+            pass
         if transcripcion_path and os.path.exists(transcripcion_path):
             from whisper_transcriber import parsear_transcripcion_youtube
-            print("\n[3/6] Parseando transcripción...")
             parsear_transcripcion_youtube(
                 transcripcion_path,
                 "transcripcion_formatted.txt"
             )
             texto_para_ia = leer_transcripcion_para_ia("transcripcion_formatted.txt")
-            print("      Modo: transcripción manual (instantáneo)")
         else:
             from whisper_transcriber import transcribir_video
-            print("\n[3/6] Transcribiendo con faster-whisper...")
-            print("      Modelo: large-v3-turbo (4x más rápido)")
             transcribir_video(
                 video,
                 "transcripcion_formatted.txt"
             )
             texto_para_ia = leer_transcripcion_para_ia("transcripcion_formatted.txt")
-            print("      Modo: faster-whisper automático")
         
         if texto_para_ia:
             datos_enriquecidos = enriquecer_datos_para_ia(datos_audio, "transcripcion_formatted.txt")
@@ -971,32 +898,22 @@ def main():
         clips_validos = validar_clips(clips_ia)
         
         if not clips_validos:
-            print("\nNo se encontraron clips válidos")
             sys.exit(0)
         
         if modo_single:
-            print(f"\nProcesando solo el mejor clip (score: {clips_validos[0]['score']})")
             mejor_clip = [clips_validos[0]]
             archivos = procesar_clips(video, mejor_clip, carpeta)
         else:
             archivos = procesar_clips(video, clips_validos, carpeta)
         
-        print("\n" + "=" * 50)
-        print(f"  CLIPS GENERADOS: {len(archivos)}")
-        print(f"  UBICACIÓN: {os.path.abspath(carpeta)}")
-        print("=" * 50)
         
     except ValueError as e:
-        print(f"\nError de datos: {e}\n")
         sys.exit(1)
     except ConnectionError as e:
-        print(f"\nError de conexión: {e}\n")
         sys.exit(1)
     except TimeoutError as e:
-        print(f"\nError de tiempo: {e}\n")
         sys.exit(1)
     except Exception as e:
-        print(f"\nError: {e}\n")
         sys.exit(1)
 
 

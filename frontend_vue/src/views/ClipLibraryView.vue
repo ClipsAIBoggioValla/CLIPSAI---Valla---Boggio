@@ -207,7 +207,6 @@ async function submitPublish() {
   const plat = platform.value
   const cap = caption.value
   const wh = webhookUrl.value
-  console.log('[publish] submit', { clipId, plat, cap })
   publishing.value = clipId
   activePublishId.value = clipId
   try {
@@ -216,7 +215,6 @@ async function submitPublish() {
       caption: cap || undefined,
       webhook_override_url: plat === 'webhook' && wh ? wh : undefined,
     })
-    console.log('[publish] 202', res)
     toast.value = `Publicación en ${plat} encolada — PUBLISHING`
     publishClip.value = null
     if (data.value) {

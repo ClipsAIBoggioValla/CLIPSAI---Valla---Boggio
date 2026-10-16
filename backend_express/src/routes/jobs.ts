@@ -63,7 +63,6 @@ async function runClipEngine(videoPath: string, transcriptionPath: string): Prom
     throw new Error(`Transcripción no encontrada en disco: ${transcriptionPath}`)
   }
   const provider = getProvider()
-  console.log(`[engine:express] provider=${provider} ANTHROPIC=${!!process.env.ANTHROPIC_API_KEY} OPENAI=${!!process.env.OPENAI_API_KEY} OPENROUTER=${!!process.env.OPENROUTER_API_KEY}`)
   // Try real Python engine via child_process (soporta ANTHROPIC_API_KEY/OPENAI_API_KEY/OPENROUTER_API_KEY/DEEPSEEK)
   try {
     const { spawnSync } = await import('child_process')
@@ -81,7 +80,6 @@ async function runClipEngine(videoPath: string, transcriptionPath: string): Prom
             throw new Error(parsed.error || 'engine falló')
           }
           if (parsed?.clips && Array.isArray(parsed.clips) && parsed.clips.length > 0) {
-            console.log(`[engine:express] engine real OK ${parsed.clips.length} clips`)
             return { clips: parsed.clips, engine: 'real', provider }
           }
           if (parsed?.clips) return { clips: parsed.clips, engine: 'real', provider }
@@ -106,7 +104,6 @@ async function runClipEngine(videoPath: string, transcriptionPath: string): Prom
   // Intento directo Anthropic/OpenRouter si python falló y hay key — log con traceback
   if (provider !== 'none') {
     try {
-      console.log(`[engine:express] intento LLM directo provider=${provider} no implementado full`)
     } catch (e) {
       console.error('[engine:express] LLM directo fallo', e, e instanceof Error ? e.stack : '')
     }
@@ -171,7 +168,6 @@ export async function runJob(jobId: string): Promise<void> {
         [videoId, jobId, String(title).slice(0, 255), start, end, score, tags ? JSON.stringify(tags) : null, storage, 'ready']
       )
     }
-    console.log(`[jobs:express] job ${jobId} completado 100% real ${clipsPayload.length} clips`)
   } catch (err: unknown) {
     // FIX: Capturar e imprimir Traceback completo en lugar de solo str(err) == "4"
     const stack = err instanceof Error ? err.stack ?? '' : ''

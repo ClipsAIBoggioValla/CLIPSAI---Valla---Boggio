@@ -175,15 +175,13 @@ export default function ClipLibraryPage() {
     const plat = platform
     const cap = caption
     const wh = webhookUrl
-    console.log('[publish] submit', { clipId, plat, cap })
     setPublishing(clipId)
     try {
-      const res = await clipService.publishClip(clipId, {
+      await clipService.publishClip(clipId, {
         platform: plat,
         caption: cap || undefined,
         webhook_override_url: plat === 'webhook' && wh ? wh : undefined,
       })
-      console.log('[publish] 202', res)
       setActivePublishId(clipId)
       setToast(`Publicación en ${plat} encolada — PUBLISHING`)
       setPublishClip(null)
