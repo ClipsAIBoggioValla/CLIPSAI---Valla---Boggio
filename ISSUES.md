@@ -540,7 +540,15 @@ node -e "import('./dist/docs/swagger.js').then(m=>console.log(Object.keys(m.swag
 - [x] `git grep -rl "LibraryPage"` → **2 archivos** (`App.tsx`, `ClipLibraryPage.tsx`); antes 4.
 - [x] `npm run typecheck` + `npm run build` verde en **ambos** frontends (React 313 kB / Vue 174 kB).
 - [x] `tsc --noEmit` verde (backend Express + FastAPI compila).
-- [x] `pytest -q`: **no hay suite `pytest` en el repo** (`pytest` no está en `requirements.txt` ni en la imagen). Los tests existentes son scripts de humo (`scripts/test_hooks.py`, `scripts/test_subtitles.py`) y `backend_fastapi/tests/test_e2e_pipeline.py` (no recolectables por pytest). Se documenta en vez de inventar un framework.
+- [x] `pytest -q`: la suite `backend_fastapi/tests/test_e2e_pipeline.py` (3 tests, mock `FakeS3Client`) pasa con la imagen desplegada:
+  ```
+  docker run --rm -v "$(pwd):/repo:ro" -w /repo \
+    -e DATABASE_URL="postgresql+psycopg2://clipsai:clipsai@db:5432/clipsai" \
+    clipsai---valla---boggio-backend_fastapi:latest \
+    sh -c "pip install -q pytest httpx && python -m pytest -q backend_fastapi/tests/"
+  # 3 passed
+  ```
+  `pytest` no estaba en `requirements.txt` original; se instala efímeramente en el contenedor (no se modificó la imagen).
 
 **Realizado:**
 - **Dependencias muertas:** desinstalado `axios` y `recharts` de React (`-682` líneas del lockfile). `recharts` se reemplazó por **barras CSS idénticas a las de Vue** en `DashboardPage.tsx` (distribución por plataforma/score + actividad reciente), eliminando la divergencia visual y el bundle de ~400 kB.

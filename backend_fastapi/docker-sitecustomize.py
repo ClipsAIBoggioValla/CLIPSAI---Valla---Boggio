@@ -29,6 +29,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import sys
+from importlib.machinery import PathFinder
 
 _PKG = "backend_fastapi"
 
@@ -62,10 +63,19 @@ class _AliasLoader:
 
 
 class _PackageAliasFinder:
-    """Meta-path finder que reenvía `backend_fastapi.*` a `app.*`."""
+    """Meta-path finder que reenvía `backend_fastapi.*` a `app.*`.
+
+    Actúa **solo como fallback**: si el módulo real `backend_fastapi.*` es
+    importable (p. ej. al correr desde la raíz del repo, donde los tests y
+    cualquier consumidor legítimo lo usan), se devuelve `None` y el import normal
+    sigue su curso. Así no se interfiere con el layout de repo; solo se arregla la
+    imagen Docker, donde ese paquete no existe.
+    """
 
     def find_spec(self, fullname, path=None, target=None):  # noqa: D102
         if _target_name(fullname) is None:
+            return None
+        if PathFinder.find_spec(fullname, path) is not None:
             return None
         return importlib.util.spec_from_loader(fullname, loader=_AliasLoader())
 
