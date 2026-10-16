@@ -6,16 +6,33 @@
  * autoritativo, `fastapi-routes.json`) contra las rutas que Express monta en
  * `src/app.ts` + `src/routes/*.ts`.
  *
- * Cómo regenerar el snapshot de FastAPI (source actual, no la imagen stale):
+ * Cómo regenerar el snapshot de FastAPI. El snapshot debe reflejar la superficie
+ * que FastAPI expone realmente; como la imagen ya incluye `backend/` (routers
+ * opcionales `retrim`/`stream`) y el alias `backend_fastapi.*` -> `app.*`
+ * (`backend_fastapi/docker-sitecustomize.py`), basta correr la imagen desplegada:
  *
- *   docker compose run --rm --no-deps \
- *     -v "$(pwd)/backend_fastapi/app:/app/app:ro" -T backend_fastapi python -c "
+ *   docker compose build backend_fastapi
+ *   docker compose run --rm --no-deps -T backend_fastapi python -c "
  *   import json
  *   from app.main import app
- *   print(json.dumps([{'path': r.path,
- *                      'methods': sorted(m for m in getattr(r,'methods',[]) or [])
- *                     } for r in app.routes]))
+ *   out = []
+ *   seen = set()
+ *   for r in app.routes:
+ *       methods = sorted(m for m in getattr(r,'methods',[]) or [] if m not in ('HEAD','OPTIONS'))
+ *       if not methods:
+ *           continue
+ *       key = (r.path, tuple(methods))
+ *       if key in seen:
+ *           continue
+ *       seen.add(key)
+ *       out.append({'path': r.path, 'methods': methods})
+ *   out.sort(key=lambda x: x['path'])
+ *   print(json.dumps(out, indent=1))
  *   " > backend_express/scripts/fastapi-routes.json
+ *
+ * Importante: NO montar `backend_fastapi/app` por encima del de la imagen, porque
+ * entonces faltaría `/backend` y el inventario saldría con 60 rutas en vez de 62
+ * (antes de Issue 35 la superficie de FastAPI dependía del layout de ejecución).
  *
  * Uso:
  *   npm run build && node scripts/audit-parity.mjs
