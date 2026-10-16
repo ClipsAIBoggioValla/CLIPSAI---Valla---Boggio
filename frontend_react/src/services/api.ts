@@ -183,6 +183,35 @@ export const clipService = {
     const base = (raw || 'https://clipsai-backend.onrender.com').replace(/\/$/, '')
     return `${base}/clips/${clipId}/descarga`
   },
+  async downloadClip(clip: import('@/types/api').ClipListItem): Promise<void> {
+    const token = (() => { try { return localStorage.getItem(TOKEN_KEY) } catch { return null } })()
+    const bust = `t=${clip.updated_at ? new Date(clip.updated_at as unknown as string).getTime() : Date.now()}`
+    const url = `${BASE_URL}/clips/${clip.id}/descarga${token ? `?token=${encodeURIComponent(token)}&${bust}` : `?${bust}`}`
+    try {
+      const headers: Record<string, string> = { 'ngrok-skip-browser-warning': 'true' }
+      if (token) headers['Authorization'] = `Bearer ${token}`
+      const res = await fetch(url, { headers, credentials: 'include' })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const blob = await res.blob()
+      const cd = res.headers.get('Content-Disposition')
+      let filename = `${clip.title || clip.id}.mp4`
+      if (cd) {
+        const m = cd.match(/filename="?([^"]+)"?/)
+        if (m) filename = m[1]
+      }
+      const blobUrl = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = blobUrl
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 5000)
+    } catch {
+      const fallback = this.downloadUrl(clip.id)
+      window.open(fallback, '_blank')
+    }
+  },
 }
 
 export const exportService = {
