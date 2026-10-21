@@ -638,7 +638,7 @@ def _run_job(job_id: uuid.UUID) -> None:
                 except Exception:
                     _claude_key = ""
             if _claude_key:
-                logger.info("[jobs] ANTHROPIC_API_KEY presente (prefijo %s...), modelo=%s — se usará Claude para selección semántica", _claude_key[:10], os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514"))
+                logger.info("[jobs] ANTHROPIC_API_KEY presente (prefijo %s...), modelo=%s — se usará Claude para selección semántica", _claude_key[:10], os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5-5"))
             else:
                 logger.warning("[jobs] ANTHROPIC_API_KEY no configurada — se usará heurística nativa (revisar backend_fastapi/app/config.py y docker-compose.yml)")
         except Exception:

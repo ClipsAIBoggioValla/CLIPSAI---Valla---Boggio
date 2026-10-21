@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Dependencias del sistema: ffmpeg/ffprobe para render ASS/Hook + curl healthcheck
+# Este paso ya sabemos que funciona y queda en caché (tarda ~60s)
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg curl \
     && ffmpeg -version \
@@ -17,8 +17,8 @@ RUN apt-get update \
 
 COPY backend_fastapi/requirements.txt ./
 RUN pip install -r requirements.txt
-RUN python -c "from faster_whisper import WhisperModel; WhisperModel('deepdml/faster-whisper-large-v3-turbo-ct2', device='cpu', compute_type='int8')"
-RUN chmod -R a+rX /tmp/huggingface_cache
+
+# NOTA: Ya NO está la línea que descargaba el modelo de Whisper durante el build.
 
 COPY backend_fastapi/app ./app
 # Paquete `backend/` (worker RunPod): `app/main.py` importa condicionalmente
@@ -29,17 +29,18 @@ COPY backend ./backend
 # (60 rutas en Docker vs 62 desde la raíz del repo).
 COPY backend_fastapi/docker-sitecustomize.py /usr/local/lib/python3.11/site-packages/sitecustomize.py
 
-# Storage persistente para clips renderizados (ASS + Hook) — Issue #29
 RUN mkdir -p /app/storage/clips /app/storage/uploads \
     && chmod -R 777 /app/storage
 
 EXPOSE 8000
 
-# Usuario no-root
 RUN useradd --create-home --shell /bin/bash appuser \
     && chown -R appuser:appuser /app \
     && chmod -R 775 /app/storage
+
 USER appuser
 
-# Render/Railway inyectan $PORT; sin PORT (docker-compose local) arranca en 8000.
+# Permiso de escritura para que el modelo se descargue en runtime en RunPod
+RUN mkdir -p /tmp/huggingface_cache && chown -R appuser:appuser /tmp/huggingface_cache && chmod -R a+rwX /tmp/huggingface_cache
+
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

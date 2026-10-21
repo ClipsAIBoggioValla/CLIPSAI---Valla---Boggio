@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import tempfile
 import types
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from backend.handler import process_video_job
@@ -14,7 +16,11 @@ from backend_fastapi.app.routers.videos import (
     generate_upload_url,
     process_video,
 )
-from backend_fastapi.app.services.runpod_service import RunPodError, process_video_via_runpod
+from backend_fastapi.app.services.runpod_service import (
+    RunPodError,
+    process_local_video_via_runpod,
+    process_video_via_runpod,
+)
 
 
 class RunPodHandlerTests(unittest.TestCase):
@@ -26,7 +32,7 @@ class RunPodHandlerTests(unittest.TestCase):
                 "clips": [
                     {"inicio": "00:00:10", "fin": "00:00:35", "score": 8, "titulo": "Momento clave"}
                 ],
-                "transcription_segments": [{"text": "transcript"}],
+                "transcription_segments": [{"start": 0, "end": 1, "text": "transcript"}],
             }
         )
 
@@ -46,7 +52,9 @@ class RunPodHandlerTests(unittest.TestCase):
         self.assertEqual(result["clip_count"], 1)
         self.assertEqual(result["clips"][0]["titulo"], "Momento clave")
         self.assertEqual(result["transcription_segments_count"], 1)
+        self.assertEqual(result["transcription_segments"], [{"start": 0.0, "end": 1.0, "text": "transcript"}])
         engine.run_clip_engine.assert_called_once()
+        self.assertFalse(engine.run_clip_engine.call_args.kwargs["allow_runpod"])
 
     def test_handler_requires_video_url(self) -> None:
         with self.assertRaisesRegex(ValueError, "video_url"):
@@ -122,6 +130,95 @@ class PresignedUploadUrlTests(unittest.TestCase):
 
 
 class RunPodOrchestrationTests(unittest.TestCase):
+    @patch.dict(
+        os.environ,
+        {
+            "RUNPOD_API_KEY": "test-runpod-key",
+            "RUNPOD_ENDPOINT_ID": "endpoint-123",
+            "AWS_ACCESS_KEY_ID": "test-access-key",
+            "AWS_SECRET_ACCESS_KEY": "test-secret-key",
+            "AWS_ENDPOINT_URL": "https://s3.example.test",
+            "BUCKET_NAME": "clipsai-test",
+        },
+        clear=False,
+    )
+    @patch("backend_fastapi.app.services.runpod_service.process_video_via_runpod")
+    def test_local_video_upload_is_presigned_and_sent_to_runpod(self, runpod_call: Mock) -> None:
+        s3_client = Mock()
+        s3_client.generate_presigned_url.return_value = "https://s3.example.test/presigned-read"
+        boto3_module = types.ModuleType("boto3")
+        boto3_module.client = Mock(return_value=s3_client)
+        config_module = types.ModuleType("botocore.config")
+        config_module.Config = Mock(return_value="s3v4-config")
+        botocore_module = types.ModuleType("botocore")
+        botocore_module.config = config_module
+        runpod_call.return_value = {
+            "status": "COMPLETED",
+            "clips": [{"title": "test"}],
+            "transcription_segments": [{"start": 0, "end": 1, "text": "hola"}],
+        }
+
+        with tempfile.TemporaryDirectory() as directory:
+            video_path = Path(directory) / "video.mp4"
+            transcript_path = Path(directory) / "transcript.txt"
+            video_path.write_bytes(b"video-data")
+            transcript_path.write_text("00:00:00 - Hola", encoding="utf-8")
+            with patch.dict(
+                sys.modules,
+                {"boto3": boto3_module, "botocore": botocore_module, "botocore.config": config_module},
+            ):
+                result = process_local_video_via_runpod(video_path, transcription_path=transcript_path)
+
+        self.assertEqual(result["status"], "COMPLETED")
+        s3_client.upload_file.assert_called_once()
+        self.assertEqual(s3_client.generate_presigned_url.call_args.kwargs["ExpiresIn"], 3600)
+        s3_client.delete_object.assert_called_once()
+        runpod_call.assert_called_once_with(
+            "https://s3.example.test/presigned-read",
+            transcription_text="00:00:00 - Hola",
+            video_id=None,
+        )
+
+    @patch.dict(os.environ, {"RUNPOD_API_KEY": "test-key", "RUNPOD_ENDPOINT_ID": "endpoint-123"})
+    @patch("backend_fastapi.app.services.runpod_service.process_local_video_via_runpod")
+    def test_engine_delegates_without_local_whisper(self, remote_process: Mock) -> None:
+        from backend_fastapi.app.services.engine import run_clip_engine
+
+        remote_result = {
+            "status": "COMPLETED",
+            "clips": [{"title": "remote clip"}],
+            "transcription_segments": [{"start": 0, "end": 1, "text": "hola"}],
+        }
+        remote_process.return_value = remote_result
+        with tempfile.TemporaryDirectory() as directory:
+            video_path = Path(directory) / "video.mp4"
+            transcript_path = Path(directory) / "transcript.txt"
+            video_path.write_bytes(b"video-data")
+            transcript_path.write_text("transcript", encoding="utf-8")
+
+            result = run_clip_engine(str(video_path), str(transcript_path))
+
+        self.assertEqual(result["clips"], remote_result["clips"])
+        self.assertEqual(result["engine"], "runpod")
+        remote_process.assert_called_once()
+
+    @patch.dict(os.environ, {"RUNPOD_API_KEY": "test-key", "RUNPOD_ENDPOINT_ID": "endpoint-123"})
+    @patch("backend_fastapi.app.services.runpod_service.process_local_video_via_runpod")
+    def test_video_transcription_delegates_to_runpod(self, remote_process: Mock) -> None:
+        from backend_fastapi.app.services.whisper_service import transcribe_video
+
+        remote_process.return_value = {
+            "transcription_segments": [{"start": 0, "end": 1, "text": "hola"}],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            video_path = Path(directory) / "video.mp4"
+            video_path.write_bytes(b"video-data")
+
+            segments = transcribe_video(str(video_path))
+
+        self.assertEqual(segments[0]["text"], "hola")
+        remote_process.assert_called_once()
+
     @patch.dict(
         os.environ,
         {
