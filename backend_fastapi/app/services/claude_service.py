@@ -37,9 +37,9 @@ ANTHROPIC_WORKSPACE_ID = os.getenv("ANTHROPIC_WORKSPACE_ID", "").strip()
 CLAUDE_MODEL = (
     os.getenv("CLAUDE_MODEL", "").strip()
     or os.getenv("ANTHROPIC_MODEL", "").strip()
-    or "claude-3-5-sonnet-20241022"
+    or "claude-sonnet-5-5"
 )
-CLAUDE_FALLBACK_MODEL = os.getenv("CLAUDE_FALLBACK_MODEL", "").strip() or "claude-3-haiku-20240307"
+CLAUDE_FALLBACK_MODEL = os.getenv("ANTHROPIC_FALLBACK_MODEL", "claude-haiku-5-5")
 ANTHROPIC_VERSION = os.getenv("ANTHROPIC_VERSION", "2023-06-01").strip()
 ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages"
 
