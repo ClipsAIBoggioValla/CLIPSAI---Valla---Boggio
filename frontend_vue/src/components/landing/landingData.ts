@@ -1,1 +1,1 @@
-export * from '../../../../frontend_react/src/components/landing/landingData'
+export * from '@shared/components/landing/landingData'

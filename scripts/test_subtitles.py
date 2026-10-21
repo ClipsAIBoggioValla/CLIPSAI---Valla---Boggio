@@ -13,10 +13,8 @@ def _resolve_video(input_path: str | None) -> Path:
         candidates.append(Path(input_path))
     candidates.extend(
         [
-            Path("backend/tests/fixtures/sample.mp4"),
-            Path("backend_fastapi/tests/fixtures/sample.mp4"),
+
             Path("tests/fixtures/sample.mp4"),
-            Path(__file__).resolve().parents[1] / "backend" / "tests" / "fixtures" / "sample.mp4",
             Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "sample.mp4",
         ]
     )
