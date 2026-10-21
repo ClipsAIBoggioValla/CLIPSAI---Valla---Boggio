@@ -6,7 +6,7 @@
     </div>
     <div class="flex items-start justify-between gap-2">
       <h3 class="text-sm font-bold line-clamp-2 flex-1 cursor-pointer hover:text-[#B4F105] transition-colors" style="color: #F1F5F9" @click="$emit('preview', clip)">{{ clip.title || 'Clip sin título' }}</h3>
-      <span :class="scoreBadge(clip.score)">Viral Score: {{ formatScore(clip.score) }}/100</span>
+      <span :class="scoreBadgeClass(clip.score)">Viral Score: {{ formatScore(clip.score) }}/100</span>
     </div>
     <div class="flex items-center gap-2 flex-wrap">
       <p class="text-xs font-mono px-2.5 py-1.5 rounded-full border inline-flex items-center gap-1.5" style="color: #94A3B8; background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.08)">
@@ -70,7 +70,7 @@
 
 <script setup lang="ts">
 import type { ClipListItem } from '@/types/api'
-import { formatScore, formatDuration, formatTimeRange, scoreBadge, publishBadge } from './helpers'
+import { formatScore, formatDuration, formatTimeRange, scoreBadgeClass, publishBadge } from './helpers'
 
 const props = defineProps<{
   clip: ClipListItem

@@ -30,6 +30,8 @@ META_TOKEN_URL = "https://graph.facebook.com/v18.0/oauth/access_token"
 META_LONG_LIVED_URL = "https://graph.facebook.com/oauth/access_token"
 
 DEFAULT_REDIRECT_URI = "https://api.clipsai.xyz/auth/social/instagram/callback"
+from .social_common import decode_state as _decode_state, encode_state as _encode_state
+
 
 
 def _get_instagram_config() -> tuple[str, str, str]:
@@ -44,29 +46,6 @@ def _get_instagram_config() -> tuple[str, str, str]:
         redirect_uri = default_uri
     return client_id, client_secret, redirect_uri
 
-
-def _encode_state(user_id: str) -> str:
-    payload = json.dumps({"user_id": str(user_id)}, separators=(",", ":"))
-    return base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
-
-
-def _decode_state(state: str) -> str | None:
-    if not state:
-        return None
-    padded = state + "=" * (-len(state) % 4)
-    for decoder in (base64.urlsafe_b64decode, base64.b64decode):
-        try:
-            decoded = decoder(padded.encode()).decode()
-            try:
-                data = json.loads(decoded)
-                if isinstance(data, dict) and "user_id" in data:
-                    return str(data["user_id"])
-            except Exception:
-                pass
-            return decoded
-        except Exception:
-            continue
-    return state
 
 
 def get_instagram_auth_url(user_id: str) -> str:

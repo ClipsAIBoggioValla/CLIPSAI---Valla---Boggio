@@ -52,7 +52,7 @@
                   <p class="font-bold line-clamp-1 cursor-pointer hover:text-[#B4F105]" style="color: var(--text-main)" @click="setPreviewClip(clip)">{{ clip.title || 'Sin título' }}</p>
                   <p v-if="clip.transcript" class="text-xs line-clamp-1 mt-1" style="color: var(--text-muted-green)">{{ clip.transcript }}</p>
                 </td>
-                <td><span :class="scoreBadge(clip.score)">Viral Score: {{ formatScore(clip.score) }}/100</span></td>
+                <td><span :class="scoreBadgeClass(clip.score)">Viral Score: {{ formatScore(clip.score) }}/100</span></td>
                 <td class="font-mono text-xs" style="color: var(--text-muted-green)">{{ formatDuration(clip) }}<br /><span class="text-[11px] text-[#64748B]">{{ formatTimeRange(clip) }}</span></td>
                 <td>
                   <div class="flex items-center gap-2">
@@ -94,7 +94,7 @@
 
 <script setup lang="ts">
 import type { ClipListItem, ClipListResponse } from '@/types/api'
-import { formatScore, formatDuration, formatTimeRange, scoreBadge, publishBadge } from './helpers'
+import { formatScore, formatDuration, formatTimeRange, scoreBadgeClass, publishBadge } from './helpers'
 import ClipCard from './ClipCard.vue'
 
 defineProps<{
