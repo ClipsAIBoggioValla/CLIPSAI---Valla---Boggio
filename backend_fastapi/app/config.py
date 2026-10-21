@@ -128,7 +128,7 @@ class Settings(BaseSettings):
 
     # ---- Claude / LLM (Anthropic) — selección semántica de clips y títulos ----
     anthropic_api_key: str = Field(default="", validation_alias="ANTHROPIC_API_KEY")
-    anthropic_model: str = Field(default="claude-sonnet-4-20250514", validation_alias="ANTHROPIC_MODEL")
+    anthropic_model: str = Field(default="claude-sonnet-5-5", validation_alias="ANTHROPIC_MODEL")
     anthropic_version: str = Field(default="2023-06-01", validation_alias="ANTHROPIC_VERSION")
     openai_api_key: str = Field(default="", validation_alias="OPENAI_API_KEY")
     openrouter_api_key: str = Field(default="", validation_alias="OPENROUTER_API_KEY")

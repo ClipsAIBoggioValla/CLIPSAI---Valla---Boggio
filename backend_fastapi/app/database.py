@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import logging
+import os
 from collections.abc import Generator
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from .config import get_settings
+
+logger = logging.getLogger(__name__)
+
+# Variable global para indicar si la DB está disponible
+DB_AVAILABLE = False
 
 _settings = get_settings()  # cacheado, levanta una vez y usa las vars del ambiente
 
@@ -45,23 +52,44 @@ def _fallback_db_url(url: str) -> str:
     return url
 
 
-_resolved_url = _fallback_db_url(_settings.database_url)
+# Inicialización perezosa de la base de datos
+engine = None
+SessionLocal = None
 
-# `pool_pre_ping=True` evita conexiones muertas tras reinicios de Postgres.
-# `future=True` para API de SQLAlchemy 2.0.
-engine = create_engine(
-    _resolved_url,
-    pool_pre_ping=True,
-    future=True,
-)
+db_url = _settings.database_url
 
-SessionLocal = sessionmaker(
-    bind=engine,
-    autoflush=False,
-    autocommit=False,
-    expire_on_commit=False,
-    class_=Session,
-)
+if db_url:
+    try:
+        _resolved_url = _fallback_db_url(db_url)
+        # `pool_pre_ping=True` evita conexiones muertas tras reinicios de Postgres.
+        # `future=True` para API de SQLAlchemy 2.0.
+        engine = create_engine(
+            _resolved_url,
+            pool_pre_ping=True,
+            future=True,
+        )
+
+        SessionLocal = sessionmaker(
+            bind=engine,
+            autoflush=False,
+            autocommit=False,
+            expire_on_commit=False,
+            class_=Session,
+        )
+
+        # Probar conexión
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        
+        DB_AVAILABLE = True
+        logger.info("Database connected successfully.")
+    except Exception as e:
+        logger.warning(f"Database connection failed on startup: {e}. Running in DB-less mode.")
+        DB_AVAILABLE = False
+else:
+    logger.info("No DATABASE_URL provided. Running in DB-less mode (e.g., RunPod worker).")
+    DB_AVAILABLE = False
 
 
 class Base(DeclarativeBase):
@@ -70,6 +98,9 @@ class Base(DeclarativeBase):
 
 def get_db() -> Generator[Session, None, None]:
     """Dependencia de FastAPI: entrega una sesion y garantiza su cierre."""
+    if not DB_AVAILABLE or SessionLocal is None:
+        raise RuntimeError("Database not available")
+    
     session = SessionLocal()
     try:
         yield session
