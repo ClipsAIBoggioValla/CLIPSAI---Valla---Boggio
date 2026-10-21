@@ -43,5 +43,5 @@ USER appuser
 # Permiso de escritura para que el modelo se descargue en runtime en RunPod
 RUN mkdir -p /tmp/huggingface_cache && chown -R appuser:appuser /tmp/huggingface_cache && chmod -R a+rwX /tmp/huggingface_cache
 
-# CMD condicional: RUN_MODE=serverless para RunPod, uvicorn para Render
-CMD ["sh", "-c", "if [ \"$RUN_MODE\" = \"serverless\" ]; then python -m runpod.serverless.start --handler backend.handler; else uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}; fi"]
+# CMD condicional auto-diagnosticable: RUN_MODE=serverless para RunPod, uvicorn para Render
+CMD ["sh", "-c", "echo '[BOOT] RUN_MODE='\"$RUN_MODE\"''; if [ \"$RUN_MODE\" = \"serverless\" ]; then echo '[BOOT] MODO=SERVERLESS (runpod handler)'; exec python -m runpod.serverless.start --handler backend.handler; else echo '[BOOT] MODO=WEB (uvicorn)'; exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}; fi"]
