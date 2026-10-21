@@ -35,92 +35,16 @@ CORRUPT_TOKEN="${CORRUPT_TOKEN:-}"
 if [ -z "$CORRUPT_TOKEN" ]; then echo "[verify-auth] ERROR: CORRUPT_TOKEN env var required (do not hardcode secrets)" >&2; exit 1; fi
 
 # -----------------------------------------------------------------------------
-# Colores (deshabilitados si no hay TTY o NO_COLOR esta seteado)
+# Helpers compartidos (scripts/_verify-common.sh)
 # -----------------------------------------------------------------------------
-if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
-    C_RESET="\033[0m"; C_BOLD="\033[1m"
-    C_RED="\033[31m";  C_GREEN="\033[32m"
-    C_YELLOW="\033[33m"; C_BLUE="\033[34m"; C_CYAN="\033[36m"; C_GRAY="\033[90m"
-else
-    C_RESET=""; C_BOLD=""; C_RED=""; C_GREEN=""; C_YELLOW=""; C_BLUE=""; C_CYAN=""; C_GRAY=""
-fi
-
-log()   { echo -e "${C_CYAN}[verify-auth]${C_RESET} $*"; }
-step()  { echo -e "\n${C_BOLD}${C_BLUE}==>${C_RESET} ${C_BOLD}$*${C_RESET}"; }
-info()  { echo -e "  ${C_GRAY}$*${C_RESET}"; }
-pass()  { echo -e "  ${C_GREEN}${C_BOLD}[PASS]${C_RESET} $*"; }
-faild() { echo -e "  ${C_RED}${C_BOLD}[FAIL]${C_RESET} $*"; }
-fatal() { echo -e "${C_RED}${C_BOLD}[FATAL]${C_RESET} $*" >&2; exit 1; }
-
-# Contadores globales
-TESTS_TOTAL=0
-TESTS_PASSED=0
-declare -a FAILED_TESTS=()
-
-record_pass() { TESTS_TOTAL=$(( TESTS_TOTAL + 1 )); TESTS_PASSED=$(( TESTS_PASSED + 1 )); pass "$1"; }
-record_fail() {
-    TESTS_TOTAL=$(( TESTS_TOTAL + 1 ))
-    FAILED_TESTS+=("$1")
-    faild "$1"
-}
+VERIFY_NAME="verify-auth"
+source "$(dirname "$0")/_verify-common.sh"
 
 # Variables compartidas entre helpers y tests
 HTTP_CODE=""
 HTTP_BODY=""
 BODY_FILE="$(mktemp -t verify-auth-body.XXXXXX)"
 trap 'rm -f "$BODY_FILE"' EXIT
-
-# -----------------------------------------------------------------------------
-# Utilidades
-# -----------------------------------------------------------------------------
-command -v curl >/dev/null 2>&1 || fatal "'curl' no esta instalado."
-
-HAS_JQ=0
-if command -v jq >/dev/null 2>&1; then
-    HAS_JQ=1
-else
-    log "${C_YELLOW}jq no encontrado; usando parser fallback (regex).${C_RESET}"
-fi
-
-# Extrae un campo string de un JSON plano.
-json_extract() {
-    local json="$1" key="$2"
-    if (( HAS_JQ )); then
-        printf '%s' "$json" | jq -r --arg k "$key" '.[$k] // empty'
-    else
-        # Fallback: solo funciona con valores string simples ("key":"value").
-        printf '%s' "$json" \
-            | grep -oE "\"${key}\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" \
-            | head -n1 \
-            | sed -E "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\"([^\"]*)\".*/\1/"
-    fi
-}
-
-# Ejecuta una request HTTP y guarda el status en HTTP_CODE y el body en HTTP_BODY.
-# Args: METHOD URL [--json BODY_JSON] [--header "Header: valor" ...]
-http_request() {
-    local method="$1" url="$2"; shift 2
-    local -a args=(-sS -o "$BODY_FILE" -w "%{http_code}" -X "$method" "$url")
-
-    while (( $# > 0 )); do
-        case "$1" in
-            --json)
-                args+=(-H "Content-Type: application/json" --data "$2")
-                shift 2
-                ;;
-            --header)
-                args+=(-H "$2")
-                shift 2
-                ;;
-            *)
-                fatal "http_request: arg desconocido '$1'"
-                ;;
-        esac
-    done
-
-    HTTP_CODE=$(curl "${args[@]}") || fatal "curl fallo contra ${url}. Backend inaccesible en ${BASE_URL}."
-    HTTP_BODY=$(cat "$BODY_FILE")
-}
 
 # -----------------------------------------------------------------------------
 # 0) Precheck: backend arriba
