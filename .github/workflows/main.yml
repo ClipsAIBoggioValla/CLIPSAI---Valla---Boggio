@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - dev
+      - main
 
 jobs:
   build-and-push:
@@ -29,7 +29,7 @@ jobs:
           file: ./backend_fastapi/Dockerfile
           push: true
           tags: |
-            mfboggio/clipsai-worker:v20
+            mfboggio/clipsai-worker:v21
             mfboggio/clipsai-worker:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
