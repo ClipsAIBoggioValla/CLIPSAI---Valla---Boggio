@@ -1,18 +1,6 @@
 import { apiClient } from '@/api/client'
+import { buildClipListQuery, normalizeJob, normalizeVideo, triggerBlobDownload } from '@shared/services/shared'
 import type { AuthToken, AuthUser, JobResponse, StatsSummary, UserLogin, UserRegister, VideoUploadResponse } from '@/types/api'
-
-function normalizeVideo(raw: VideoUploadResponse & { filename?: string; title?: string }): VideoUploadResponse {
-  const filename = raw.filename ?? raw.title ?? ''
-  const title = raw.title ?? raw.filename ?? filename
-  return { ...raw, filename, title }
-}
-
-function normalizeJob(raw: JobResponse & { id?: string; job_id?: string; status?: string; progress?: number }): JobResponse {
-  const id = raw.id ?? raw.job_id ?? ''
-  const status = (raw.status ?? 'PENDING').toString().toUpperCase() as JobResponse['status']
-  const progress = typeof raw.progress === 'number' ? raw.progress : 0
-  return { ...raw, id, job_id: raw.job_id ?? id, status, progress } as JobResponse
-}
 
 export const authService = {
   async login(data: UserLogin): Promise<AuthToken> {
@@ -109,16 +97,7 @@ export const userService = {
 
 export const clipService = {
   async getClips(params?: import('@/types/api').ClipListParams): Promise<import('@/types/api').ClipListResponse> {
-    const cleaned: Record<string, string> = {}
-    if (params?.q?.trim()) cleaned.q = params.q.trim()
-    if (params?.min_score !== undefined) cleaned.min_score = String(params.min_score)
-    if (params?.sort_by) cleaned.sort_by = params.sort_by
-    if (params?.page) cleaned.page = String(params.page)
-    if (params?.limit) cleaned.limit = String(params.limit)
-    if (params?.video_id) cleaned.video_id = params.video_id
-    if (params?.job_id) cleaned.job_id = params.job_id
-    if (params?.status) cleaned.status = params.status
-    const qs = Object.keys(cleaned).length ? `?${new URLSearchParams(cleaned).toString()}` : ''
+    const qs = buildClipListQuery(params)
     const { data } = await apiClient.get<import('@/types/api').ClipListResponse>(`/clips${qs}`)
     return data
   },
@@ -147,21 +126,9 @@ export const clipService = {
       const token = (() => { try { return localStorage.getItem('clipsai_token') } catch { return null } })()
       const bust = `t=${clip.updated_at ? new Date(clip.updated_at as unknown as string).getTime() : Date.now()}`
       const res = await apiClient.get<Blob>(`/clips/${clip.id}/descarga${token ? `?token=${encodeURIComponent(token)}&${bust}` : `?${bust}`}`, { responseType: 'blob' })
-      const cd = (res.headers as Record<string, string>)['content-disposition'] ?? null
-      let filename = `${clip.title || clip.id}.mp4`
-      if (cd) {
-        const m = cd.match(/filename="?([^"]+)"?/)
-        if (m) filename = m[1]
-      }
       const blob = res.data as unknown as Blob
-      const blobUrl = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = blobUrl
-      a.download = filename
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 5000)
+      const cd = (res.headers as Record<string, string>)['content-disposition'] ?? null
+      triggerBlobDownload(blob, cd, `${clip.title || clip.id}.mp4`)
     } catch {
       window.open(`${(import.meta.env.VITE_API_URL ?? 'http://localhost:8000').trim().replace(/\/$/, '')}/clips/${clip.id}/descarga`, '_blank')
     }
@@ -177,22 +144,6 @@ export const jobService = {
     const { data: raw } = await apiClient.get<JobResponse & { id?: string; job_id?: string }>(`/jobs/${jobId}`)
     return normalizeJob(raw as JobResponse & { id?: string; job_id?: string })
   },
-}
-
-function triggerBlobDownload(blob: Blob, contentDisposition: string | null, fallbackFilename: string) {
-  let filename = fallbackFilename
-  if (contentDisposition) {
-    const m = contentDisposition.match(/filename="?([^"]+)"?/)
-    if (m) filename = m[1]
-  }
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 export const exportService = {
