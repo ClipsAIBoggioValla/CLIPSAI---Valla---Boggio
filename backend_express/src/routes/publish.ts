@@ -218,10 +218,3 @@ publishRouter.get('/clips/:clipId/publish-stream', authMiddleware, async (req: A
     } finally { client.release() }
   } catch {}
 })
-
-publishRouter.get('/clips/:clipId/stream', authMiddleware, async (req: AuthRequest, res) => {
-  // Alias legacy: redirige a publish-stream
-  req.params.clipId = String(req.params.clipId)
-  // Reutilizar handler anterior via redirección interna 307
-  res.redirect(307, `/clips/${req.params.clipId}/publish-stream`)
-})

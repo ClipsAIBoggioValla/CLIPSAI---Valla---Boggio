@@ -17,6 +17,10 @@ const directUploadResult = ref<import('@/types/api').RunPodProcessResponse | nul
 const error = ref<string | null>(null)
 const activeJobId = ref<string | null>(null)
 const isDirectUploadBusy = computed(() => directUploadState.value === 'uploading' || directUploadState.value === 'processing')
+type SampleState = 'idle' | 'loading' | 'error'
+const sampleState = ref<SampleState>('idle')
+const sampleError = ref<string | null>(null)
+const isSampleBusy = computed(() => sampleState.value === 'loading')
 
 onMounted(() => {
   try {
@@ -52,6 +56,23 @@ async function handleFileUpload(file: File) {
   } catch (err: unknown) {
     directUploadError.value = err instanceof ApiError ? err.detail : err instanceof Error ? err.message : 'Error inesperado durante la subida directa.'
     directUploadState.value = 'error'
+  }
+}
+
+/** Issue 34: iniciar job con video de muestra sin subir archivo. */
+async function handleSampleJob() {
+  sampleState.value = 'loading'
+  sampleError.value = null
+  try {
+    const job = await videoService.createSampleJob()
+    const jobId = job.job_id ?? job.id
+    try {
+      localStorage.setItem('clipsai_active_job_id', jobId)
+    } catch {}
+    router.push(`/jobs/${jobId}`)
+  } catch (err: unknown) {
+    sampleError.value = err instanceof ApiError ? err.detail : err instanceof Error ? err.message : 'Error inesperado al crear el job de muestra.'
+    sampleState.value = 'error'
   }
 }
 
@@ -108,8 +129,23 @@ async function handleSubmit() {
           <span class="text-sm font-bold" style="color: #F1F5F9">{{ videoFile ? videoFile.name : 'Arrastra o selecciona tu video' }}</span>
           <span class="text-xs mt-1" style="color: #94A3B8">.mp4, .mov, .avi (máx. 500MB)</span>
           <span v-if="videoFile" class="inline-flex items-center gap-1.5 mt-2 px-2.5 py-1 rounded-full text-xs font-bold bg-[rgba(180,241,5,0.14)] text-[#B4F105] border border-[rgba(180,241,5,0.25)]"><i class="bi bi-check-circle-fill" /> {{ (videoFile.size / 1024 / 1024).toFixed(1) }} MB</span>
-          <input type="file" accept=".mp4,.mov,.avi,video/mp4,video/quicktime" class="hidden" :disabled="status !== 'idle' || isDirectUploadBusy" @change="onVideoChange" />
+          <input type="file" accept=".mp4,.mov,.avi,video/mp4,video/quicktime" class="hidden" :disabled="status !== 'idle' || isDirectUploadBusy || isSampleBusy" @change="onVideoChange" />
         </label>
+        <!-- Issue 34: botón para probar con video de muestra -->
+        <div class="mt-3">
+          <button
+            type="button"
+            :disabled="status !== 'idle' || isDirectUploadBusy || isSampleBusy"
+            class="btn-custom btn-custom-light w-full justify-center disabled:opacity-50"
+            @click="handleSampleJob"
+          >
+            <span v-if="sampleState === 'loading'" class="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-[#B4F105]" />
+            <i v-else class="bi bi-play-circle" />
+            {{ sampleState === 'loading' ? 'Preparando video de muestra...' : 'Probar con video de muestra' }}
+          </button>
+          <p v-if="sampleState === 'error' && sampleError" role="alert" class="text-xs text-red-400 mt-2">{{ sampleError }}</p>
+          <p class="text-xs text-[#94A3B8] mt-2 text-center">Usa un clip liviano de ejemplo para evaluar el flujo completo sin subir archivos pesados.</p>
+        </div>
       </div>
 
       <div>

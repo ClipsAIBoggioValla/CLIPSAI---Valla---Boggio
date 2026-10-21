@@ -120,7 +120,12 @@ function buildFallback(_videoId: string, _preview: string): Record<string, unkno
   throw new Error('buildFallback deshabilitado en modo 100% real')
 }
 
-async function runJob(jobId: string): Promise<void> {
+/**
+ * Ejecuta el pipeline completo de un job (engine de clips + persistencia).
+ * Exportado para que `routes/videos.ts` pueda lanzar el job del video de
+ * muestra (`POST /videos/sample`) en background, igual que FastAPI.
+ */
+export async function runJob(jobId: string): Promise<void> {
   const client = await pool.connect()
   try {
     await client.query("UPDATE jobs SET status = 'processing', updated_at = NOW() WHERE id = $1", [jobId])
