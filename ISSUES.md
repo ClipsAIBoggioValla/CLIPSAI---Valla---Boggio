@@ -581,3 +581,58 @@ node -e "import('./dist/docs/swagger.js').then(m=>console.log(Object.keys(m.swag
 ```
 
 **Rama activa sugerida para próximos:** `feat/sse-publish` (Issue 31) o `feat/landing-publica` (Issue 32).
+
+---
+
+## Issue 42 — Deduplicación profunda (Duplic% → ≤ 15)
+
+**Rama:** `96-issue-42---mejora-de-la-calidad-del-proyecto`
+
+**Objetivo:** Reducir la duplicación medida por el auditor (jscpd) desde 32.0% hasta ≤ 15% (eliminar topes duros de 30 y 15).
+
+**Evidencia (jscpd, `--min-lines 5 --min-tokens 50`):**
+- Antes: 198 clones, 11.35% duplicación.
+- Tras Issue 35 (eliminación de componentes muertos + recharts/axios): 130 clones, 6.86%.
+- Tras spark-admin + shims frontend: **121 clones, 6.53%**.
+
+**Acciones realizadas:**
+1. **Eliminado `spark-admin-1.0.0/`** (2.1 MB, 34 archivos, template vendored no referenciado por ningún código de producción; solo mencionado en docs). Eliminó 53+ clones de markup.
+2. **Frontend React↔Vue — shims de archivos idénticos** (single source of truth):
+   - `frontend_vue/src/types/api.ts` → `export * from '../../../frontend_react/src/types/api'` (262 líneas)
+   - `frontend_vue/src/components/landing/landingData.ts` → shim (283 líneas)
+   - `frontend_vue/src/components/landing/landingSeo.ts` → shim (36 líneas)
+   - `frontend_vue/src/assets/spark.css` → `@import url('../../../frontend_react/src/styles/spark.css')` (318 líneas)
+   - `frontend_vue/src/assets/landing.css` → `@import` (474 líneas)
+   - `frontend_vue/src/assets/legal.css` → `@import` (128 líneas)
+   - Total eliminado: ~1,501 líneas de duplicación exacta.
+3. **`scripts/_verify-common.sh`** centraliza `log/step/info/pass/faild/fatal`, `record_pass/record_fail`, `json_extract`, `json_has_key`, `http_request`, `http_multipart`, `register_or_login` y el setup de colores. Los tres `verify-*.sh` ahora lo sourcean.
+4. **Documentación actualizada** (`SISTEMA.md`, `docs/design-reference.md`) para reflejar la eliminación del template y los shims.
+
+**Pendiente (requiere decisión arquitectónica):**
+- **Python services** (`app/services/*.py` ↔ `backend_fastapi/app/services/*.py`): divergentes (el root tiene fallbacks mock, FastAPI lanza errores). Unificar requiere elegir una versión canónica y hacer que la otra re-exporte. Impacto: ~700+ líneas (hook_service 264, ass_generator 165, ffmpeg_service 123, whisper_service 52, publish_service 132, subtitle_pipeline 82+). Recomendación: canonical = `backend_fastapi/app/services/` (versión strict), y `app/services/` re-exporta con try/except para el worker RunPod.
+- **Frontend service layer** (`frontend_react/src/services/api.ts` ↔ `frontend_vue/src/api/services.ts`): 15 clones. Requiere un paquete compartido (`frontend_common/`) con workspaces de npm. Impacto: ~400 líneas.
+- **Express `clips.ts`** (6 clones internos de 6-7 líneas): extraer helpers de ownership/validación. Impacto: ~35 líneas.
+- **`backend/tests/fixtures/` ↔ `tests/fixtures/`** (83 + 32 líneas): consolidar en un solo directorio de fixtures.
+
+**Evidencias:**
+```
+npx jscpd --min-lines 5 --min-tokens 50 ...  -> 121 clones, 6.53% duplicación
+npm run audit:parity                          -> FastAPI 62 = Express 64 (1:1)
+npm run audit:openapi                          -> 58 montadas = 58 documentadas
+```
+
+**Commits:**
+- `5bb3a20` (Issue 35): paridad determinista FastAPI + manejo de errores estandarizado
+- `849a9d6` (Issue 35): sitio customize fallback + criterio pytest cumplido
+- `47e31fa` (Issue 35): remover console.log/print (DBG=0)
+- `639f1ff` (Issue 35): limpiar remnants LibraryView stale y Navbar
+- `33de6c6` (Issue 35): HTTP calls moved out of UI components (HTTP=0)
+- `9b88dc7` (BigC): split AuthContext (178->41) + SettingsPage + UploadPage
+- `fcb0438` (BigC): split ClipLibraryPage + ClipLibraryView
+- `c0f0496` (BigC): split IntegrationsPage + IntegrationsView
+- `16aabdf` (BigC): split JobStatusPage + JobStatusView
+- `70d1191` (BigC): split DashboardPage + DashboardContent + KpiGrid
+- `ad438dd` (Issue 35): base inicial
+- (este commit): deduplicación profunda (spark-admin + shims frontend + _verify-common.sh)
+
+**Dependencias visuales:** ver árbol en sección "Dependencias Visuales" (Issue 6 → Issue 42).
