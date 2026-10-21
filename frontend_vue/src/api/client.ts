@@ -30,6 +30,42 @@ apiClient.interceptors.request.use((config) => {
   return config
 })
 
+/**
+ * Política ÚNICA de fallo de sesión — estandarizada en React y Vue (Issue 35).
+ *
+ * - `/jobs/*`: polling en segundo plano → reintento silencioso (lo resuelve `useJobPolling`).
+ * - rutas terminadas en `/me`: verificación inicial de sesión → NO se destruye la sesión,
+ *   porque otra pestaña puede estar refrescándola. Es el mismo criterio que documentan los
+ *   stores de auth.
+ * - cualquier otro fallo de sesión: limpiar token y volver a `/login`.
+ */
+function shouldRedirectOn401(url: string): boolean {
+  if (url.includes('/jobs/')) return false
+  if (/(^|\/)(users\/)?me\/?$/.test(url)) return false
+  return true
+}
+
+/**
+ * Decide si una respuesta es un fallo de sesión. FastAPI devuelve **403**
+ * "Not authenticated" cuando falta el header (OAuth2 `auto_error=True`) y 401 cuando el token
+ * es inválido/vencido; Express siempre 401. Se aceptan ambas formas para que el
+ * comportamiento sea idéntico contra cualquiera de los dos backends.
+ */
+function isSessionFailure(status: number, detail: string): boolean {
+  return status === 401 || (status === 403 && /not authenticated/i.test(detail))
+}
+
+function handleUnauthorized(url: string, status: number, detail: string): void {
+  if (!shouldRedirectOn401(url)) return
+  if (!isSessionFailure(status, detail)) return
+  try {
+    localStorage.removeItem(TOKEN_KEY)
+  } catch {}
+  if (typeof window !== 'undefined' && window.location.pathname !== '/login' && window.location.pathname !== '/auth') {
+    window.location.href = '/login'
+  }
+}
+
 apiClient.interceptors.response.use(
   (res) => res,
   (error) => {
@@ -42,23 +78,10 @@ apiClient.interceptors.response.use(
         detail = data.detail.map((e) => `${e.loc.join('.')}: ${e.msg}`).join(' | ')
       else if (typeof error.response.data === 'string' && error.response.data)
         detail = (error.response.data as string).slice(0, 500)
-      // Para polling de jobs (/jobs/:id) no redirigir ni mostrar alerta intrusiva en 401;
-      // useJobPolling manejará reintento silencioso en segundo plano
-      const url = (error.config?.url ?? '') as string
-      const isJobPolling = url.includes('/jobs/')
-      if ((status === 401 || detail.toLowerCase().includes('not authenticated')) && !isJobPolling) {
-        try {
-          localStorage.removeItem(TOKEN_KEY)
-        } catch {}
-        const path = typeof window !== 'undefined' ? window.location.pathname : ''
-        if (path !== '/login' && path !== '/auth') {
-          import('@/router').then((m) => m.default.push('/login').catch(() => { window.location.href = '/login' })).catch(() => { window.location.href = '/login' })
-        }
-      }
-      // Para jobs, no limpiar token automáticamente para permitir reintento
-      if (isJobPolling && status === 401) {
-        console.warn('[apiClient] 401 en polling job, sin redirigir, reintento silencioso')
-      }
+
+      // Política única de fallo de sesión (idéntica al cliente de React).
+      handleUnauthorized(error.config?.url ?? '', status, detail)
+
       return Promise.reject(new ApiError(status, detail, data))
     }
     if (error instanceof Error) return Promise.reject(new ApiError(0, error.message))

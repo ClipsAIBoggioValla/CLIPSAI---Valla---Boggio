@@ -43,6 +43,44 @@ async function parseError(res: Response): Promise<ApiError> {
   return new ApiError(res.status, detail, raw)
 }
 
+/**
+ * Política ÚNICA de fallo de sesión — estandarizada en React y Vue (Issue 35).
+ *
+ * - `/jobs/*`: polling en segundo plano → reintento silencioso (lo resuelve `useJobPolling`).
+ * - rutas terminadas en `/me`: verificación inicial de sesión → NO se destruye la sesión,
+ *   porque otra pestaña puede estar refrescándola. Es el mismo criterio que documentan los
+ *   stores de auth.
+ * - cualquier otro fallo de sesión: limpiar token y volver a `/login`.
+ */
+function shouldRedirectOn401(path: string): boolean {
+  if (path.includes('/jobs/')) return false
+  if (/(^|\/)(users\/)?me\/?$/.test(path)) return false
+  return true
+}
+
+/**
+ * Decide si una respuesta es un fallo de sesión. FastAPI devuelve **403**
+ * "Not authenticated" cuando falta el header (OAuth2 `auto_error=True`) y 401 cuando el token
+ * es inválido/vencido; Express siempre 401. Se aceptan ambas formas para que el
+ * comportamiento sea idéntico contra cualquiera de los dos backends.
+ */
+function isSessionFailure(status: number, detail: string): boolean {
+  return status === 401 || (status === 403 && /not authenticated/i.test(detail))
+}
+
+function handleUnauthorized(path: string, status: number, detail: string): void {
+  if (!shouldRedirectOn401(path)) return
+  if (!isSessionFailure(status, detail)) return
+  try {
+    localStorage.removeItem(TOKEN_KEY)
+  } catch {
+    /* ignore */
+  }
+  if (typeof window !== 'undefined' && window.location.pathname !== '/login' && window.location.pathname !== '/auth') {
+    window.location.href = '/login'
+  }
+}
+
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
   body?: BodyInit | null
@@ -79,7 +117,11 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
   } finally {
     if (timeoutId !== undefined) window.clearTimeout(timeoutId)
   }
-  if (!res.ok) throw await parseError(res)
+  if (!res.ok) {
+    const apiError = await parseError(res)
+    if (isSessionFailure(res.status, apiError.detail)) handleUnauthorized(path, res.status, apiError.detail)
+    throw apiError
+  }
   if (res.status === 204) return undefined as unknown as T
   const text = await res.text()
   if (!text) return undefined as unknown as T
