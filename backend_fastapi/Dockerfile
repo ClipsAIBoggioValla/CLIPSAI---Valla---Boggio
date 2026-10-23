@@ -24,6 +24,11 @@ COPY backend_fastapi/app ./app
 # Paquete `backend/` (worker RunPod): `app/main.py` importa condicionalmente
 # `backend.api.routes.retrim` y `backend.api.routes.stream`.
 COPY backend ./backend
+# Motor IA (engine.py + dependencias) para el handler de RunPod.
+COPY engine.py ./engine.py
+COPY main.py ./main.py
+COPY whisper_transcriber.py ./whisper_transcriber.py
+COPY audio_analyzer.py ./audio_analyzer.py
 # Worker RunPod Serverless (script de arranque).
 COPY backend_fastapi/runpod_worker.py ./runpod_worker.py
 # Alias `backend_fastapi.*` -> `app.*` para que esos routers resuelvan sus imports
