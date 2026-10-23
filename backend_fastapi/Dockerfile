@@ -1,41 +1,35 @@
-FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
+
+# Esta imagen ya tiene:
+# - Python 3.11
+# - CUDA 12.1
+# - cuDNN 8
+# - PyTorch con soporte GPU
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    HUGGINGFACE_HUB_CACHE=/tmp/huggingface_cache \
-    DEBIAN_FRONTEND=noninteractive
+    HUGGINGFACE_HUB_CACHE=/app/whisper_model
 
 WORKDIR /app
 
-# Instalar Python 3.11, ffmpeg y dependencias
+# Instalar dependencias del sistema
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        software-properties-common \
-        ffmpeg \
-        curl \
-        git \
-    && add-apt-repository ppa:deadsnakes/ppa -y \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
-        python3.11 \
-        python3.11-venv \
-        python3.11-dev \
-    && ln -s /usr/bin/python3.11 /usr/bin/python \
-    && ln -s /usr/bin/python3.11 /usr/bin/python3 \
-    && curl -sS https://bootstrap.pypa.io/get-pip.py | python3.11 \
-    && ln -s /usr/local/bin/pip /usr/local/bin/pip3 \
-    && ffmpeg -version \
-    && ffprobe -version \
+    && apt-get install -y --no-install-recommends ffmpeg curl git \
     && rm -rf /var/lib/apt/lists/*
+
+# Verificar que todo esté disponible
+RUN python --version \
+    && python -c "import torch; print(f'PyTorch {torch.__version__} con CUDA {torch.version.cuda}')" \
+    && ffmpeg -version \
+    && ffprobe -version
 
 COPY backend_fastapi/requirements.txt ./
 RUN pip install -r requirements.txt
 
 # Precargar modelo de Whisper durante el build via snapshot_download
 # (evita cold start de 3.3GB en runtime y garantiza que local_files_only funcione)
-ENV HUGGINGFACE_HUB_CACHE=/app/whisper_model
 RUN python -c "from huggingface_hub import snapshot_download; snapshot_download('deepdml/faster-whisper-large-v3-turbo-ct2', cache_dir='/app/whisper_model')"
 
 COPY backend_fastapi/app ./app
