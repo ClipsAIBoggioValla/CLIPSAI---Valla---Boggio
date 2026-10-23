@@ -67,27 +67,12 @@ import { useIntegrations } from '@/composables/useIntegrations'
 import PlatformCard from '@/components/integrations/PlatformCard.vue'
 
 const {
-  loading, error, integration, status, errorDetail, social, route, router,
-  fetchSocialStatus, syncQuery, handleConnectYoutube, handleConnectInstagram,
+  loading, error, integration, status, errorDetail, social,
+  handleConnectYoutube, handleConnectInstagram,
 } = useIntegrations()
 
 import { onMounted } from 'vue'
-onMounted(async () => {
-  syncQuery()
-  await fetchSocialStatus()
-  if (status.value === 'success') await fetchSocialStatus()
-  if (status.value) {
-    setTimeout(() => {
-      const q = { ...route.query }
-      delete q.integration
-      delete q.status
-      delete q.error
-      delete (q as Record<string, unknown>).message
-      router.replace({ query: q })
-      syncQuery()
-    }, 5000)
-  }
-})
+
 </script>
 EOF
 echo "written ($(wc -l < frontend_vue/src/views/IntegrationsView.vue) lines)"
