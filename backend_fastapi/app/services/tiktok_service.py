@@ -40,7 +40,11 @@ TIKTOK_SCOPES = ",".join(_scopes_list)
 TIKTOK_CLIENT_KEY = os.getenv("TIKTOK_CLIENT_KEY", "").strip()
 TIKTOK_CLIENT_SECRET = os.getenv("TIKTOK_CLIENT_SECRET", "").strip()
 TIKTOK_REDIRECT_URI = os.getenv("TIKTOK_REDIRECT_URI", "").strip()
-from .social_common import decode_state as _decode_state, encode_state as _encode_state
+from .social_common import (
+    decode_state as _decode_state,
+    encode_state as _encode_state,
+    validate_user_id,
+)
 
 
 
@@ -149,16 +153,12 @@ def _fetch_tiktok_user_info(access_token: str) -> str:
 
 
 def save_tiktok_tokens(db: Session, user_id: str, token_data: dict[str, Any]) -> SocialAccount:
-    import uuid
-
-    try:
-        uid = uuid.UUID(str(user_id))
-    except ValueError as exc:
-        raise ValueError(f"user_id inválido: {user_id}") from exc
+    uid = validate_user_id(user_id)
 
     access_token = token_data.get("access_token")
     if not access_token:
         raise ValueError("tokens sin access_token")
+    access_token = str(access_token)
 
     refresh_token = token_data.get("refresh_token") or access_token
     expires_in = token_data.get("expires_in")

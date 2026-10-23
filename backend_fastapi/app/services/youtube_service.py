@@ -25,7 +25,12 @@ GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 
 DEFAULT_REDIRECT_URI = "https://api.clipsai.xyz/auth/social/youtube/callback"
-from .social_common import decode_state as _decode_state, encode_state as _encode_state
+from .social_common import (
+    decode_state as _decode_state,
+    encode_state as _encode_state,
+    require_access_token,
+    validate_user_id,
+)
 
 
 
@@ -111,16 +116,9 @@ def exchange_code_for_tokens(code: str) -> dict[str, Any]:
 
 
 def save_youtube_tokens(db: Session, user_id: str, tokens: dict[str, Any]) -> SocialAccount:
-    import uuid
+    uid = validate_user_id(user_id)
 
-    try:
-        uid = uuid.UUID(str(user_id))
-    except ValueError as exc:
-        raise ValueError(f"user_id inválido: {user_id}") from exc
-
-    access_token = tokens.get("access_token")
-    if not access_token:
-        raise ValueError("tokens sin access_token")
+    access_token = require_access_token(tokens)
 
     refresh_token = tokens.get("refresh_token")
     token_type = tokens.get("token_type", "Bearer")
