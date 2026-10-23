@@ -1,16 +1,31 @@
-FROM python:3.11-slim
+FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    HUGGINGFACE_HUB_CACHE=/tmp/huggingface_cache
+    HUGGINGFACE_HUB_CACHE=/tmp/huggingface_cache \
+    DEBIAN_FRONTEND=noninteractive
 
 WORKDIR /app
 
-# Este paso ya sabemos que funciona y queda en caché (tarda ~60s)
+# Instalar Python 3.11, ffmpeg y dependencias
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg curl \
+    && apt-get install -y --no-install-recommends \
+        software-properties-common \
+        ffmpeg \
+        curl \
+        git \
+    && add-apt-repository ppa:deadsnakes/ppa -y \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        python3.11 \
+        python3.11-venv \
+        python3.11-dev \
+    && ln -s /usr/bin/python3.11 /usr/bin/python \
+    && ln -s /usr/bin/python3.11 /usr/bin/python3 \
+    && curl -sS https://bootstrap.pypa.io/get-pip.py | python3.11 \
+    && ln -s /usr/local/bin/pip /usr/local/bin/pip3 \
     && ffmpeg -version \
     && ffprobe -version \
     && rm -rf /var/lib/apt/lists/*
@@ -18,7 +33,10 @@ RUN apt-get update \
 COPY backend_fastapi/requirements.txt ./
 RUN pip install -r requirements.txt
 
-# NOTA: Ya NO está la línea que descargaba el modelo de Whisper durante el build.
+# Precargar modelo de Whisper durante el build via snapshot_download
+# (evita cold start de 3.3GB en runtime y garantiza que local_files_only funcione)
+ENV HUGGINGFACE_HUB_CACHE=/app/whisper_model
+RUN python -c "from huggingface_hub import snapshot_download; snapshot_download('deepdml/faster-whisper-large-v3-turbo-ct2', cache_dir='/app/whisper_model')"
 
 COPY backend_fastapi/app ./app
 # Paquete `backend/` (worker RunPod): `app/main.py` importa condicionalmente
@@ -41,14 +59,17 @@ RUN mkdir -p /app/storage/clips /app/storage/uploads \
 
 EXPOSE 8000
 
+# Crear usuario no-root
 RUN useradd --create-home --shell /bin/bash appuser \
     && chown -R appuser:appuser /app \
     && chmod -R 775 /app/storage
 
-USER appuser
+# Cache de HuggingFace con permisos para appuser (modelo ya precargado)
+RUN mkdir -p /app/whisper_model /tmp/huggingface_cache \
+    && chown -R appuser:appuser /app/whisper_model /tmp/huggingface_cache \
+    && chmod -R a+rwX /app/whisper_model /tmp/huggingface_cache
 
-# Permiso de escritura para que el modelo se descargue en runtime en RunPod
-RUN mkdir -p /tmp/huggingface_cache && chown -R appuser:appuser /tmp/huggingface_cache && chmod -R a+rwX /tmp/huggingface_cache
+USER appuser
 
 # CMD condicional auto-diagnosticable: RUN_MODE=serverless para RunPod, uvicorn para Render
 CMD ["sh", "-c", "echo '[BOOT] RUN_MODE='\"$RUN_MODE\"''; if [ \"$RUN_MODE\" = \"serverless\" ]; then echo '[BOOT] MODO=SERVERLESS (runpod handler)'; exec python runpod_worker.py; else echo '[BOOT] MODO=WEB (uvicorn)'; exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}; fi"]
