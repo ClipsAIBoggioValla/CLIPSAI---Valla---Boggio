@@ -34,3 +34,21 @@ def decode_state(state: str) -> str | None:
         except Exception:
             continue
     return state
+
+
+def validate_user_id(user_id: str) -> "uuid.UUID":
+    """Valida que user_id sea un UUID válido y lo devuelve; lanza ValueError si no."""
+    import uuid
+
+    try:
+        return uuid.UUID(str(user_id))
+    except ValueError as exc:
+        raise ValueError(f"user_id inválido: {user_id}") from exc
+
+
+def require_access_token(tokens: dict) -> str:
+    """Extrae access_token de tokens, lanza ValueError si falta."""
+    access_token = tokens.get("access_token")
+    if not access_token:
+        raise ValueError("tokens sin access_token")
+    return str(access_token)

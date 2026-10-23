@@ -30,7 +30,12 @@ META_TOKEN_URL = "https://graph.facebook.com/v18.0/oauth/access_token"
 META_LONG_LIVED_URL = "https://graph.facebook.com/oauth/access_token"
 
 DEFAULT_REDIRECT_URI = "https://api.clipsai.xyz/auth/social/instagram/callback"
-from .social_common import decode_state as _decode_state, encode_state as _encode_state
+from .social_common import (
+    decode_state as _decode_state,
+    encode_state as _encode_state,
+    require_access_token,
+    validate_user_id,
+)
 
 
 
@@ -192,16 +197,9 @@ def exchange_code_for_tokens(code: str) -> dict[str, Any]:
 
 
 def save_instagram_tokens(db: Session, user_id: str, tokens: dict[str, Any]) -> SocialAccount:
-    import uuid
+    uid = validate_user_id(user_id)
 
-    try:
-        uid = uuid.UUID(str(user_id))
-    except ValueError as exc:
-        raise ValueError(f"user_id inválido: {user_id}") from exc
-
-    access_token = tokens.get("access_token")
-    if not access_token:
-        raise ValueError("tokens sin access_token")
+    access_token = require_access_token(tokens)
 
     refresh_token = tokens.get("access_token")
     expires_in = tokens.get("expires_in")
