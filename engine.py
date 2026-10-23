@@ -165,7 +165,7 @@ def procesar_video(video_path: str, transcripcion_path: str) -> ProcesamientoRes
             procesar_clips,
             AUDIO_ANALYZER_AVAILABLE,
         )
-        from whisper_transcriber import parsear_transcripcion_youtube
+        from whisper_transcriber import parsear_transcripcion_youtube, transcribir_audio
 
         # 4. Ejecutar pipeline paso a paso con manejo de errores granular
 
@@ -192,16 +192,60 @@ def procesar_video(video_path: str, transcripcion_path: str) -> ProcesamientoRes
             # audio_analyzer no disponible, continuamos
             pass
 
-        # 4.3 Parsear y formatear transcripción
+        # 4.3 Parsear transcripción o usar Whisper si está vacía
         transcripcion_formatted = os.path.join(trabajo_dir, "transcripcion_formatted.txt")
+        
+        # Primero intentar parsear la transcripción proporcionada
+        print("[engine] Intentando parsear transcripción proporcionada...")
         try:
             parsear_transcripcion_youtube(transcripcion_original, transcripcion_formatted)
+            
+            # Verificar si se generaron segmentos válidos
+            if os.path.exists(transcripcion_formatted):
+                with open(transcripcion_formatted, 'r', encoding='utf-8') as f:
+                    contenido = f.read().strip()
+                
+                if not contenido or len(contenido) < 10:
+                    print(f"[engine] Transcripción vacía o muy corta ({len(contenido)} chars). Usando Whisper...")
+                    raise ValueError("Transcripción vacía")
+                
+                # Contar líneas no vacías
+                lineas = [l for l in contenido.split('\n') if l.strip()]
+                if len(lineas) < 3:
+                    print(f"[engine] Solo {len(lineas)} segmentos. Usando Whisper...")
+                    raise ValueError("Muy pocos segmentos")
+                
+                print(f"[engine] Transcripción válida: {len(lineas)} segmentos")
+            else:
+                print(f"[engine] Archivo de transcripción no generado. Usando Whisper...")
+                raise ValueError("Archivo no generado")
+                
         except Exception as e:
-            return ProcesamientoResultado.error_resultado(
-                error=f"Falló parseo de transcripción: {e}",
-                error_tipo="TranscripcionError",
-                error_detalle=traceback.format_exc()
-            )
+            # Si falla el parseo o la transcripción está vacía, usar Whisper
+            print(f"[engine] Parseo falló o transcripción vacía: {e}")
+            print("[engine] Transcribiendo audio con Whisper...")
+            try:
+                # Transcribir audio directamente con Whisper
+                transcribir_audio(audio_path, transcripcion_formatted)
+                
+                # Verificar resultado
+                if not os.path.exists(transcripcion_formatted):
+                    raise ValueError("Whisper no generó archivo de transcripción")
+                
+                with open(transcripcion_formatted, 'r', encoding='utf-8') as f:
+                    contenido = f.read().strip()
+                
+                if not contenido:
+                    raise ValueError("Whisper devolvió transcripción vacía")
+                
+                print(f"[engine] Whisper generó transcripción: {len(contenido)} chars")
+                
+            except Exception as whisper_err:
+                return ProcesamientoResultado.error_resultado(
+                    error=f"Falló transcripción con Whisper: {whisper_err}",
+                    error_tipo="TranscripcionError",
+                    error_detalle=traceback.format_exc()
+                )
 
         # 4.4 Preparar datos para IA
         try:

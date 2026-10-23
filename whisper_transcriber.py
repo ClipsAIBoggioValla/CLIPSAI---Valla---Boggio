@@ -147,6 +147,95 @@ def parsear_transcripcion_youtube(
     return salida
 
 
+def transcribir_audio(
+    audio_path: str,
+    salida: str = "transcripcion_formatted.txt",
+    modelo: str = "large-v3-turbo",
+    idioma: str = "es",
+) -> str:
+    """Transcribe audio WAV con faster-whisper y genera transcripcion_formatted.txt."""
+    print(f"[Whisper] Transcribiendo audio: {audio_path}")
+    
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError:
+        raise ImportError(
+            "faster-whisper no instalado.\n"
+            "Instalar: pip install faster-whisper"
+        )
+    
+    device, compute_type = detectar_device()
+    print(f"      Device: {device} ({compute_type})")
+    
+    modelo_mapa = {
+        "large-v3-turbo": "deepdml/faster-whisper-large-v3-turbo-ct2",
+        "turbo": "deepdml/faster-whisper-large-v3-turbo-ct2",
+        "large-v3": "large-v3",
+        "medium": "medium",
+        "small": "small",
+    }
+    model_name = modelo_mapa.get(modelo, "deepdml/faster-whisper-large-v3-turbo-ct2")
+    
+    try:
+        print(f"      Cargando modelo {model_name}...")
+        model = WhisperModel(model_name, device=device, compute_type=compute_type)
+        
+        print(f"      Transcribiendo...")
+        segments_gen, info = model.transcribe(
+            audio_path,
+            language=idioma,
+            word_timestamps=False,
+            vad_filter=True,
+            beam_size=5,
+            temperature=0.0,
+        )
+        
+        duracion_total = info.duration
+        segmentos_texto = []
+        ultimo_tiempo = 0.0
+        
+        print(f"      Duración: {duracion_total:.0f}s")
+        print(f"      [{'░' * 40}] 0%", end='', flush=True)
+        
+        inicio = time.time()
+        
+        for segment in segments_gen:
+            segmentos_texto.append({
+                "ts": segundos_a_ms(segment.start),
+                "texto": segment.text.strip()
+            })
+            ultimo_tiempo = segment.end
+            
+            progreso = min(ultimo_tiempo / duracion_total, 1.0)
+            pct = int(progreso * 100)
+            llenos = int(progreso * 40)
+            barra = '█' * llenos + '░' * (40 - llenos)
+            
+            transcurrido = time.time() - inicio
+            velocidad = ultimo_tiempo / max(transcurrido, 0.1)
+            eta = int((duracion_total - ultimo_tiempo) / max(velocidad, 0.1))
+            
+            print(
+                f"\r      [{barra}] {pct}% | {velocidad:.1f}x | {eta}s restantes    ",
+                end='', flush=True
+            )
+        
+        print(f"\r      [{'█'*40}] 100% ✓                              ")
+        
+        with open(salida, 'w', encoding='utf-8') as f:
+            for seg in segmentos_texto:
+                if seg['texto']:
+                    f.write(f"{seg['ts']} - {seg['texto']}\n")
+        
+        print(f"      ✓ {len(segmentos_texto)} segmentos transcritos")
+        print(f"      Guardado: {salida}")
+        
+        return salida
+        
+    except Exception as e:
+        raise RuntimeError(f"Error transcribiendo con Whisper: {e}")
+
+
 def transcribir_video(
     video_path: str,
     salida: str = "transcripcion_formatted.txt",
