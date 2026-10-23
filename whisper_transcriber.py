@@ -28,13 +28,37 @@ def segundos_a_hhmmss(seg: float) -> str:
     return f"{h:02d}:{m:02d}:{s:02d}"
 
 
-def detectar_device() -> tuple:
-    try:
-        import torch
-        if torch.cuda.is_available():
-            return ("cuda", "float16")
-    except Exception:
-        pass
+def detectar_device(force_gpu: bool = False) -> tuple:
+    """Detecta si hay GPU disponible. En RunPod siempre hay GPU RTX."""
+    # Si se fuerza GPU o estamos en RunPod (variable de entorno), intentar CUDA
+    use_gpu = force_gpu or os.environ.get("RUNPOD_GPU", "").lower() in ("1", "true", "yes")
+    
+    if use_gpu:
+        try:
+            import torch
+            if torch.cuda.is_available():
+                gpu_name = torch.cuda.get_device_name(0)
+                print(f"      GPU detectada: {gpu_name}")
+                return ("cuda", "float16")
+            else:
+                print("      CUDA no disponible en torch, usando CPU")
+        except ImportError:
+            print("      torch no instalado, intentando detectar GPU manualmente...")
+            # Fallback: verificar si hay GPU disponible sin torch
+            try:
+                import subprocess
+                result = subprocess.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], 
+                                       capture_output=True, text=True, timeout=5)
+                if result.returncode == 0 and result.stdout.strip():
+                    gpu_name = result.stdout.strip()
+                    print(f"      GPU detectada vía nvidia-smi: {gpu_name}")
+                    return ("cuda", "float16")
+            except Exception:
+                pass
+            print("      No se detectó GPU, usando CPU")
+        except Exception as e:
+            print(f"      Error detectando GPU: {e}, usando CPU")
+    
     return ("cpu", "int8")
 
 
@@ -164,7 +188,8 @@ def transcribir_audio(
             "Instalar: pip install faster-whisper"
         )
     
-    device, compute_type = detectar_device()
+    # Forzar GPU en RunPod (siempre tiene GPU RTX)
+    device, compute_type = detectar_device(force_gpu=True)
     print(f"      Device: {device} ({compute_type})")
     
     modelo_mapa = {
@@ -255,7 +280,8 @@ def transcribir_video(
             "Instalar: pip install faster-whisper"
         )
     
-    device, compute_type = detectar_device()
+    # Forzar GPU en RunPod (siempre tiene GPU RTX)
+    device, compute_type = detectar_device(force_gpu=True)
     print(f"      Device: {device} ({compute_type})")
     
     modelo_mapa = {
