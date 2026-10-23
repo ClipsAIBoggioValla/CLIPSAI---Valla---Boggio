@@ -3,6 +3,7 @@ import vue from '@vitejs/plugin-vue'
 import path from 'path'
 
 export default defineConfig({
+  publicDir: '../frontend_common/public',
   plugins: [vue()],
   resolve: {
     alias: {
