@@ -24,6 +24,8 @@ COPY backend_fastapi/app ./app
 # Paquete `backend/` (worker RunPod): `app/main.py` importa condicionalmente
 # `backend.api.routes.retrim` y `backend.api.routes.stream`.
 COPY backend ./backend
+# Worker RunPod Serverless (script de arranque).
+COPY backend_fastapi/runpod_worker.py ./runpod_worker.py
 # Alias `backend_fastapi.*` -> `app.*` para que esos routers resuelvan sus imports
 # dentro de la imagen. Sin esto la superficie de la API dependía del layout
 # (60 rutas en Docker vs 62 desde la raíz del repo).
@@ -44,4 +46,4 @@ USER appuser
 RUN mkdir -p /tmp/huggingface_cache && chown -R appuser:appuser /tmp/huggingface_cache && chmod -R a+rwX /tmp/huggingface_cache
 
 # CMD condicional auto-diagnosticable: RUN_MODE=serverless para RunPod, uvicorn para Render
-CMD ["sh", "-c", "echo '[BOOT] RUN_MODE='\"$RUN_MODE\"''; if [ \"$RUN_MODE\" = \"serverless\" ]; then echo '[BOOT] MODO=SERVERLESS (runpod handler)'; exec python -m runpod.serverless.start --handler backend.handler; else echo '[BOOT] MODO=WEB (uvicorn)'; exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}; fi"]
+CMD ["sh", "-c", "echo '[BOOT] RUN_MODE='\"$RUN_MODE\"''; if [ \"$RUN_MODE\" = \"serverless\" ]; then echo '[BOOT] MODO=SERVERLESS (runpod handler)'; exec python runpod_worker.py; else echo '[BOOT] MODO=WEB (uvicorn)'; exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}; fi"]
