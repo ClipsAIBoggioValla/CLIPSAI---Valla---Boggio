@@ -605,17 +605,53 @@ def obtener_clips_ia(transcripcion: str, datos_audio: List[Dict], datos_enriquec
 
     print(f"      Respuesta IA ({len(contenido)} chars)")
     print(f"      === RESPUESTA COMPLETA ===")
-    print(contenido[:1000])
+    print(contenido[:2000])
     print(f"      === FIN RESPUESTA ===")
     
+    # Loggear respuesta cruda completa para debug
+    logger.info("Respuesta Claude raw (completa): %s", contenido)
+    
+    # 1. Si viene envuelto en markdown fences ```json ... ```, extraerlo primero
+    md_match = re.search(r'```(?:json)?\s*([\s\S]*?)```', contenido)
+    if md_match:
+        print(f"      Detectado JSON dentro de markdown fences")
+        contenido = md_match.group(1).strip()
+    
+    # 2. Buscar el array JSON más largo posible (puede haber texto antes/después)
     json_match = re.search(r'\[[\s\S]*\]', contenido)
     if not json_match:
-        print(f"      Preview: {contenido[:200]}...")
-        raise ValueError("No se encontró JSON válido en la respuesta")
+        # 3. Fallback: buscar objetos individuales { ... }
+        print(f"      No se encontró array JSON. Buscando objetos individuales...")
+        print(f"      Preview crudo: {contenido[:500]}...")
+        try:
+            raw = contenido.strip()
+            if raw.startswith("{") and raw.endswith("}"):
+                data = json.loads(raw)
+                if "clips" in data and isinstance(data["clips"], list):
+                    clips = data["clips"]
+                    print(f"      Extraidos {len(clips)} clips desde objeto con clave 'clips'")
+                    return clips
+            # Último intento: parsear objetos sueltos
+            objetos = []
+            for m in re.finditer(r'\{[^{}]*\}', contenido):
+                try:
+                    obj = json.loads(m.group())
+                    if "inicio" in obj and "fin" in obj:
+                        objetos.append(obj)
+                except json.JSONDecodeError:
+                    continue
+            if objetos:
+                print(f"      Extraidos {len(objetos)} clips desde objetos sueltos")
+                return objetos
+        except Exception as ex:
+            logger.warning("Fallback parse failed: %s", ex)
+        raise ValueError("No se encontró JSON válido en la respuesta de la IA")
     
-    clips = parsear_json_tolerante(contenido)
+    json_str = json_match.group(0)
+    clips = parsear_json_tolerante(json_str)
     if not clips:
-        print(f"      JSON inválido, no se pudieron extraer clips")
+        print(f"      JSON parse devolvió 0 clips. Respuesta raw:")
+        print(contenido[:2000])
         raise ValueError("No se pudo parsear la respuesta como JSON")
     
     print(f"      IA detectó {len(clips)} momentos")
@@ -659,6 +695,11 @@ def reparar_json(texto: str) -> str:
 def parsear_json_tolerante(texto: str) -> List[Dict]:
     """Intenta parsear JSON, intentando reparar errores comunes."""
     texto = texto.strip()
+    
+    # Si viene envuelto en markdown fences, limpiar
+    md_match = re.search(r'```(?:json)?\s*([\s\S]*?)```', texto)
+    if md_match:
+        texto = md_match.group(1).strip()
     
     first_bracket = texto.find('[')
     last_bracket = texto.rfind(']')
