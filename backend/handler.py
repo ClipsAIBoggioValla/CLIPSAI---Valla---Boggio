@@ -171,7 +171,7 @@ def process_video_job(job: dict[str, Any]) -> dict[str, Any]:
         clips = result.clips
         print(f"[RunPod Handler] EXITO: {len(clips)} clips generados")
 
-        return {
+        response = {
             "status": "COMPLETED",
             "video_id": video_id,
             "engine": "clipsai_native",
@@ -179,6 +179,12 @@ def process_video_job(job: dict[str, Any]) -> dict[str, Any]:
             "clip_count": len(clips),
             "output_folder": result.carpeta_salida,
         }
+        
+        # Mensaje informativo si no hay clips
+        if len(clips) == 0:
+            response["message"] = "No se encontraron clips relevantes en el video. El contenido puede no tener momentos virales claros o la transcripción puede estar vacía."
+        
+        return response
 
 
 # Alias para compatibilidad con runpod.serverless.start({"handler": handler})
