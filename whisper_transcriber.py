@@ -201,20 +201,18 @@ def transcribir_audio(
     }
     model_name = modelo_mapa.get(modelo, "deepdml/faster-whisper-large-v3-turbo-ct2")
     
-    # Modelo local precargado durante el build (evita download en runtime)
+    # Modelo local precargado durante el build (si existe, se usa sin descargar)
     whisper_model_cache = os.environ.get("WHISPER_MODEL_PATH", "/app/whisper_model/models--deepdml--faster-whisper-large-v3-turbo-ct2")
     if os.path.isdir(whisper_model_cache):
         print(f"      Usando modelo local: {whisper_model_cache}")
         model_id = whisper_model_cache
-        local_files_only = True
     else:
-        print(f"      Modelo local no encontrado en {whisper_model_cache}, usando descarga remota")
         model_id = model_name
-        local_files_only = False
     
     try:
-        print(f"      Cargando modelo {model_id} (local_files_only={local_files_only})...")
-        model = WhisperModel(model_id, device=device, compute_type=compute_type, local_files_only=local_files_only)
+        if not os.path.isdir(whisper_model_cache):
+            print(f"[Whisper] Descargando modelo {model_id} (solo la primera vez)...")
+        model = WhisperModel(model_id, device=device, compute_type=compute_type, local_files_only=False)
         
         print(f"      Transcribiendo...")
         segments_gen, info = model.transcribe(
@@ -304,22 +302,20 @@ def transcribir_video(
     }
     model_name = modelo_mapa.get(modelo, "deepdml/faster-whisper-large-v3-turbo-ct2")
     
-    # Modelo local precargado durante el build (evita download en runtime)
+    # Modelo local precargado durante el build (si existe, se usa sin descargar)
     whisper_model_cache = os.environ.get("WHISPER_MODEL_PATH", "/app/whisper_model/models--deepdml--faster-whisper-large-v3-turbo-ct2")
     if os.path.isdir(whisper_model_cache):
         print(f"      Usando modelo local: {whisper_model_cache}")
         model_id = whisper_model_cache
-        local_files_only = True
     else:
-        print(f"      Modelo local no encontrado en {whisper_model_cache}, usando descarga remota")
         model_id = model_name
-        local_files_only = False
     
     audio_temp = _extraer_audio(video_path)
     
     try:
-        print(f"      Cargando modelo {model_id} (local_files_only={local_files_only})...")
-        model = WhisperModel(model_id, device=device, compute_type=compute_type, local_files_only=local_files_only)
+        if not os.path.isdir(whisper_model_cache):
+            print(f"[Whisper] Descargando modelo {model_id} (solo la primera vez)...")
+        model = WhisperModel(model_id, device=device, compute_type=compute_type, local_files_only=False)
         
         print(f"      Transcribiendo...")
         segments_gen, info = model.transcribe(

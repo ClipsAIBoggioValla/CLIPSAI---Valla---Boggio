@@ -28,8 +28,7 @@ RUN python --version \
 COPY backend_fastapi/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Descargar modelo Whisper
-RUN python -c "from huggingface_hub import snapshot_download; snapshot_download('deepdml/faster-whisper-large-v3-turbo-ct2', cache_dir='/app/whisper_model')"
+# El modelo Whisper se descarga en el primer arranque del worker (evita corrupción en build)
 
 # Copiar código
 COPY backend_fastapi/app ./app
