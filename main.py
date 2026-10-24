@@ -357,27 +357,31 @@ def construir_prompt(transcripcion: str, datos_audio: List[Dict], datos_enriquec
     else:
         audio_json = json.dumps(datos_audio, indent=2, ensure_ascii=False)
     
-    return f"""Sos un experto en contenido viral para TikTok, Instagram Reels y YouTube Shorts especializado en contenido deportivo y periodístico en español rioplatense. Tu tarea es analizar una transcripción y datos de audio para identificar los momentos con mayor potencial viral. Conocés en profundidad qué engancha a la audiencia hispanohablante de fútbol/deportes en redes sociales. DEVOLVÉ ÚNICAMENTE UN ARRAY JSON VÁLIDO. Sin texto antes ni después. Sin markdown. Empezá con [ y terminá con ].
+    return f"""Sos un experto en crear contenido viral para redes sociales (TikTok, Reels, Shorts). Tu objetivo es encontrar los momentos más interesantes, emocionantes, polémicos, educativos o informativos de CUALQUIER tipo de video. No importa si es deporte, entrevista, vlog, tutorial, gaming, música, noticias o cualquier otro género. Buscá los segmentos que más enganchen a la audiencia.
+
+DEVOLVÉ ÚNICAMENTE UN ARRAY JSON VÁLIDO. Sin texto antes ni después. Sin markdown. Empezá con [ y terminá con ].
+
+REGLA OBLIGATORIA: Debés devolver SIEMPRE un array con entre 1 y 5 clips. Si no hay momentos perfectos, elegí los mejores segmentos disponibles como 'mejor esfuerzo'. NUNCA devuelvas un array vacío [].
 
 CRITERIOS DE VIRALIDAD (ordenados por peso):
 
 REVELACIÓN O EXCLUSIVA (peso 10/10)
-Información que el espectador no sabía y genera sorpresa. Datos internos, rumores confirmados, primicias. Frases como "tengo la información", "me dijeron", "la verdad es que". Ejemplo: revelar por qué realmente salió un jugador, una lesión real vs oficial.
+Información que el espectador no sabía y genera sorpresa. Datos internos, rumores confirmados, primicias. Frases como "tengo la información", "me dijeron", "la verdad es que".
 
 CONTROVERSIA O CONTRADICCIÓN (peso 9/10)
-Momentos donde se contradice la versión oficial. Críticas directas a jugadores, cuerpo técnico o dirigencia. Predicciones arriesgadas con fundamento. Frases como "no puede ser", "me parece mal", "error garrafal".
+Momentos donde se contradice la versión oficial. Críticas directas. Predicciones arriesgadas con fundamento. Frases como "no puede ser", "me parece mal", "error garrafal".
 
 DATO CONCRETO IMPACTANTE (peso 8/10)
-Números, fechas, montos específicos que sorprenden. Comparaciones que reencuadran la realidad. Ejemplo: "costó más que Julián Álvarez", "8 millones de euros".
+Números, fechas, montos específicos que sorprenden. Comparaciones que reencuadran la realidad.
 
 MOMENTO EMOCIONAL AUTÉNTICO (peso 7/10)
-Nostalgia, pasión, anécdota personal del conductor. Momento donde el conductor se quiebra o se emociona. Frases como "se me pone la piel de gallina", "lo atesoro".
+Nostalgia, pasión, anécdota personal. Momento donde alguien se quiebra o se emociona.
 
 ANÁLISIS TÉCNICO SIMPLE Y CLARO (peso 6/10)
-Explicación de por qué pasó algo en cancha de manera accesible. Máximo cuando usa metáforas o ejemplos concretos. Ejemplo: explicar por qué sacaron a un jugador con causa táctica clara.
+Explicación de por qué pasó algo de manera accesible. Máximo cuando usa metáforas o ejemplos concretos.
 
 PREDICCIÓN O ANTICIPACIÓN (peso 5/10)
-El conductor adelanta algo que va a pasar. Spoiler de una decisión técnica o dirigencial futura. Genera curiosidad sobre si acertó o no.
+Se adelanta algo que va a pasar. Spoiler de una decisión futura. Genera curiosidad sobre si acertó o no.
 
 SEÑALES DE AUDIO QUE AMPLIFICAN EL SCORE:
 - intensidad > 7.0 en el timestamp: +1 punto al score
@@ -455,8 +459,8 @@ CAMPOS OBLIGATORIOS:
 - audio_score: 1-10 basado en los datos de audio en ese rango de tiempo
 
 REGLAS FINALES:
-- Score mínimo para incluir: 7
-- Máximo 10 clips
+- Asigná un score del 1 al 10, pero incluí todos los clips que tengan al menos un 5
+- Devolvé entre 1 y 5 clips (NUNCA 0)
 - No repetir el mismo tema o personaje en más de 2 clips
 - El primer clip del array DEBE ser el de mayor score
 - Todos los timestamps deben existir en la transcripción proporcionada
@@ -577,6 +581,8 @@ def obtener_clips_ia(transcripcion: str, datos_audio: List[Dict], datos_enriquec
         proveedor = "DeepSeek"
     print(f"[4/6] Analizando con IA ({proveedor})...")
 
+    print(f"[DEBUG CLAUDE] Transcripción enviada ({len(texto_para_ia)} chars): {texto_para_ia[:300]}...")
+    
     prompt = construir_prompt(transcripcion, datos_audio, datos_enriquecidos)
 
     try:
@@ -610,6 +616,7 @@ def obtener_clips_ia(transcripcion: str, datos_audio: List[Dict], datos_enriquec
     
     # Loggear respuesta cruda completa para debug
     logger.info("Respuesta Claude raw (completa): %s", contenido)
+    print(f"[DEBUG CLAUDE] Respuesta cruda recibida ({len(contenido)} chars): {contenido[:500]}...")
     
     # 1. Si viene envuelto en markdown fences ```json ... ```, extraerlo primero
     md_match = re.search(r'```(?:json)?\s*([\s\S]*?)```', contenido)
@@ -785,7 +792,7 @@ def validar_clips(clips: List[Dict]) -> List[Dict]:
             continue
         
         if score < 5:
-            print(f"      DEBUG clip {i+1}: score {score} < 5")
+            print(f"      DEBUG clip {i+1}: score {score} < 5 (umbral mínimo)")
             continue
         
         criterio = clip.get("criterio_principal", "otro")

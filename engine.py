@@ -290,10 +290,11 @@ def procesar_video(video_path: str, transcripcion_path: str) -> ProcesamientoRes
         # 4.6 Validar clips
         clips_validos = validar_clips(clips_ia)
         if not clips_validos:
-            return ProcesamientoResultado.error_resultado(
-                error="No se encontraron clips válidos tras análisis de IA",
-                error_tipo="SinClipsValidos",
-                error_detalle=f"IA devolvió {len(clips_ia)} clips, ninguno pasó validación (duración 30-90s, score>=5)"
+            # Respuesta válida pero vacía - no es un error, el video no tiene clips relevantes
+            print(f"[engine] IA no encontró clips válidos (devolvió {len(clips_ia)} clips, ninguno pasó validación)")
+            return ProcesamientoResultado.exito_resultado(
+                clips=[],
+                carpeta_salida=clips_dir
             )
 
         # 4.7 Generar clips de video
@@ -307,10 +308,11 @@ def procesar_video(video_path: str, transcripcion_path: str) -> ProcesamientoRes
             )
 
         if not archivos_generados:
-            return ProcesamientoResultado.error_resultado(
-                error="No se pudo generar ningún archivo de clip",
-                error_tipo="GeneracionError",
-                error_detalle="procesar_clips devolvió lista vacía"
+            # Si no se generaron archivos, retornar éxito con 0 clips
+            print(f"[engine] No se generaron archivos de clip, retornando resultado vacío")
+            return ProcesamientoResultado.exito_resultado(
+                clips=[],
+                carpeta_salida=clips_dir
             )
 
         # 5. Leer info de clips generados desde clips_info.json
