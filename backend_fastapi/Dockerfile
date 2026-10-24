@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.1.1-runtime-ubuntu22.04
+FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
 
 ENV DEBIAN_FRONTEND=noninteractive \
     TZ=UTC \
@@ -11,26 +11,20 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 WORKDIR /app
 
-# Instalar Python 3.11 y dependencias del sistema
+# Instalar solo ffmpeg y git (Python y CUDA ya están)
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        python3.11 \
-        python3.11-venv \
-        python3.11-dev \
-        python3-pip \
         ffmpeg \
-        curl \
         git \
-    && ln -s /usr/bin/python3.11 /usr/bin/python \
-    && ln -s /usr/bin/python3.11 /usr/bin/python3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Verificar
 RUN python --version \
+    && python -c "import torch; print(f'PyTorch {torch.__version__} con CUDA {torch.version.cuda}')" \
     && ffmpeg -version \
     && ffprobe -version
 
-# Instalar dependencias de Python (torch con CUDA)
+# Instalar dependencias de Python
 COPY backend_fastapi/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
