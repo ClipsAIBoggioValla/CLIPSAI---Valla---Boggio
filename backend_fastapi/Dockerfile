@@ -1,37 +1,44 @@
-FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
+FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
 
-# Esta imagen ya tiene:
-# - Python 3.11
-# - CUDA 12.1
-# - cuDNN 8
-# - PyTorch con soporte GPU
-
-ENV PYTHONDONTWRITEBYTECODE=1 \
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=UTC \
+    PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    HUGGINGFACE_HUB_CACHE=/app/whisper_model \
-    DEBIAN_FRONTEND=noninteractive \
-    TZ=UTC
+    HUGGINGFACE_HUB_CACHE=/app/whisper_model
 
 # Evitar prompt interactivo de tzdata durante apt-get
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 WORKDIR /app
 
-# Instalar dependencias del sistema
+# Instalar Python 3.11 y dependencias
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg curl git \
+    && apt-get install -y --no-install-recommends \
+        software-properties-common \
+        ffmpeg \
+        curl \
+        git \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        python3.11 \
+        python3.11-venv \
+        python3.11-dev \
+    && ln -s /usr/bin/python3.11 /usr/bin/python \
+    && ln -s /usr/bin/python3.11 /usr/bin/python3 \
+    && curl -sS https://bootstrap.pypa.io/get-pip.py | python3.11 \
+    && ln -s /usr/local/bin/pip /usr/local/bin/pip3 \
     && rm -rf /var/lib/apt/lists/*
 
-# Verificar que todo esté disponible
+# Verificar
 RUN python --version \
-    && python -c "import torch; print(f'PyTorch {torch.__version__} con CUDA {torch.version.cuda}')" \
     && ffmpeg -version \
     && ffprobe -version
 
 COPY backend_fastapi/requirements.txt ./
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Precargar modelo de Whisper durante el build via snapshot_download
 # (evita cold start de 3.3GB en runtime y garantiza que local_files_only funcione)
