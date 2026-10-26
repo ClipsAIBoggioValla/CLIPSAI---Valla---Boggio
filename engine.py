@@ -43,6 +43,7 @@ class ProcesamientoResultado:
     error: Optional[str] = None
     error_tipo: Optional[str] = None
     error_detalle: Optional[str] = None
+    transcription_segments: Optional[List[Dict[str, Any]]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convierte el resultado a diccionario para serialización JSON."""
@@ -53,12 +54,13 @@ class ProcesamientoResultado:
             "error": self.error,
             "error_tipo": self.error_tipo,
             "error_detalle": self.error_detalle,
+            "transcription_segments": self.transcription_segments or [],
         }
 
     @classmethod
-    def exito_resultado(cls, clips: List[ClipInfo], carpeta_salida: str) -> "ProcesamientoResultado":
+    def exito_resultado(cls, clips: List[ClipInfo], carpeta_salida: str, transcription_segments: Optional[List[Dict[str, Any]]] = None) -> "ProcesamientoResultado":
         """Factory para resultado exitoso."""
-        return cls(exito=True, clips=clips, carpeta_salida=carpeta_salida)
+        return cls(exito=True, clips=clips, carpeta_salida=carpeta_salida, transcription_segments=transcription_segments)
 
     @classmethod
     def error_resultado(cls, error: str, error_tipo: str = "Error", error_detalle: str = "") -> "ProcesamientoResultado":
@@ -248,10 +250,24 @@ def procesar_video(video_path: str, transcripcion_path: str) -> ProcesamientoRes
                 )
 
         # 4.4 Preparar datos para IA
+        transcription_segments = []
         try:
             texto_para_ia = leer_transcripcion_para_ia(transcripcion_formatted)
             datos_enriquecidos = enriquecer_datos_para_ia(datos_audio, transcripcion_formatted)
             texto_para_ia = preparar_transcripcion_para_ia(transcripcion_formatted)
+            
+            # Leer segmentos de transcripción para incluirlos en el resultado
+            try:
+                with open(transcripcion_formatted, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if ' - ' in line:
+                            parts = line.split(' - ', 1)
+                            if len(parts) == 2:
+                                timestamp_str, text = parts
+                                transcription_segments.append({"timestamp": timestamp_str, "text": text})
+            except Exception as read_err:
+                print(f"[engine] No se pudieron leer segmentos de transcripción: {read_err}")
         except Exception as e:
             return ProcesamientoResultado.error_resultado(
                 error=f"Falló preparación de datos para IA: {e}",
@@ -294,7 +310,8 @@ def procesar_video(video_path: str, transcripcion_path: str) -> ProcesamientoRes
             print(f"[engine] IA no encontró clips válidos (devolvió {len(clips_ia)} clips, ninguno pasó validación)")
             return ProcesamientoResultado.exito_resultado(
                 clips=[],
-                carpeta_salida=clips_dir
+                carpeta_salida=clips_dir,
+                transcription_segments=transcription_segments
             )
 
         # 4.7 Generar clips de video
@@ -312,7 +329,8 @@ def procesar_video(video_path: str, transcripcion_path: str) -> ProcesamientoRes
             print(f"[engine] No se generaron archivos de clip, retornando resultado vacío")
             return ProcesamientoResultado.exito_resultado(
                 clips=[],
-                carpeta_salida=clips_dir
+                carpeta_salida=clips_dir,
+                transcription_segments=transcription_segments
             )
 
         # 5. Leer info de clips generados desde clips_info.json
@@ -339,7 +357,8 @@ def procesar_video(video_path: str, transcripcion_path: str) -> ProcesamientoRes
         # 6. Resultado exitoso
         return ProcesamientoResultado.exito_resultado(
             clips=clips_resultado,
-            carpeta_salida=clips_dir
+            carpeta_salida=clips_dir,
+            transcription_segments=transcription_segments
         )
 
     except ImportError as e:
