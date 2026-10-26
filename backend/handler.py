@@ -166,10 +166,12 @@ def process_video_job(job: dict[str, Any]) -> dict[str, Any]:
                 "error": error_msg,
                 "error_tipo": result.error_tipo,
                 "error_detalle": result.error_detalle,
+                "transcription_segments": [],
             }
 
         clips = result.clips
-        print(f"[RunPod Handler] EXITO: {len(clips)} clips generados")
+        transcription_segments = getattr(result, 'transcription_segments', None) or []
+        print(f"[RunPod Handler] EXITO: {len(clips)} clips generados, {len(transcription_segments)} segmentos de transcripción")
 
         response = {
             "status": "COMPLETED",
@@ -178,6 +180,7 @@ def process_video_job(job: dict[str, Any]) -> dict[str, Any]:
             "clips": [_serialize_clip(clip) for clip in clips],
             "clip_count": len(clips),
             "output_folder": result.carpeta_salida,
+            "transcription_segments": transcription_segments,
         }
         
         # Mensaje informativo si no hay clips
