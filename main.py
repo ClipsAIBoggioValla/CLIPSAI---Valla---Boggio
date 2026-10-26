@@ -830,6 +830,11 @@ def crear_carpeta_salida(nombre: str = "clips") -> str:
 
 def cortar_clip(video_entrada: str, inicio: str, fin: str, salida: str) -> bool:
     """Corta un clip usando FFmpeg."""
+    # Verificar que el archivo de entrada existe
+    if not os.path.exists(video_entrada):
+        print(f"      ERROR CRITICO: El archivo de video de entrada NO existe: {video_entrada}")
+        return False
+    
     inicio_seg = timestamp_a_segundos(inicio)
     fin_seg = timestamp_a_segundos(fin)
     duracion = int(fin_seg - inicio_seg)
@@ -843,26 +848,30 @@ def cortar_clip(video_entrada: str, inicio: str, fin: str, salida: str) -> bool:
     try:
         comando = [
             "ffmpeg", "-y",
-            "-ss", str(inicio),
             "-i", video_entrada,
+            "-ss", str(inicio),
             "-t", str(duracion),
             "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
             "-c:a", "aac", "-b:a", "192k",
             "-avoid_negative_ts", "make_zero",
             "-movflags", "+faststart",
-            "-progress", "pipe:1",
             salida
         ]
+        comando_str = " ".join(comando)
+        print(f"      Ejecutando: {comando_str}")
+        
         result = subprocess.run(comando, capture_output=True, timeout=120)
         if result.returncode != 0:
-            print(f"      FFmpeg error: {result.stderr.decode()[:200]}")
+            stderr_msg = result.stderr.decode("utf-8", errors="ignore")
+            print(f"      Ffmpeg FALLÓ. Return code: {result.returncode}")
+            print(f"      Ffmpeg stderr completo:\n{stderr_msg}")
             return False
         return True
     except subprocess.TimeoutExpired:
         print(f"      Timeout al cortar clip")
         return False
     except subprocess.CalledProcessError as e:
-        print(f"      Error al cortar: {e.stderr.decode() if e.stderr else e}")
+        print(f"      Error al cortar: {e.stderr.decode('utf-8', errors='ignore') if e.stderr else e}")
         return False
 
 
