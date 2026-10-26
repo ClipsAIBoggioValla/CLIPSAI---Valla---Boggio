@@ -581,7 +581,7 @@ def obtener_clips_ia(transcripcion: str, datos_audio: List[Dict], datos_enriquec
         proveedor = "DeepSeek"
     print(f"[4/6] Analizando con IA ({proveedor})...")
 
-    print(f"[DEBUG CLAUDE] Transcripción enviada ({len(texto_para_ia)} chars): {texto_para_ia[:300]}...")
+    print(f"[DEBUG CLAUDE] Transcripción enviada ({len(transcripcion)} chars): {transcripcion[:300]}...")
     
     prompt = construir_prompt(transcripcion, datos_audio, datos_enriquecidos)
 
