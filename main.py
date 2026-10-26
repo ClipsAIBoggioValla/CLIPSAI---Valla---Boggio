@@ -10,6 +10,7 @@ import json
 import time
 import subprocess
 import sys
+import shutil
 
 # Forzar la codificación de la consola a UTF-8 en Windows para evitar errores
 # al imprimir caracteres especiales (✓, ►, etc.) en PowerShell
@@ -830,6 +831,10 @@ def crear_carpeta_salida(nombre: str = "clips") -> str:
 
 def cortar_clip(video_entrada: str, inicio: str, fin: str, salida: str) -> bool:
     """Corta un clip usando FFmpeg."""
+    # Debug: mostrar qué FFmpeg estamos usando
+    ffmpeg_path = shutil.which("ffmpeg")
+    print(f"      [DEBUG] Usando FFmpeg en: {ffmpeg_path}")
+    
     # Verificar que el archivo de entrada existe
     if not os.path.exists(video_entrada):
         print(f"      ERROR CRITICO: El archivo de video de entrada NO existe: {video_entrada}")
@@ -848,13 +853,12 @@ def cortar_clip(video_entrada: str, inicio: str, fin: str, salida: str) -> bool:
     try:
         comando = [
             "ffmpeg", "-y",
-            "-i", video_entrada,
-            "-ss", str(inicio),
-            "-t", str(duracion),
-            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
-            "-c:a", "aac", "-b:a", "192k",
-            "-avoid_negative_ts", "make_zero",
-            "-movflags", "+faststart",
+            "-i", video_entrada,           # Entrada primero
+            "-ss", str(inicio),             # Slow seek (después de -i)
+            "-t", str(duracion),            # Duración
+            "-c:v", "libx264",              # Codec de video estándar
+            "-c:a", "aac",                  # Codec de audio estándar
+            "-movflags", "+faststart",      # Optimización para web
             salida
         ]
         comando_str = " ".join(comando)
