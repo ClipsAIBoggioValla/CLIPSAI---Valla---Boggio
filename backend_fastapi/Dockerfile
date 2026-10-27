@@ -19,8 +19,8 @@ RUN apt-get update \
         git \
     && rm -rf /var/lib/apt/lists/*
 
-# Desinstalar ffmpeg de conda para evitar conflictos
-RUN conda uninstall -y ffmpeg || true
+# Eliminar ffmpeg/ffprobe de conda para evitar conflictos (instantáneo, no cuelga el build)
+RUN rm -f /opt/conda/bin/ffmpeg /opt/conda/bin/ffprobe && echo "FFmpeg de conda eliminado"
 
 # Asegurar que /usr/bin esté antes que /opt/conda en el PATH
 ENV PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH}"
