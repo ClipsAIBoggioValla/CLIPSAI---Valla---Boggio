@@ -19,13 +19,16 @@ RUN apt-get update \
         git \
     && rm -rf /var/lib/apt/lists/*
 
-# Verificar que ffmpeg tenga soporte para libx264
-RUN ffmpeg -encoders 2>/dev/null | grep libx264 || (echo "ERROR: libx264 no disponible" && exit 1)
+# Desinstalar ffmpeg de conda para evitar conflictos
+RUN conda uninstall -y ffmpeg || true
 
 # Asegurar que /usr/bin esté antes que /opt/conda en el PATH
-ENV PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/conda/bin"
+ENV PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH}"
 
-# Verificar
+# Verificar que /usr/bin/ffmpeg tenga soporte para libx264
+RUN /usr/bin/ffmpeg -encoders 2>/dev/null | grep libx264 || (echo "ERROR: libx264 no disponible" && exit 1)
+
+# Verificar versiones y entorno
 RUN python --version \
     && python -c "import torch; print(f'PyTorch {torch.__version__} con CUDA {torch.version.cuda}')" \
     && /usr/bin/ffmpeg -version \
