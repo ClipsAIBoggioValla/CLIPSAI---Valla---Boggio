@@ -11,18 +11,25 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 WORKDIR /app
 
-# Instalar solo ffmpeg y git (Python y CUDA ya están)
+# Instalar FFmpeg completo con soporte para H.264
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ffmpeg \
+        libx264-dev \
         git \
     && rm -rf /var/lib/apt/lists/*
+
+# Verificar que ffmpeg tenga soporte para libx264
+RUN ffmpeg -encoders 2>/dev/null | grep libx264 || (echo "ERROR: libx264 no disponible" && exit 1)
+
+# Asegurar que /usr/bin esté antes que /opt/conda en el PATH
+ENV PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/conda/bin"
 
 # Verificar
 RUN python --version \
     && python -c "import torch; print(f'PyTorch {torch.__version__} con CUDA {torch.version.cuda}')" \
-    && ffmpeg -version \
-    && ffprobe -version
+    && /usr/bin/ffmpeg -version \
+    && /usr/bin/ffprobe -version
 
 # Instalar dependencias de Python
 COPY backend_fastapi/requirements.txt ./
