@@ -11,28 +11,25 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 WORKDIR /app
 
-# Instalar FFmpeg completo con soporte para H.264
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        ffmpeg \
-        libx264-dev \
-        git \
-    && rm -rf /var/lib/apt/lists/*
+# Descargar FFmpeg estático con todos los codecs (incluido libx264)
+RUN wget -q https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz \
+    && tar -xf ffmpeg-release-amd64-static.tar.xz \
+    && mv ffmpeg-*-amd64-static/ffmpeg /usr/local/bin/ffmpeg \
+    && mv ffmpeg-*-amd64-static/ffprobe /usr/local/bin/ffprobe \
+    && rm -rf ffmpeg-release-amd64-static.tar.xz ffmpeg-*-amd64-static \
+    && chmod +x /usr/local/bin/ffmpeg /usr/local/bin/ffprobe
 
-# Eliminar ffmpeg/ffprobe de conda para evitar conflictos (instantáneo, no cuelga el build)
-RUN rm -f /opt/conda/bin/ffmpeg /opt/conda/bin/ffprobe && echo "FFmpeg de conda eliminado"
-
-# Asegurar que /usr/bin esté antes que /opt/conda en el PATH
+# Asegurar que /usr/local/bin esté primero en el PATH
 ENV PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH}"
 
-# Verificar que /usr/bin/ffmpeg tenga soporte para libx264
-RUN /usr/bin/ffmpeg -encoders 2>/dev/null | grep libx264 || (echo "ERROR: libx264 no disponible" && exit 1)
+# Verificar que ffmpeg tenga libx264
+RUN /usr/local/bin/ffmpeg -encoders | grep libx264 || (echo "ERROR: libx264 no disponible" && exit 1)
 
 # Verificar versiones y entorno
 RUN python --version \
     && python -c "import torch; print(f'PyTorch {torch.__version__} con CUDA {torch.version.cuda}')" \
-    && /usr/bin/ffmpeg -version \
-    && /usr/bin/ffprobe -version
+    && /usr/local/bin/ffmpeg -version \
+    && /usr/local/bin/ffprobe -version
 
 # Instalar dependencias de Python
 COPY backend_fastapi/requirements.txt ./
