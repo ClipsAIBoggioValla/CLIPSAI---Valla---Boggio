@@ -31,10 +31,15 @@ def reframe_video(
         raise RuntimeError(f"No se puede aplicar crop 9:16: video de entrada no encontrado: {source}")
     output.parent.mkdir(parents=True, exist_ok=True)
 
+    # Filtro que escala primero manteniendo el aspect ratio hasta cubrir 1080x1920,
+    # luego recorta el centro exacto de 1080x1920.
+    # Para un video 16:9 (ej: 1280x720):
+    #   1. scale aumenta la altura a 1920, el ancho crece proporcionalmente a ~3413
+    #   2. crop toma el centro de 1080x1920
     crop_filter = (
-        "crop=w='min(iw,ih*9/16)':h='min(ih,iw*16/9)':"
-        "x='(iw-ow)/2':y='(ih-oh)/2',"
-        f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos,setsar=1"
+        f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
+        f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},"
+        "setsar=1"
     )
     command = [
         "ffmpeg",
