@@ -1138,6 +1138,13 @@ def _run_job(job_id: uuid.UUID) -> None:
                 pass
     finally:
         db.close()
+        # Limpieza post-job para evitar [Errno 28] en Render.
+        try:
+            from ..services.storage_cleanup import cleanup_storage
+            freed = cleanup_storage(max_age_hours=2)
+            logger.info("[jobs] Cleanup post-job para job=%s: liberó %.2f MB", job_id, freed / (1024 * 1024))
+        except Exception as cleanup_err:
+            logger.warning("[jobs] Cleanup post-job falló (non-fatal) para job=%s: %s", job_id, cleanup_err)
 
 
 # Wrapper Global para BackgroundTasks — spec exacta (async)
@@ -1187,14 +1194,14 @@ async def run_job_safely(job_id: str) -> None:
 
 # Wrapper Global para BackgroundTasks — spec exacta con asyncio.to_thread para desbloquear event loop
 async def run_job_safely(job_id: str) -> None:
-    """Wrapper async con try...except global para BackgroundTasks (spec) + desbloqueo event loop."""
+    """Wrapper async con try...except global para BackgroundTasks (spec)."""
     try:
         logger.info(f"[JOB {job_id}] Inicio de procesamiento de job.")
         try:
             sys.stdout.flush()
         except Exception:
             pass
-        # Desbloquear Event Loop: pipeline síncrono pesado (Whisper/PyTorch/FFmpeg) en hilo secundario
+        # Delegar a pipeline síncrono existente (convierte str a UUID si necesario)
         try:
             jid = uuid.UUID(str(job_id)) if isinstance(job_id, str) else job_id  # type: ignore
         except Exception:
@@ -1231,6 +1238,14 @@ async def run_job_safely(job_id: str) -> None:
                 db2.close()
         except Exception as _db_e:
             logger.error(f"[JOB {job_id}] No se pudo guardar error en BD desde wrapper: {_db_e}")
+    finally:
+        # Limpieza de archivos locales al finalizar el job (éxito o fracaso)
+        try:
+            from ..services.storage_cleanup import cleanup_storage
+            freed = cleanup_storage(max_age_hours=2)
+            logger.info("[jobs] Cleanup post-job para job=%s: liberó %.2f MB", job_id, freed / (1024 * 1024))
+        except Exception as cleanup_err:
+            logger.warning("[jobs] Cleanup post-job falló (non-fatal) para job=%s: %s", job_id, cleanup_err)
 
 
 @router.post(

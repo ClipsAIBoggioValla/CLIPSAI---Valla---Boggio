@@ -209,6 +209,14 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("Database not available. Skipping migrations and running in API-only mode.")
 
+    # Limpieza de emergencia al arrancar: evita [Errno 28] en Render si el disco quedó lleno.
+    try:
+        from .services.storage_cleanup import cleanup_storage
+        freed_bytes = cleanup_storage()  # usa STORAGE_DIR/STORAGE_PATH o /var/data
+        logger.info("[STARTUP] Storage cleanup: liberó %.2f MB", freed_bytes / (1024 * 1024))
+    except Exception as cleanup_err:
+        logger.warning("[STARTUP] Storage cleanup falló (non-fatal): %s", cleanup_err)
+
     yield
 
 

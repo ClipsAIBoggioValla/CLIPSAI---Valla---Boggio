@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import uuid
 from pathlib import Path
@@ -14,6 +15,8 @@ from sqlalchemy import select
 from ..deps import CurrentUser, DbSession
 from ..models import Video
 from ..schemas import VideoResponse
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/videos", tags=["videos"])
 upload_url_router = APIRouter(prefix="/api/videos", tags=["videos"])
@@ -195,6 +198,12 @@ async def upload_video(
         transcript_dest = upload_dir / f"{uuid.uuid4().hex}{transcript_ext}"
 
     try:
+        # Garantizar espacio antes de escribir en disco (evita [Errno 28] en Render)
+        try:
+            from ..services.storage_cleanup import ensure_disk_space
+            ensure_disk_space(upload_dir, min_free_mb=500)
+        except Exception as disk_err:
+            logger.warning("[upload] ensure_disk_space falló (non-fatal): %s", disk_err)
         await _save_upload_file(video, video_dest)
         if transcription is not None and transcript_dest is not None:
             await _save_upload_file(transcription, transcript_dest)
@@ -246,6 +255,17 @@ async def upload_video(
     db.add(entity)
     db.commit()
     db.refresh(entity)
+
+    # Borrar transcripción local: ya está en el campo `transcript` de la BD.
+    # El video se conserva (filepath) hasta que el job lo procese; se limpia luego
+    # por cleanup_storage cuando supere la antigüedad.
+    try:
+        from ..services.storage_cleanup import delete_file_safe  # type: ignore
+        if transcript_dest and transcript_dest.exists():
+            delete_file_safe(transcript_dest, "transcript")
+    except Exception:
+        pass
+
     return entity
 
 
