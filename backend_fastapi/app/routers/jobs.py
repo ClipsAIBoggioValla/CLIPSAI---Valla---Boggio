@@ -478,6 +478,28 @@ def _render_clip_with_ass_and_hook(
                 cut_segment(src, clip_start, clip_end, trimmed_path)
 
             # b) Reencuadrar explícitamente a 9:16. Un error aborta el render, nunca usa 16:9.
+            # Log detallado antes del reframe para debug
+            try:
+                import subprocess as _sp
+                _probe_cmd = ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,duration", "-of", "json", str(trimmed_path)]
+                _probe_res = _sp.run(_probe_cmd, capture_output=True, text=True, timeout=10)
+                if _probe_res.returncode == 0 and _probe_res.stdout.strip():
+                    import json as _json
+                    _probe_data = _json.loads(_probe_res.stdout)
+                    _streams = _probe_data.get("streams", [])
+                    if _streams:
+                        _w = _streams[0].get("width", "?")
+                        _h = _streams[0].get("height", "?")
+                        _dur = _streams[0].get("duration", "?")
+                        logger.info("[jobs] reframe input: %s (%sx%s, %ss)", trimmed_path.name, _w, _h, _dur)
+                _size = trimmed_path.stat().st_size if trimmed_path.exists() else 0
+                logger.info("[jobs] reframe input size: %d bytes, exists=%s", _size, trimmed_path.exists())
+            except Exception as probe_err:
+                logger.warning("[jobs] no se pudo propear trimmed_path: %s", probe_err)
+            
+            if not trimmed_path.exists() or trimmed_path.stat().st_size == 0:
+                raise RuntimeError(f"trimmed_path no existe o está vacío: {trimmed_path}")
+            
             reframe_video(trimmed_path, reframed_path, aspect_ratio="9:16")
             meta["aspect_ratio"] = "9:16"
 

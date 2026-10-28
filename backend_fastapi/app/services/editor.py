@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from pathlib import Path
 from typing import Literal
+
+logger = logging.getLogger(__name__)
 
 
 OUTPUT_WIDTH = 1080
@@ -31,6 +34,27 @@ def reframe_video(
         raise RuntimeError(f"No se puede aplicar crop 9:16: video de entrada no encontrado: {source}")
     output.parent.mkdir(parents=True, exist_ok=True)
 
+    # Verificar dimensiones del video de entrada
+    try:
+        probe_cmd = [
+            "ffprobe", "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height",
+            "-of", "csv=p=0:s=x",
+            str(source),
+        ]
+        probe = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=30)
+        if probe.returncode == 0 and probe.stdout.strip():
+            dims = probe.stdout.strip()
+            logger.info("[editor] reframe_video input dimensions: %s (%s)", source.name, dims)
+            if dims == f"{OUTPUT_WIDTH}x{OUTPUT_HEIGHT}":
+                logger.info("[editor] reframe_video: video ya es %dx%d, copiando tal cual", OUTPUT_WIDTH, OUTPUT_HEIGHT)
+                import shutil
+                shutil.copy2(str(source), str(output))
+                return str(output)
+    except Exception as probe_err:
+        logger.warning("[editor] no se pudo verificar dimensiones del input: %s", probe_err)
+
     # Filtro que escala primero manteniendo el aspect ratio hasta cubrir 1080x1920,
     # luego recorta el centro exacto de 1080x1920.
     # Para un video 16:9 (ej: 1280x720):
@@ -41,6 +65,7 @@ def reframe_video(
         f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},"
         "setsar=1"
     )
+    logger.info("[editor] reframe_video applying filter: %s", crop_filter)
     command = [
         "ffmpeg",
         "-y",
