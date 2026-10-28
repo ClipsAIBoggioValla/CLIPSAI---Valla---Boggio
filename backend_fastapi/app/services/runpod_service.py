@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import re
 import time
 import uuid
 from pathlib import Path
@@ -10,6 +12,8 @@ from typing import Any
 from urllib.parse import quote
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 
 class RunPodError(RuntimeError):
@@ -120,6 +124,87 @@ def process_local_video_via_runpod(
                 pass
 
 
+def _normalize_transcription_segments(segments: list[Any]) -> list[dict[str, Any]]:
+    """Normaliza segmentos de transcripción a formato uniforme {"start": float, "end": float, "text": str}.
+    
+    Acepta dos formatos de entrada:
+    a) Formato nuevo: {"start": float, "end": float, "text": str}
+    b) Formato viejo: {"timestamp": str, "text": str}
+    
+    Descarta items sin texto o con tiempos negativos.
+    """
+    if not isinstance(segments, list):
+        return []
+    
+    normalized = []
+    format_detected = None
+    
+    for i, seg in enumerate(segments):
+        if not isinstance(seg, dict):
+            continue
+        
+        text = str(seg.get("text", "")).strip()
+        if not text:
+            continue
+        
+        # Formato nuevo: start/end como floats
+        if "start" in seg and "end" in seg:
+            try:
+                start = float(seg["start"])
+                end = float(seg["end"])
+                if start < 0 or end <= start:
+                    continue
+                normalized.append({"start": round(start, 2), "end": round(end, 2), "text": text})
+                if format_detected is None:
+                    format_detected = "start/end"
+            except (ValueError, TypeError):
+                continue
+        # Formato viejo: timestamp como string "M:SS" o "H:MM:SS"
+        elif "timestamp" in seg:
+            try:
+                ts_str = str(seg["timestamp"]).strip()
+                ts_parts = ts_str.split(':')
+                if len(ts_parts) == 2:
+                    start = int(ts_parts[0]) * 60 + float(ts_parts[1])
+                elif len(ts_parts) == 3:
+                    start = int(ts_parts[0]) * 3600 + int(ts_parts[1]) * 60 + float(ts_parts[2])
+                else:
+                    start = float(ts_parts[0])
+                
+                if start < 0:
+                    continue
+                
+                # Estimar end: start del siguiente segmento o start + 3.0
+                end = start + 3.0
+                if i + 1 < len(segments):
+                    next_seg = segments[i + 1]
+                    if isinstance(next_seg, dict):
+                        next_ts = str(next_seg.get("timestamp", "")).strip()
+                        if next_ts:
+                            next_parts = next_ts.split(':')
+                            try:
+                                if len(next_parts) == 2:
+                                    next_start = int(next_parts[0]) * 60 + float(next_parts[1])
+                                elif len(next_parts) == 3:
+                                    next_start = int(next_parts[0]) * 3600 + int(next_parts[1]) * 60 + float(next_parts[2])
+                                else:
+                                    next_start = float(next_parts[0])
+                                if next_start > start:
+                                    end = next_start
+                            except (ValueError, IndexError):
+                                pass
+                
+                normalized.append({"start": round(start, 2), "end": round(end, 2), "text": text})
+                if format_detected is None:
+                    format_detected = "timestamp"
+            except (ValueError, TypeError, IndexError):
+                continue
+    
+    fmt_label = format_detected if format_detected else "desconocido"
+    logger.info("[runpod_service] Recibidos %d segmentos de transcripción (formato detectado: %s)", len(normalized), fmt_label)
+    return normalized
+
+
 def _decode_response(response: requests.Response) -> dict[str, Any]:
     try:
         data = response.json()
@@ -185,7 +270,12 @@ def process_video_via_runpod(
     status = str(data.get("status", "")).upper()
     if status in {"COMPLETED", "SUCCEEDED"}:
         output = data.get("output")
-        return output if isinstance(output, dict) else {"output": output, "job_id": data.get("id"), "status": status}
+        if isinstance(output, dict):
+            # Normalizar segmentos de transcripción si existen
+            raw_segments = output.get("transcription_segments", [])
+            output["transcription_segments"] = _normalize_transcription_segments(raw_segments)
+            return output
+        return {"output": output, "job_id": data.get("id"), "status": status}
 
     job_id = data.get("id")
     if not job_id:
@@ -208,6 +298,11 @@ def process_video_via_runpod(
         status = str(data.get("status", "")).upper()
         if status in {"COMPLETED", "SUCCEEDED"}:
             output = data.get("output")
-            return output if isinstance(output, dict) else {"output": output, "job_id": job_id, "status": status}
+            if isinstance(output, dict):
+                # Normalizar segmentos de transcripción si existen
+                raw_segments = output.get("transcription_segments", [])
+                output["transcription_segments"] = _normalize_transcription_segments(raw_segments)
+                return output
+            return {"output": output, "job_id": job_id, "status": status}
 
     raise RunPodError(f"El job RunPod {job_id} no terminó en {total_timeout}s")
