@@ -12,18 +12,18 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 WORKDIR /app
 
 # Descargar FFmpeg estático con todos los codecs (incluido libx264)
-RUN wget -q https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz \
-    && tar -xf ffmpeg-release-amd64-static.tar.xz \
+RUN curl -sSL https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz -o ffmpeg-release.tar.xz \
+    && tar -xf ffmpeg-release.tar.xz \
     && mv ffmpeg-*-amd64-static/ffmpeg /usr/local/bin/ffmpeg \
     && mv ffmpeg-*-amd64-static/ffprobe /usr/local/bin/ffprobe \
-    && rm -rf ffmpeg-release-amd64-static.tar.xz ffmpeg-*-amd64-static \
+    && rm -rf ffmpeg-release.tar.xz ffmpeg-*-amd64-static \
     && chmod +x /usr/local/bin/ffmpeg /usr/local/bin/ffprobe
 
 # Asegurar que /usr/local/bin esté primero en el PATH
 ENV PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH}"
 
 # Verificar que ffmpeg tenga libx264
-RUN /usr/local/bin/ffmpeg -encoders | grep libx264 || (echo "ERROR: libx264 no disponible" && exit 1)
+RUN /usr/local/bin/ffmpeg -encoders 2>/dev/null | grep libx264 || (echo "ERROR: libx264 no disponible" && exit 1)
 
 # Verificar versiones y entorno
 RUN python --version \
