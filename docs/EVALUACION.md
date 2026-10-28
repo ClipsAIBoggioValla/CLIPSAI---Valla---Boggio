@@ -16,7 +16,7 @@
 | Código (LOC) | 28,694 |
 | Archivos de código | 214 |
 | Tests (archivos) | 6 |
-| Cobertura de líneas | no medible (mínimo 80%) |
+| Cobertura de líneas | 16.0% (mínimo 80%) |
 | Capas detectadas | vistas, servicios, estado |
 | Tope por duplicación | `DUP>=15%` → índice ≤ 50 |
 
@@ -162,7 +162,7 @@ Cada aspecto indica **qué mide**, **por qué importa** y **tu resultado**. Cuan
 
 - **Qué mide:** Porcentaje de líneas de código ejecutadas por la suite de tests (cobertura real, no cantidad de archivos de test).
 - **Por qué importa:** Un test que existe pero no ejecuta el código no protege de nada: la cobertura muestra qué partes quedan sin verificar.
-- **Tu resultado:** **no medible** (sin tests, sin runner o sin artefacto de cobertura) _(mínimo 80% de líneas)_
+- **Tu resultado:** **16.0%** de líneas cubiertas _(mínimo 80% de líneas)_
 - **Para investigar la causa:**
     - ¿Qué módulos o ramas del sistema nunca se ejecutan en los tests?
     - ¿Los tests prueban el camino principal y los errores, o solo el caso feliz?
@@ -188,7 +188,7 @@ Criterios que hoy están en rojo y qué habría que cambiar para alcanzar el niv
 | Componente demasiado grande (BigC) | **16** componente(s) demasiado grande(s) | máximo 1 | Dividir el componente por responsabilidad en subcomponentes; ≤1 componente grande. |
 | Baja cohesión (Coh) | **1** unidad(es) con baja cohesión | máximo 0 | Separar en unidades con una sola responsabilidad; 0 clases con baja cohesión. |
 | Complejidad alta (Compl) | **295** bloque(s) de complejidad alta | máximo 5 por 1000 LOC (tenés 28694 LOC) | Extraer ramas y reglas a funciones con nombre propio; ≤5 bloques por 1000 LOC. |
-| Cobertura de tests (Cob) | **no medible** (sin tests, sin runner o sin artefacto de cobertura) | mínimo 80% de líneas | Publicar cobertura (o correr la suite con coverage) y cubrir ≥80% de líneas. |
+| Cobertura de tests (Cob) | **16.0%** de líneas cubiertas | mínimo 80% de líneas | Publicar cobertura (o correr la suite con coverage) y cubrir ≥80% de líneas. |
 
 > Empezá por las señales de seguridad (**SEC**, **SQL**) y por la **duplicación**: son las que más pesan en el índice y las más rápidas de verificar a ojo.
 
