@@ -852,7 +852,7 @@ def cortar_clip(video_entrada: str, inicio: str, fin: str, salida: str) -> bool:
     
     try:
         comando = [
-            "/usr/bin/ffmpeg", "-y",
+            "/usr/local/bin/ffmpeg", "-y",
             "-i", video_entrada,           # Entrada primero
             "-ss", str(inicio),             # Slow seek (después de -i)
             "-t", str(duracion),            # Duración
