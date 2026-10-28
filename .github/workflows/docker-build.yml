@@ -4,7 +4,7 @@ on:
   workflow_dispatch: # Permite ejecutarlo manualmente desde la pestaña Actions de GitHub
   push:
     branches:
-      - main # Se ejecuta automáticamente al hacer push a main (cambia si tu rama se llama diferente)
+      - dev   # Se ejecuta automáticamente al hacer push a dev (rama activa)
 
 jobs:
   build-and-push:
@@ -29,7 +29,7 @@ jobs:
           file: ./backend_fastapi/Dockerfile
           push: true
           tags: |
-            mfboggio/clipsai-worker:v20
+            mfboggio/clipsai-worker:v21
             mfboggio/clipsai-worker:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
