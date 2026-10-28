@@ -1,1 +1,1 @@
-export * from '@shared/types/api'
+export * from 'frontend_common/types/api'

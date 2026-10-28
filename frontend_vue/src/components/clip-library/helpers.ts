@@ -1,1 +1,1 @@
-export * from '@shared/components/clip-library/helpers'
+export * from 'frontend_common/components/clip-library/helpers'

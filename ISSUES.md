@@ -243,7 +243,7 @@ npm run audit:parity    → FastAPI 60 | Express 62 | Documentadas 56 → PARIDA
 
 **Descripción:** Eliminar secretos hardcodeados y completar `docker-compose.yml`.
 
-**Estado:** JWT/bcrypt OK. Pendiente rotar `ANTHROPIC_API_KEY` `sk-ant-api03-...` en git history `BFG` y `requirements.txt` `bcrypt==4.1.2`, `backend_express/Dockerfile`. Compose ahora con `db + backend_fastapi + backend_express` OK, frontends `preview` pendiente Issues 31–35.
+**Estado:** JWT/bcrypt OK. Pendiente rotar `ANTHROPIC_API_KEY` `[REDACTED]` en git history `BFG` y `requirements.txt` `bcrypt==4.1.2`, `backend_express/Dockerfile`. Compose ahora con `db + backend_fastapi + backend_express` OK, frontends `preview` pendiente Issues 31–35.
 
 **Acción:** ver Issue 35 (deuda técnica UI).
 

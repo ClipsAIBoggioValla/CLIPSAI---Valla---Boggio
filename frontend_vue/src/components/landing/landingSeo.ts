@@ -1,1 +1,1 @@
-export * from '@shared/components/landing/landingSeo'
+export * from 'frontend_common/components/landing/landingSeo'

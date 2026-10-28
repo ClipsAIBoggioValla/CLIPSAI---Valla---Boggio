@@ -1,3 +1,11 @@
+def _first_env(*names: str) -> str:
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value.strip()
+    return ""
+
+
 from __future__ import annotations
 
 import asyncio
@@ -49,11 +57,10 @@ def _get_ngrok_domain() -> str:
         domain = public_url.replace("https://", "").replace("http://", "").strip().strip("/")
         if domain:
             return domain
-    # Si PUBLIC_BACKEND_URL no está seteada, usar BACKEND_URL/API_BASE_URL
-    backend = os.getenv("BACKEND_URL", "").strip() or os.getenv("API_BASE_URL", "").strip() or os.getenv("PUBLIC_BACKEND_URL", "").strip()
+    backend = _first_env("BACKEND_URL", "API_BASE_URL", "PUBLIC_BACKEND_URL")
     if backend:
         domain = backend.replace("https://", "").replace("http://", "").strip().strip("/")
-        if domain and "decorator" not in domain and "guns-camps" not in domain and "ngrok" not in domain:
+        if domain and all(tok not in domain for tok in ("decorator", "guns-camps", "ngrok")):
             return domain
     domain = os.getenv("NGROK_DOMAIN", "").strip()
     if domain and "decorator" not in domain:

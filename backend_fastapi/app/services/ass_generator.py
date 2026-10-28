@@ -90,27 +90,33 @@ def generate_ass_content(
     header = ASS_HEADER_TEMPLATE.format(title=title or "clipsai", style=style_str)
     lines: list[str] = []
     for seg in segments:
-        try:
-            start = float(seg.get("start", 0))
-            end = float(seg.get("end", 0))
-            text_raw = str(seg.get("text", "") or "")
-        except Exception:
-            continue
-        if end <= start:
-            end = start + min_duration
-        dur = end - start
-        if dur < 0.15:
-            continue
-        if dur < min_duration:
-            end = start + min_duration
-        if dur > max_duration:
-            end = start + max_duration
-        text = _sanitize_text(text_raw)
-        if not text:
-            continue
-        wrapped = _wrap_text(text, max_chars=max_chars_per_line)
-        lines.append(f"Dialogue: 0,{_format_ass_time(start)},{_format_ass_time(end)},Default,,0,0,0,,{wrapped}")
+        line = _segment_to_dialogue(seg, min_duration=min_duration, max_duration=max_duration, max_chars_per_line=max_chars_per_line)
+        if line is not None:
+            lines.append(line)
     return header + "\n".join(lines)
+
+
+def _segment_to_dialogue(seg, *, min_duration, max_duration, max_chars_per_line):
+    try:
+        start = float(seg.get("start", 0))
+        end = float(seg.get("end", 0))
+        text_raw = str(seg.get("text", "") or "")
+    except Exception:
+        return None
+    if end <= start:
+        end = start + min_duration
+    dur = end - start
+    if dur < 0.15:
+        return None
+    if dur < min_duration:
+        end = start + min_duration
+    if dur > max_duration:
+        end = start + max_duration
+    text = _sanitize_text(text_raw)
+    if not text:
+        return None
+    wrapped = _wrap_text(text, max_chars=max_chars_per_line)
+    return f"Dialogue: 0,{_format_ass_time(start)},{_format_ass_time(end)},Default,,0,0,0,,{wrapped}"
 
 
 def write_ass_file(
@@ -152,15 +158,14 @@ def generate_ass_for_clip(
     return write_ass_file(segments, output_path, title=clip_title or "clipsai")
 
 
-def generate_hooked_ass(
+def _generate_hooked_segments(
     segments: list[SubtitleSegment],
     clip_start: float,
     clip_end: float,
     hook_start: float,
     hook_end: float,
-    output_path: str | Path,
-    title: str = "clipsai",
-) -> str:
+) -> tuple[list[SubtitleSegment], list[SubtitleSegment]]:
+    """Lógica compartida de segmentos hooked. Retorna (hook_segs, clip_segs)."""
     hook_dur = hook_end - hook_start
     if not (2.5 < hook_dur < 5.5):
         raise ValueError(f"Hook duracion {hook_dur:.3f}s debe estar estrictamente entre 2.5 y 5.5s")
@@ -190,8 +195,20 @@ def generate_hooked_ass(
                 clip_segs.append(SubtitleSegment(start=cs - clip_start + hook_dur, end=ce - clip_start + hook_dur, text=txt))
         except Exception:
             continue
-    all_shifted = hook_segs + clip_segs
-    all_shifted.sort(key=lambda x: x["start"])
+    return hook_segs, clip_segs
+
+
+def generate_hooked_ass(
+    segments: list[SubtitleSegment],
+    clip_start: float,
+    clip_end: float,
+    hook_start: float,
+    hook_end: float,
+    output_path: str | Path,
+    title: str = "clipsai",
+) -> str:
+    hook_segs, clip_segs = _generate_hooked_segments(segments, clip_start, clip_end, hook_start, hook_end)
+    all_shifted = sorted(hook_segs + clip_segs, key=lambda x: x["start"])
     return write_ass_file(all_shifted, output_path, title=title)
 
 
@@ -203,32 +220,6 @@ def build_hooked_ass_content(
     hook_end: float,
     title: str = "clipsai",
 ) -> str:
-    hook_dur = hook_end - hook_start
-    if not (2.5 < hook_dur < 5.5):
-        raise ValueError(f"Hook duracion {hook_dur:.3f}s debe estar estrictamente entre 2.5 y 5.5s")
-    if not (0.0 <= hook_start < hook_end):
-        raise ValueError(f"Rango de hook invalido: [{hook_start},{hook_end}]")
-    hook_segs: list[SubtitleSegment] = []
-    clip_segs: list[SubtitleSegment] = []
-    for s in segments:
-        try:
-            st = float(s.get("start", 0))
-            en = float(s.get("end", 0))
-            txt = str(s.get("text", "")).strip()
-            if not txt or en <= st:
-                continue
-            if not (en < hook_start or st > hook_end):
-                cs = max(st, hook_start)
-                ce = min(en, hook_end)
-                if ce > cs:
-                    hook_segs.append(SubtitleSegment(start=cs - hook_start, end=ce - hook_start, text=txt))
-            if en < clip_start or st > clip_end:
-                continue
-            cs = max(st, clip_start)
-            ce = min(en, clip_end)
-            if ce > cs:
-                clip_segs.append(SubtitleSegment(start=cs - clip_start + hook_dur, end=ce - clip_start + hook_dur, text=txt))
-        except Exception:
-            continue
+    hook_segs, clip_segs = _generate_hooked_segments(segments, clip_start, clip_end, hook_start, hook_end)
     all_shifted = sorted(hook_segs + clip_segs, key=lambda x: x["start"])
     return generate_ass_content(all_shifted, title=title)
