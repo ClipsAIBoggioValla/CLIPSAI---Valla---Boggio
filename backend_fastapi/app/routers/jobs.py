@@ -285,8 +285,11 @@ def _select_hook_for_clip(
     clip_start: float,
     clip_end: float,
     hook_selection: dict | None,
-) -> tuple[float, float, dict] | None:
-    """Valida el teaser de Claude o selecciona los primeros 3s sin reordenarlos."""
+) -> tuple[float, float, dict]:
+    """Valida el teaser de Claude o selecciona los primeros 3s sin reordenarlos.
+    
+    NUNCA retorna None - siempre devuelve al menos el fallback in_clip.
+    """
     try:
         clip_start = float(clip_start)
         clip_end = float(clip_end)
@@ -294,14 +297,32 @@ def _select_hook_for_clip(
             raise ValueError(f"Rango de clip inválido [{clip_start},{clip_end}]")
     except (TypeError, ValueError) as exc:
         logger.warning("[jobs] hook: rango de clip inválido: %s", exc)
-        return None
+        # Fallback seguro: 0 a 3 segundos
+        return (0.0, 3.0, {
+            "mode": "in_clip",
+            "source": "in_clip_fallback_invalid_range",
+            "curiosity_score": None,
+            "makes_sense_standalone": False,
+        })
 
     clip_duration = clip_end - clip_start
+    direct_end = min(clip_start + 3.0, clip_end)
+    
+    fallback_in_clip = (
+        clip_start,
+        direct_end,
+        {
+            "mode": "in_clip",
+            "source": "in_clip_fallback",
+            "curiosity_score": None,
+            "makes_sense_standalone": False,
+        },
+    )
+    
     if clip_duration < 3.0:
         logger.warning("[jobs] clip demasiado corto para hook in-clip: %.3fs", clip_duration)
-        return None
+        return fallback_in_clip
 
-    direct_end = min(clip_start + 3.0, clip_end)
     if isinstance(hook_selection, dict) and hook_selection.get("mode") == "in_clip":
         return (
             clip_start,
@@ -331,17 +352,8 @@ def _select_hook_for_clip(
         except (KeyError, TypeError, ValueError) as exc:
             logger.warning("[jobs] teaser Claude inválido (%s); se usa apertura in-clip", exc)
 
-    # No se extrae ni se concatena otra ventana: el video ya abre con su hook directo.
-    return (
-        clip_start,
-        direct_end,
-        {
-            "mode": "in_clip",
-            "source": "in_clip_fallback",
-            "curiosity_score": None,
-            "makes_sense_standalone": False,
-        },
-    )
+    # Fallback: usar los primeros 3 segundos del clip
+    return fallback_in_clip
 
 
 def _render_clip_with_ass_and_hook(
@@ -703,16 +715,17 @@ def _run_job(job_id: uuid.UUID) -> None:
         cached_transcription_segments: list[dict] = []
         if isinstance(result, dict):
             clips_payload = result.get("clips") or result.get("result") or result.get("clips_generated") or []
-            raw_segments = result.pop("transcription_segments", None)
+            # Los segmentos ya vienen normalizados desde runpod_service.py
+            raw_segments = result.get("transcription_segments", [])
             if isinstance(raw_segments, list):
                 for raw_segment in raw_segments:
                     if not isinstance(raw_segment, dict):
                         continue
                     try:
-                        start_time = float(raw_segment["start"])
-                        end_time = float(raw_segment["end"])
+                        start_time = float(raw_segment.get("start", 0))
+                        end_time = float(raw_segment.get("end", 0))
                         text = str(raw_segment.get("text", "")).strip()
-                        if text and end_time > start_time:
+                        if text and end_time > start_time >= 0:
                             cached_transcription_segments.append(
                                 {"start": start_time, "end": end_time, "text": text}
                             )
@@ -724,13 +737,12 @@ def _run_job(job_id: uuid.UUID) -> None:
         if not clips_payload:
             # Control de arrays vacíos: mensaje descriptivo en lugar de error críptico o "4"
             # Esto evita que el frontend reciba solo "4" y permite diagnóstico real
-            segs_dbg = len(segments) if 'segments' in locals() else "N/A (antes de ASS/Hook)"
             raise RuntimeError(
                 f"El engine real no devolvió clips (0 clips). "
                 f"Posibles causas: transcripción vacía o sin segmentos detectables, "
                 f"Whisper no generó segmentos (verificar audio/idioma), "
                 f"LLM sin respuesta o filtrado por score. "
-                f"Debug: clips_payload vacío, job={job_id}, video={video.id}, segments_detectados={segs_dbg}. "
+                f"Debug: clips_payload vacío, job={job_id}, video={video.id}. "
                 f"Revisar logs whisper/LLM y verificar que el video tenga audio nítido y transcripción válida."
             )
 
@@ -746,19 +758,49 @@ def _run_job(job_id: uuid.UUID) -> None:
         # --- Issue #29: preparar segmentos y hooks para ASS + teaser — flujo obligatorio Claude sin fallback heurístico
         segments: list[dict] = []
         if ENABLE_ASS_HOOK:
-            # Reusar segmentos de la pasada Whisper del engine; el WAV temporal ya se limpió.
-            # Si el engine no los entregó, extraer/transcribir de nuevo con los timeouts adecuados.
-            segments = cached_transcription_segments or _load_transcription_segments(video)
+            # 1) Reusar segmentos normalizados del engine (ya vienen de runpod_service.py)
+            segments = cached_transcription_segments
+            
+            # 2) Fallback: cargar desde video/transcripción si no hay segmentos en caché
             if not segments:
-                raise RuntimeError("Error en API de Claude: no se detectaron segmentos de transcripción para ASS/Hook — verificar Whisper/transcripción")
-            if cached_transcription_segments:
-                logger.info("[jobs] reutilizando %s segmentos Whisper en memoria para ASS/Hook", len(segments))
-            logger.info("[jobs] pipeline ASS/Hook enabled: segments=%s; hook candidates provistos por Claude engine", len(segments))
-            # 65% Finalización análisis hooks (Claude)
-            try:
-                _set_progress(db, job, 65)
-            except Exception:
-                pass
+                logger.warning("[jobs] Sin segmentos en caché, intentando _load_transcription_segments")
+                try:
+                    segments = _load_transcription_segments(video)
+                except Exception as load_err:
+                    logger.warning("[jobs] _load_transcription_segments falló: %s", load_err)
+                    segments = []
+            
+            # 3) Fallback final: generar segmentos planos estimados desde transcript de BD
+            if not segments and video.transcript and video.transcript.strip():
+                logger.warning("[jobs] Sin segmentos Whisper, generando segmentos planos desde transcript BD")
+                try:
+                    segments = _parse_transcript_text_to_segments(video.transcript)
+                except Exception as parse_err:
+                    logger.warning("[jobs] _parse_transcript_text_to_segments falló: %s", parse_err)
+                    segments = []
+            
+            # 4) Si aún no hay segmentos, NO lanzar error inmediatamente — permitir render sin ASS
+            if not segments:
+                logger.error(
+                    "[jobs] CRÍTICO: No hay segmentos de transcripción disponibles para ASS/Hook. "
+                    "Los clips se renderizarán SIN subtítulos. "
+                    "Causas posibles: Whisper no transcribió, transcripción vacía, formato inválido. "
+                    "job=%s video=%s",
+                    job_id, video.id
+                )
+                # Continuar sin segmentos (render sin ASS)
+                ENABLE_ASS_HOOK = False
+            
+            if segments:
+                if cached_transcription_segments:
+                    logger.info("[jobs] reutilizando %s segmentos Whisper en memoria para ASS/Hook", len(segments))
+                else:
+                    logger.info("[jobs] usando %s segmentos de fallback para ASS/Hook", len(segments))
+                # 65% Finalización análisis hooks (Claude)
+                try:
+                    _set_progress(db, job, 65)
+                except Exception:
+                    pass
 
         from ..models import Clip
 
@@ -799,7 +841,33 @@ def _run_job(job_id: uuid.UUID) -> None:
                     )
                 except Exception as e:
                     logger.warning("[jobs] hook select fallo clip %s: %s", idx, e)
-                    hook_sel = None
+                    # Fallback: usar primeros 3 segundos del clip
+                    hook_sel = (
+                        float(start),
+                        min(float(start) + 3.0, float(end)),
+                        {
+                            "mode": "in_clip",
+                            "source": "in_clip_fallback",
+                            "curiosity_score": None,
+                            "makes_sense_standalone": False,
+                        }
+                    )
+            
+            # Log de segmentos y hook para este clip
+            if ENABLE_ASS_HOOK and segments:
+                segs_en_ventana = [s for s in segments if s["start"] < end and s["end"] > start]
+                if hook_sel:
+                    hs, he, hmeta = hook_sel
+                    logger.info(
+                        "[jobs] Clip %s: %s segmentos en ventana [%.1f-%.1f], hook de %.1f s a %.1f s (modo=%s)",
+                        idx, len(segs_en_ventana), start, end, hs, he,
+                        hmeta.get("mode", "unknown") if isinstance(hmeta, dict) else "none"
+                    )
+                else:
+                    logger.info(
+                        "[jobs] Clip %s: %s segmentos en ventana [%.1f-%.1f], SIN hook",
+                        idx, len(segs_en_ventana), start, end
+                    )
 
             # Render FFmpeg + ASS
             storage = item.get("storage_path") or item.get("file_path") or item.get("path") or ""

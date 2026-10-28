@@ -257,15 +257,68 @@ def procesar_video(video_path: str, transcripcion_path: str) -> ProcesamientoRes
             texto_para_ia = preparar_transcripcion_para_ia(transcripcion_formatted)
             
             # Leer segmentos de transcripción para incluirlos en el resultado
+            # Formato esperado por jobs.py: {"start": float, "end": float, "text": str}
             try:
                 with open(transcripcion_formatted, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        line = line.strip()
-                        if ' - ' in line:
-                            parts = line.split(' - ', 1)
-                            if len(parts) == 2:
-                                timestamp_str, text = parts
-                                transcription_segments.append({"timestamp": timestamp_str, "text": text})
+                    lines = f.readlines()
+                
+                for i, line in enumerate(lines):
+                    line = line.strip()
+                    if ' - ' in line:
+                        parts = line.split(' - ', 1)
+                        if len(parts) == 2:
+                            timestamp_str, text = parts
+                            if not text.strip():
+                                continue
+                            # Convertir timestamp M:SS, MM:SS o H:MM:SS a segundos
+                            try:
+                                ts_parts = timestamp_str.split(':')
+                                if len(ts_parts) == 2:
+                                    start_seconds = int(ts_parts[0]) * 60 + float(ts_parts[1])
+                                elif len(ts_parts) == 3:
+                                    start_seconds = int(ts_parts[0]) * 3600 + int(ts_parts[1]) * 60 + float(ts_parts[2])
+                                else:
+                                    start_seconds = float(timestamp_str)
+                                
+                                if start_seconds < 0:
+                                    continue
+                                
+                                # Estimar end como start del siguiente segmento (o start + 3.0 para el último)
+                                end_seconds = start_seconds + 3.0
+                                if i + 1 < len(lines):
+                                    next_line = lines[i + 1].strip()
+                                    if ' - ' in next_line:
+                                        next_parts = next_line.split(' - ', 1)
+                                        if len(next_parts) == 2 and next_parts[0].strip():
+                                            next_ts = next_parts[0].strip()
+                                            next_ts_parts = next_ts.split(':')
+                                            try:
+                                                if len(next_ts_parts) == 2:
+                                                    next_start = int(next_ts_parts[0]) * 60 + float(next_ts_parts[1])
+                                                elif len(next_ts_parts) == 3:
+                                                    next_start = int(next_ts_parts[0]) * 3600 + int(next_ts_parts[1]) * 60 + float(next_ts_parts[2])
+                                                else:
+                                                    next_start = float(next_ts)
+                                                if next_start > start_seconds:
+                                                    end_seconds = next_start
+                                            except (ValueError, IndexError):
+                                                pass
+                                
+                                transcription_segments.append({
+                                    "start": round(start_seconds, 2),
+                                    "end": round(end_seconds, 2),
+                                    "text": text.strip()
+                                })
+                            except (ValueError, IndexError) as ts_err:
+                                print(f"[engine] No se pudo parsear timestamp '{timestamp_str}': {ts_err}")
+                
+                # Log de los primeros 3 segmentos como muestra
+                if transcription_segments:
+                    print(f"[engine] Generados {len(transcription_segments)} segmentos de transcripción:")
+                    for seg in transcription_segments[:3]:
+                        print(f"  - start={seg['start']}, end={seg['end']}, text='{seg['text'][:50]}'")
+                else:
+                    print(f"[engine] WARNING: No se generaron segmentos de transcripción")
             except Exception as read_err:
                 print(f"[engine] No se pudieron leer segmentos de transcripción: {read_err}")
         except Exception as e:

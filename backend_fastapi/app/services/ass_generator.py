@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import TypedDict
+
+logger = logging.getLogger(__name__)
 
 
 class SubtitleSegment(TypedDict):
@@ -166,6 +169,25 @@ def generate_hooked_ass(
         raise ValueError(f"Hook duracion {hook_dur:.3f}s debe estar estrictamente entre 2.5 y 5.5s")
     if not (0.0 <= hook_start < hook_end):
         raise ValueError(f"Rango de hook invalido: [{hook_start},{hook_end}]")
+    
+    # Verificar si hay segmentos dentro de la ventana del clip
+    segs_en_ventana = [
+        s for s in segments
+        if float(s.get("start", 0)) < clip_end and float(s.get("end", 0)) > clip_start
+    ]
+    
+    # Si no hay segmentos en la ventana, ampliar ±2 segundos
+    window_start = clip_start
+    window_end = clip_end
+    if not segs_en_ventana:
+        window_start = max(0.0, clip_start - 2.0)
+        window_end = clip_end + 2.0
+        logger = logging.getLogger(__name__)
+        logger.warning(
+            "[ass] Sin segmentos en ventana [%.1f-%.1f], ampliando a [%.1f-%.1f]",
+            clip_start, clip_end, window_start, window_end
+        )
+    
     hook_segs: list[SubtitleSegment] = []
     clip_segs: list[SubtitleSegment] = []
     for s in segments:
@@ -175,6 +197,7 @@ def generate_hooked_ass(
             txt = str(s.get("text", "")).strip()
             if not txt or en <= st:
                 continue
+            # Segmentos para el hook
             if en < hook_start or st > hook_end:
                 pass
             else:
@@ -182,10 +205,11 @@ def generate_hooked_ass(
                 ce = min(en, hook_end)
                 if ce > cs:
                     hook_segs.append(SubtitleSegment(start=cs - hook_start, end=ce - hook_start, text=txt))
-            if en < clip_start or st > clip_end:
+            # Segmentos para el clip (usar ventana ampliada si es necesario)
+            if en < window_start or st > window_end:
                 continue
-            cs = max(st, clip_start)
-            ce = min(en, clip_end)
+            cs = max(st, window_start)
+            ce = min(en, window_end)
             if ce > cs:
                 clip_segs.append(SubtitleSegment(start=cs - clip_start + hook_dur, end=ce - clip_start + hook_dur, text=txt))
         except Exception:
