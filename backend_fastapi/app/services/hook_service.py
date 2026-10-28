@@ -266,12 +266,8 @@ def _validate_clips(data: dict[str, Any]) -> list[HookClip]:
                 continue
             clip_dur = en - st
             hook_dur = hk_en - hk_st
-            if not (15.0 <= clip_dur <= 60.0):
+            if not (15.0 <= clip_dur <= 60.0 and 3.0 <= hook_dur <= 6.0):
                 continue
-            if not (3.0 <= hook_dur <= 6.0):
-                continue
-            if abs(hk_dur - hook_dur) > 0.5:
-                hk_dur = hook_dur
             if not (st <= hk_st < hk_en <= en):
                 continue
             if not (0 <= score <= 100):

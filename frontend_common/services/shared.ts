@@ -8,6 +8,21 @@
  */
 import type { JobResponse, VideoUploadResponse } from '../types/api'
 
+/** Sube un archivo a una URL firmada (PUT directo, sin pasar por el backend). */
+export async function uploadFileToSignedUrl(uploadUrl: string, file: File): Promise<void> {
+  const response = await fetch(uploadUrl, {
+    method: 'PUT',
+    headers: { 'Content-Type': file.type },
+    body: file,
+  })
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '')
+    throw new Error(
+      `Error al subir a Cloudflare R2 (HTTP ${response.status})${detail ? `: ${detail.slice(0, 300)}` : ''}`,
+    )
+  }
+}
+
 /** Descarga un Blob como archivo usando el nombre de Content-Disposition si existe. */
 export function triggerBlobDownload(blob: Blob, contentDisposition: string | null, fallbackFilename: string): void {
   let filename = fallbackFilename

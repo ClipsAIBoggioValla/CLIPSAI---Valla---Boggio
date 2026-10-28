@@ -34,10 +34,8 @@ def _resolve_sentence_timestamps(
         all_words.extend(sentence_words)
         positions[sentence_id] = (first_word_idx, len(all_words) - 1)
 
-    if start_sentence_id not in positions:
-        raise ValueError(f"start_sentence_id desconocido: {start_sentence_id}")
-    if end_sentence_id not in positions:
-        raise ValueError(f"end_sentence_id desconocido: {end_sentence_id}")
+    if start_sentence_id not in positions or end_sentence_id not in positions:
+        raise ValueError(f"start/end sentence id desconocido: {start_sentence_id} / {end_sentence_id}")
 
     first_idx = positions[start_sentence_id][0]
     last_idx = positions[end_sentence_id][1]
@@ -388,47 +386,15 @@ def run_clip_engine(video_path: str, transcription_path: str, progress_callback:
     import re
     _log = logging.getLogger(__name__)
 
-    def _parse_transcript_native(text: str) -> list[dict]:
-        segs: list[dict] = []
-        if not text or not text.strip():
-            return segs
-        lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
-        re_ts = re.compile(r"^(\d{1,2}:\d{2}(?::\d{2})?)\s*[-–]\s*(.+)$")
-        re_bracket = re.compile(r"^\[\s*(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*\]\s*(.+)$")
-        cursor = 0.0
-        for line in lines:
-            m = re_bracket.match(line)
-            if m:
-                try:
-                    s = float(m.group(1)); e = float(m.group(2)); t = m.group(3).strip()
-                    if e > s and t:
-                        segs.append({"start": s, "end": e, "text": t})
-                        cursor = e
-                    continue
-                except Exception:
-                    pass
-            m = re_ts.match(line)
-            if m:
-                ts_str = m.group(1); t = m.group(2).strip()
-                try:
-                    parts = ts_str.split(":")
-                    if len(parts) == 3:
-                        s = int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
-                    elif len(parts) == 2:
-                        s = int(parts[0]) * 60 + float(parts[1])
-                    else:
-                        s = float(parts[0])
-                    e = s + 3.0
-                    if t:
-                        segs.append({"start": s, "end": e, "text": t})
-                        cursor = e
-                    continue
-                except Exception:
-                    pass
-            segs.append({"start": cursor, "end": cursor + 3.0, "text": line})
-            cursor += 3.0
-        return segs
+def _parse_transcript_native(text: str) -> list[dict]:
+    """Parser de transcripción nativo.
 
+    Delega en ``parse_transcript_text_to_segments`` de
+    ``backend_fastapi/app/services/transcript_utils`` para compartir lógica.
+    """
+    from ..services.transcript_utils import parse_transcript_text_to_segments as _shared
+
+    return _shared(text)
     def _native_segments() -> list[dict]:
         wav_path: str | None = None
         try:

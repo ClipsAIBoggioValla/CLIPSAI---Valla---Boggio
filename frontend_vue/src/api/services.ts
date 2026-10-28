@@ -1,5 +1,5 @@
 import { apiClient } from '@/api/client'
-import { buildClipListQuery, normalizeJob, normalizeVideo, triggerBlobDownload } from '@shared/services/shared'
+import { buildClipListQuery, normalizeJob, normalizeVideo, triggerBlobDownload, uploadFileToSignedUrl } from 'frontend_common/services/shared'
 import type { AuthToken, AuthUser, JobResponse, StatsSummary, UserLogin, UserRegister, VideoUploadResponse } from '@/types/api'
 
 export const authService = {
@@ -27,15 +27,7 @@ export const videoService = {
       throw new Error('El backend no devolvió upload_url y file_key')
     }
 
-    const response = await fetch(signed.upload_url, {
-      method: 'PUT',
-      headers: { 'Content-Type': videoFile.type },
-      body: videoFile,
-    })
-    if (!response.ok) {
-      const detail = await response.text().catch(() => '')
-      throw new Error(`Error al subir a Cloudflare R2 (HTTP ${response.status})${detail ? `: ${detail.slice(0, 300)}` : ''}`)
-    }
+    await uploadFileToSignedUrl(signed.upload_url, videoFile)
 
     return { file_key: signed.file_key }
   },
@@ -110,9 +102,7 @@ export const clipService = {
     return res
   },
   async list(params?: { video_id?: string; status?: string }): Promise<import('@/types/api').ClipResponse[]> {
-    const qs = params
-      ? `?${new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined) as [string, string][]).toString()}`
-      : ''
+    const qs = buildClipListQuery(params)
     const { data } = await apiClient.get<import('@/types/api').ClipResponse[]>(`/clips${qs}`)
     return data
   },

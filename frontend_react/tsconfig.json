@@ -14,7 +14,7 @@
       "@/*": [
         "./src/*"
       ],
-      "@shared/*": [
+      "frontend_common/*": [
         "../frontend_common/*"
       ]
     },

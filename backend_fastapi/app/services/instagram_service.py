@@ -39,11 +39,17 @@ from .social_common import (
 
 
 
+def _first_env(*names: str) -> str:
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value.strip()
+    return ""
+
+
 def _get_instagram_config() -> tuple[str, str, str]:
-    client_id = os.getenv("INSTAGRAM_CLIENT_ID") or os.getenv("META_APP_ID") or os.getenv("FB_CLIENT_ID") or ""
-    client_id = client_id.strip()
-    client_secret = os.getenv("INSTAGRAM_CLIENT_SECRET") or os.getenv("META_APP_SECRET") or os.getenv("FB_CLIENT_SECRET") or ""
-    client_secret = client_secret.strip()
+    client_id = _first_env("INSTAGRAM_CLIENT_ID", "META_APP_ID", "FB_CLIENT_ID")
+    client_secret = _first_env("INSTAGRAM_CLIENT_SECRET", "META_APP_SECRET", "FB_CLIENT_SECRET")
     public_base = os.getenv("PUBLIC_BACKEND_URL", "https://api.clipsai.xyz").strip().rstrip("/")
     default_uri = f"{public_base}/auth/social/instagram/callback"
     redirect_uri = os.getenv("INSTAGRAM_REDIRECT_URI", default_uri).strip() or default_uri

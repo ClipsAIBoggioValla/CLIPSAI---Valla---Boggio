@@ -20,6 +20,7 @@ from ..database import SessionLocal
 from ..deps import CurrentUser, DbSession
 from ..models import Job, JobStatus, Video
 from ..schemas import JobResponse
+from ..services.transcript_utils import parse_transcript_text_to_segments
 
 # Logging inmediato (Unbuffered Output) — flush automático a sys.stdout
 try:
@@ -148,51 +149,14 @@ def _parse_time_to_seconds(value: object) -> float:
 
 
 def _parse_transcript_text_to_segments(text: str) -> list[dict]:
-    """Fallback parser: convierte texto plano o líneas con timestamps a segmentos sintéticos."""
-    segs: list[dict] = []
-    if not text or not text.strip():
-        return segs
-    lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
-    # Detecta formato "HH:MM:SS - texto" o "MM:SS - texto" o "[start - end] texto"
-    re_ts = re.compile(r"^(\d{1,2}:\d{2}(?::\d{2})?)\s*[-–]\s*(.+)$")
-    re_bracket = re.compile(r"^\[\s*(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*\]\s*(.+)$")
-    cursor = 0.0
-    for line in lines:
-        m = re_bracket.match(line)
-        if m:
-            try:
-                s = float(m.group(1)); e = float(m.group(2)); t = m.group(3).strip()
-                if e > s and t:
-                    segs.append({"start": s, "end": e, "text": t})
-                    cursor = e
-                continue
-            except Exception:
-                pass
-        m = re_ts.match(line)
-        if m:
-            ts_str = m.group(1); t = m.group(2).strip()
-            # Convierte ts a segundos
-            try:
-                parts = ts_str.split(":")
-                if len(parts) == 3:
-                    s = int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
-                elif len(parts) == 2:
-                    s = int(parts[0]) * 60 + float(parts[1])
-                else:
-                    s = float(parts[0])
-                e = s + 3.0
-                if t:
-                    segs.append({"start": s, "end": e, "text": t})
-                    cursor = e
-                continue
-            except Exception:
-                pass
-        # Línea sin timestamp: asigna ventana sintética 3s
-        segs.append({"start": cursor, "end": cursor + 3.0, "text": line})
-        cursor += 3.0
-    return segs
+    """Fallback parser: convierte texto plano o líneas con timestamps a segmentos sintéticos.
 
+    Delega en ``parse_transcript_text_to_segments`` de
+    ``backend_fastapi/app/services/transcript_utils`` para compartir lógica.
+    """
+    from ..services.transcript_utils import parse_transcript_text_to_segments as _shared
 
+    return _shared(text)
 def _load_transcription_segments(video: Video) -> list[dict]:
     """Intenta obtener segmentos con timestamps para ASS/Hook. Prioridad: whisper > archivo transcripción > transcript TEXT."""
     # Validación previa: verificar que el archivo de video existe antes de Whisper/FFmpeg
