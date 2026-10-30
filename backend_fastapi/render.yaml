@@ -1,12 +1,12 @@
 # Render Blueprint — Issue 47 (despliegue del backend a la nube).
 # Uso: conectar este directorio (backend_fastapi/) como Blueprint en Render y
-# completar en el dashboard las variables marcadas con `sync: # El contexto es la raíz del repo para que los COPY de backend/ y scripts suelts funcionen.
+# completar en el dashboard las variables marcadas con `sync: false`.
 services:
   - type: web
     name: clipsai-backend
     runtime: docker # CMD respeta $PORT
     dockerfilePath: backend_fastapi/Dockerfile
-    dockerContext: .
+    dockerContext: backend_fastapi
     plan: starter # "free" no admite disco persistente para clips/uploads
     region: oregon
     autoDeploy: true
