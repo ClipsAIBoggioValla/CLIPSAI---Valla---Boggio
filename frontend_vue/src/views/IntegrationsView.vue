@@ -1,117 +1,8 @@
-<script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { apiClient } from '@/api/client'
-import { ApiError } from '@/types/api'
-
-const route = useRoute()
-const router = useRouter()
-
-const loading = ref(false)
-const error = ref<string | null>(null)
-
-const integration = ref<string | null>(null)
-const status = ref<string | null>(null)
-const errorDetail = ref<string | null>(null)
-
-type SocialEntry = { connected: boolean; username: string | null; expires_at: string | null }
-const social = ref<{ youtube: SocialEntry; instagram: SocialEntry; tiktok: SocialEntry } | null>(null)
-
-async function fetchSocialStatus() {
-  try {
-    const token = (() => {
-      try {
-        return localStorage.getItem('clipsai_token')
-      } catch {
-        return null
-      }
-    })()
-    const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
-    const { data } = await apiClient.get<{ youtube: SocialEntry; instagram: SocialEntry; tiktok: SocialEntry }>('/auth/social/status', { headers })
-    console.log("[DEBUG] Respuesta /auth/social/status:", data)
-    social.value = data
-  } catch {}
-}
-
-function syncQuery() {
-  integration.value = route.query.integration as string | null
-  status.value = route.query.status as string | null
-  errorDetail.value = (route.query.error as string | null) || (route.query.message as string | null)
-}
-
-onMounted(async () => {
-  syncQuery()
-  await fetchSocialStatus()
-  if (status.value === 'success') await fetchSocialStatus()
-  if (status.value) {
-    setTimeout(() => {
-      const q = { ...route.query }
-      delete q.integration
-      delete q.status
-      delete q.error
-      delete (q as Record<string, unknown>).message
-      router.replace({ query: q })
-      syncQuery()
-    }, 5000)
-  }
-})
-
-async function handleConnectYoutube() {
-  loading.value = true
-  error.value = null
-  try {
-    const { data } = await apiClient.get<{ auth_url: string }>('/auth/social/youtube/connect')
-    if (data.auth_url) window.location.href = data.auth_url
-    else error.value = 'No se recibió auth_url del backend'
-  } catch (e: unknown) {
-    if (e instanceof ApiError) error.value = e.detail
-    else if (e instanceof Error) error.value = e.message
-    else error.value = 'Error al conectar con YouTube'
-  } finally {
-    loading.value = false
-  }
-}
-async function handleConnectInstagram() {
-  loading.value = true
-  error.value = null
-  try {
-    const token = (() => {
-      try {
-        return localStorage.getItem('clipsai_token')
-      } catch {
-        return null
-      }
-    })()
-    const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
-    const { data } = await apiClient.get<{ auth_url?: string; url?: string }>('/auth/social/instagram/connect', { headers })
-    const authUrl = (data as { auth_url?: string; url?: string }).auth_url || (data as { auth_url?: string; url?: string }).url
-    console.log("[DEBUG] Auth URL recibida del backend:", authUrl)
-    if (!authUrl) {
-      error.value = 'No se recibió auth_url del backend'
-      return
-    }
-    if (!authUrl.startsWith("https://www.facebook.com/")) {
-      error.value = 'URL de autorización inválida: debe comenzar con https://www.facebook.com/'
-      return
-    }
-    window.location.href = authUrl
-  } catch (e: unknown) {
-    if (e instanceof ApiError) error.value = e.detail
-    else if (e instanceof Error) error.value = e.message
-    else error.value = 'Error al conectar con Instagram'
-  } finally {
-    loading.value = false
-  }
-}
-</script>
-
 <template>
   <div class="max-w-4xl mx-auto">
     <div class="page-header" style="margin-bottom: 2rem">
       <div class="flex items-center gap-4">
-        <span class="inline-flex h-12 w-12 items-center justify-center rounded-xl shrink-0 bg-[#FF0000] text-white border border-[rgba(255,0,0,0.3)] shadow-[0_0_16px_rgba(255,0,0,0.35)]">
-          <i class="bi bi-youtube" style="font-size: 1.5rem" />
-        </span>
+        <span class="inline-flex h-12 w-12 items-center justify-center rounded-xl shrink-0 bg-[#FF0000] text-white border border-[rgba(255,0,0,0.3)] shadow-[0_0_16px_rgba(255,0,0,0.35)]"><i class="bi bi-youtube" style="font-size: 1.5rem" /></span>
         <div>
           <h1 class="page-title" style="margin-bottom: 0; font-size: 2.35rem; font-weight: 800; letter-spacing: -0.03em; line-height: 1.1; color: #F1F5F9">Integraciones</h1>
           <p class="page-subtitle" style="margin-bottom: 0; font-size: 0.98rem; font-weight: 500; color: #94A3B8; line-height: 1.6">Conecta tus redes sociales para publicación automática</p>
@@ -141,45 +32,21 @@ async function handleConnectInstagram() {
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <div class="card-spark">
-        <div class="flex items-center gap-3 mb-3">
-          <span class="h-10 w-10 rounded-xl bg-[#FF0000]/10 border border-[#FF0000]/20 flex items-center justify-center text-[#FF0000] text-xl"><i class="bi bi-youtube" /></span>
-          <div>
-            <h3 class="font-bold text-white">YouTube</h3>
-            <p v-if="social?.youtube.connected && social.youtube.username" class="text-xs font-mono text-emerald-300">@{{ social.youtube.username }}</p>
-            <p v-else class="text-xs text-[#94A3B8]">Google Data API v3 — upload + readonly</p>
-          </div>
-          <span v-if="social?.youtube.connected || (integration === 'youtube' && status === 'success')" class="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/20"><span class="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Conectado</span>
-          <span v-else class="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-white/5 text-[#94A3B8] border border-white/10">No conectado</span>
-        </div>
-        <p class="text-sm text-[#94A3B8] mb-4">Conecta tu canal para subir clips directamente como Shorts. Scopes: <code class="text-xs bg-white/5 px-1 py-0.5 rounded">youtube.readonly</code> + <code class="text-xs bg-white/5 px-1 py-0.5 rounded">youtube.upload</code></p>
+      <PlatformCard name="YouTube" icon="bi bi-youtube" icon-wrap-class="h-10 w-10 rounded-xl bg-[#FF0000]/10 border border-[#FF0000]/20 flex items-center justify-center text-[#FF0000] text-xl" :connected="social?.youtube.connected || (integration === 'youtube' && status === 'success')" :username="social?.youtube.username ?? null" description="Google Data API v3 — upload + readonly" description-long="Conecta tu canal para subir clips directamente como Shorts. Scopes: youtube.readonly + youtube.upload" endpoint-hint="GET /auth/social/youtube/connect → redirect Google OAuth (offline + consent)">
         <button class="btn-custom btn-custom-primary w-full flex items-center justify-center gap-2" :disabled="loading" data-testid="connect-youtube-btn" @click="handleConnectYoutube">
-          <span v-if="loading" class="h-4 w-4 animate-spin rounded-full border-2 border-[#080C14]/30 border-t-[#080C14]" /> 
+          <span v-if="loading" class="h-4 w-4 animate-spin rounded-full border-2 border-[#080C14]/30 border-t-[#080C14]" />
           <template v-if="!loading"><i class="bi bi-box-arrow-up-right" /> Conectar YouTube</template>
           <template v-else>Conectando...</template>
         </button>
-        <p class="text-xs text-[#64748B] mt-2 text-center">GET <code>/auth/social/youtube/connect</code> → redirect Google OAuth (offline + consent)</p>
-      </div>
+      </PlatformCard>
 
-      <div class="card-spark">
-        <div class="flex items-center gap-3 mb-3">
-          <span class="h-10 w-10 rounded-xl bg-[#E1306C]/10 border border-[#E1306C]/20 flex items-center justify-center text-[#E1306C] text-xl"><i class="bi bi-instagram" /></span>
-          <div>
-            <h3 class="font-bold text-white">Instagram</h3>
-            <p v-if="social?.instagram.connected && social.instagram.username" class="text-xs font-mono text-emerald-300">@{{ social.instagram.username }}</p>
-            <p v-else class="text-xs text-[#94A3B8]">Meta Graph API — instagram_basic + content_publish</p>
-          </div>
-          <span v-if="social?.instagram.connected || (integration === 'instagram' && status === 'success')" class="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/20"><span class="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Conectado</span>
-          <span v-else class="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-white/5 text-[#94A3B8] border border-white/10">No conectado</span>
-        </div>
-        <p class="text-sm text-[#94A3B8] mb-4">Conecta tu cuenta para publicar Reels automáticamente. Scopes: <code class="text-xs bg-white/5 px-1 py-0.5 rounded">instagram_basic</code> + <code class="text-xs bg-white/5 px-1 py-0.5 rounded">instagram_content_publish</code> + <code class="text-xs bg-white/5 px-1 py-0.5 rounded">pages_show_list</code></p>
+      <PlatformCard name="Instagram" icon="bi bi-instagram" icon-wrap-class="h-10 w-10 rounded-xl bg-[#E1306C]/10 border border-[#E1306C]/20 flex items-center justify-center text-[#E1306C] text-xl" :connected="social?.instagram.connected || (integration === 'instagram' && status === 'success')" :username="social?.instagram.username ?? null" description="Meta Graph API — instagram_basic + content_publish" description-long="Conecta tu cuenta para publicar Reels automáticamente. Scopes: instagram_basic + instagram_content_publish + pages_show_list" endpoint-hint="GET /auth/social/instagram/connect → redirect Meta OAuth (long-lived 60 días)">
         <button class="btn-custom w-full flex items-center justify-center gap-2 bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#515BD4] text-white border-0 hover:opacity-90" :disabled="loading" data-testid="connect-instagram-btn" @click="handleConnectInstagram">
           <span v-if="loading" class="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
           <template v-if="!loading"><i class="bi bi-instagram" /> Conectar Instagram</template>
           <template v-else>Conectando...</template>
         </button>
-        <p class="text-xs text-[#64748B] mt-2 text-center">GET <code>/auth/social/instagram/connect</code> → redirect Meta OAuth (long-lived 60 días)</p>
-      </div>
+      </PlatformCard>
     </div>
 
     <div class="card-spark mt-4 bg-[#0B0F17]/50">
@@ -194,3 +61,18 @@ async function handleConnectInstagram() {
     </div>
   </div>
 </template>
+
+<script setup lang="ts">
+import { useIntegrations } from '@/composables/useIntegrations'
+import PlatformCard from '@/components/integrations/PlatformCard.vue'
+
+const {
+  loading, error, integration, status, errorDetail, social,
+  handleConnectYoutube, handleConnectInstagram,
+} = useIntegrations()
+
+import { onMounted } from 'vue'
+
+</script>
+EOF
+echo "written ($(wc -l < frontend_vue/src/views/IntegrationsView.vue) lines)"

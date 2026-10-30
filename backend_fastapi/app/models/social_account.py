@@ -10,9 +10,10 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..database import Base
+from .mixins import TimestampMixin
 
 
-class SocialAccount(Base):
+class SocialAccount(Base, TimestampMixin):
     __tablename__ = "social_accounts"
     __table_args__ = (
         CheckConstraint("lower(platform) IN ('youtube','instagram','tiktok')", name="chk_social_accounts_platform"),
@@ -69,17 +70,6 @@ class SocialAccount(Base):
         nullable=True,
     )
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.current_timestamp(),
-        nullable=False,
-    )
-
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.current_timestamp(),
-        nullable=False,
-    )
 
     user: Mapped[object | None] = relationship("Usuario", backref="social_accounts", lazy="joined")
 

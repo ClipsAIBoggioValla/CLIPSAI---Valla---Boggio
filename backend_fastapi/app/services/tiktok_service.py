@@ -40,6 +40,12 @@ TIKTOK_SCOPES = ",".join(_scopes_list)
 TIKTOK_CLIENT_KEY = os.getenv("TIKTOK_CLIENT_KEY", "").strip()
 TIKTOK_CLIENT_SECRET = os.getenv("TIKTOK_CLIENT_SECRET", "").strip()
 TIKTOK_REDIRECT_URI = os.getenv("TIKTOK_REDIRECT_URI", "").strip()
+from .social_common import (
+    decode_state as _decode_state,
+    encode_state as _encode_state,
+    validate_user_id,
+)
+
 
 
 def _get_tiktok_config() -> tuple[str, str, str]:
@@ -56,29 +62,6 @@ def _get_tiktok_config() -> tuple[str, str, str]:
         redirect_uri = default_uri
     return client_key, client_secret, redirect_uri
 
-
-def _encode_state(user_id: str) -> str:
-    payload = json.dumps({"user_id": str(user_id)}, separators=(",", ":"))
-    return base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
-
-
-def _decode_state(state: str) -> str | None:
-    if not state:
-        return None
-    padded = state + "=" * (-len(state) % 4)
-    for decoder in (base64.urlsafe_b64decode, base64.b64decode):
-        try:
-            decoded = decoder(padded.encode()).decode()
-            try:
-                data = json.loads(decoded)
-                if isinstance(data, dict) and "user_id" in data:
-                    return str(data["user_id"])
-            except Exception:
-                pass
-            return decoded
-        except Exception:
-            continue
-    return state
 
 
 def generate_pkce_pair() -> tuple[str, str]:
@@ -170,16 +153,12 @@ def _fetch_tiktok_user_info(access_token: str) -> str:
 
 
 def save_tiktok_tokens(db: Session, user_id: str, token_data: dict[str, Any]) -> SocialAccount:
-    import uuid
-
-    try:
-        uid = uuid.UUID(str(user_id))
-    except ValueError as exc:
-        raise ValueError(f"user_id inválido: {user_id}") from exc
+    uid = validate_user_id(user_id)
 
     access_token = token_data.get("access_token")
     if not access_token:
         raise ValueError("tokens sin access_token")
+    access_token = str(access_token)
 
     refresh_token = token_data.get("refresh_token") or access_token
     expires_in = token_data.get("expires_in")

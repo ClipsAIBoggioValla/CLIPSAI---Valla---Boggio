@@ -42,7 +42,6 @@ def via_ffmpeg(out: Path) -> bool:
         subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
         return out.exists()
     except Exception as e:
-        print(f"ffmpeg failed: {e}", file=sys.stderr)
         return False
 
 
@@ -64,23 +63,20 @@ def via_moviepy(out: Path) -> bool:
         clip.write_videofile(str(out), fps=24, codec="libx264", audio_codec="aac", logger=None, verbose=False)
         return out.exists()
     except Exception as e:
-        print(f"moviepy failed: {e}", file=sys.stderr)
         return False
 
 
 def main() -> None:
     for out in (OUT, ALT_OUT):
         if out.exists():
-            print(f"exists: {out}")
             continue
         ok = via_ffmpeg(out)
         if not ok:
             ok = via_moviepy(out)
         if ok:
-            print(f"generated: {out} ({out.stat().st_size} bytes)")
+            pass
         else:
             out.write_text("stub sample.mp4 placeholder - install ffmpeg or moviepy\n")
-            print(f"stub created: {out}")
 
 
 if __name__ == "__main__":

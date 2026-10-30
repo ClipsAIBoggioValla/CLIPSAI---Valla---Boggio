@@ -117,10 +117,9 @@ async def analyze_transcript(
 ) -> List[ViralClipCandidate]:
     if use_mock:
         fixture = Path("tests/fixtures/mock_transcript.json")
-        alt = Path("backend/tests/fixtures/mock_transcript.json")
         alt2 = Path(__file__).parent.parent.parent / "tests" / "fixtures" / "mock_transcript.json"
         src = None
-        for p in (fixture, alt, alt2):
+        for p in (fixture, alt2):
             if p.exists():
                 src = p
                 break

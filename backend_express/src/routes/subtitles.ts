@@ -155,9 +155,9 @@ try:
         t = str(s.text).strip()
         if t:
             out.append({"start": float(s.start), "end": float(s.end), "text": t})
-    print(json.dumps(out))
+    sys.stdout.write(json.dumps(out))
 except Exception as e:
-    print(json.dumps({"__error__": str(e)}))
+    sys.stdout.write(json.dumps({"__error__": str(e)}))
     sys.exit(1)
 `
 
