@@ -55,15 +55,13 @@ def reframe_video(
     except Exception as probe_err:
         logger.warning("[editor] no se pudo verificar dimensiones del input: %s", probe_err)
 
-    # Filtro que escala primero manteniendo el aspect ratio hasta cubrir 1080x1920,
-    # luego recorta el centro exacto de 1080x1920.
-    # Para un video 16:9 (ej: 1280x720):
-    #   1. scale aumenta la altura a 1920, el ancho crece proporcionalmente a ~3413
-    #   2. crop toma el centro de 1080x1920
+    # Crop-primero (evita frames intermedios gigantes de 3413px que causan OOM en Render)
+    # Para input 1280x720 (16:9):
+    #   1. crop calcula 405x720 (centrado, manteniendo aspect ratio 9:16)
+    #   2. scale escala a 1080x1920
     crop_filter = (
-        f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
-        f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},"
-        "setsar=1"
+        f"crop='if(gt(iw/ih,9/16),ih*9/16,iw)':'if(gt(iw/ih,9/16),ih,iw*16/9)',"
+        f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},setsar=1"
     )
     logger.info("[editor] reframe_video applying filter: %s", crop_filter)
     command = [
@@ -78,7 +76,7 @@ def reframe_video(
         "-preset",
         "ultrafast",
         "-crf",
-        "18",
+        "20",
         "-c:a",
         "aac",
         "-b:a",
@@ -100,7 +98,15 @@ def reframe_video(
     if result.returncode != 0:
         output.unlink(missing_ok=True)
         stderr = (result.stderr or "sin stderr")[-2500:]
-        raise RuntimeError(f"FFmpeg falló al aplicar crop 9:16 (code={result.returncode}): {stderr}")
+        logger.error("[editor] reframe FAILED rc=%s: %s", result.returncode, stderr)
+        if result.returncode == -9:
+            raise RuntimeError(
+                f"reframe vertical falló (memoria/ffmpeg): ffmpeg fue terminado por OOM (rc=-9). "
+                f"El video de entrada puede ser demasiado grande para los recursos disponibles."
+            )
+        raise RuntimeError(
+            f"reframe vertical falló (ffmpeg rc={result.returncode}): {stderr}"
+        )
     if not output.is_file() or output.stat().st_size == 0:
         output.unlink(missing_ok=True)
         raise RuntimeError(f"FFmpeg terminó el crop 9:16 sin generar un video válido: {output}")
