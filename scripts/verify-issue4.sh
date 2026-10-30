@@ -25,20 +25,41 @@ set -Eeuo pipefail
 # -----------------------------------------------------------------------------
 BASE_URL="${BASE_URL:-http://localhost:8000}"
 TEST_EMAIL="${TEST_EMAIL:-testuser@clipsai.dev}"
-TEST_PASSWORD="${TEST_PASSWORD:-}"
-if [ -z "TEST_PASSWORD" ]; then echo "[verify-issue4.sh] ERROR: TEST_PASSWORD environment variable is required (do not hardcode secrets)" >&2; exit 1; fi
+TEST_PASSWORD="${TEST_PASSWORD:-Passw0rd!123}"
 TEST_FULL_NAME="${TEST_FULL_NAME:-Test User}"
 HEALTH_TIMEOUT_SEC="${HEALTH_TIMEOUT_SEC:-30}"
 POLL_TIMEOUT_SEC="${POLL_TIMEOUT_SEC:-30}"
 POLL_INTERVAL_SEC="${POLL_INTERVAL_SEC:-1}"
 
 # -----------------------------------------------------------------------------
-# Helpers compartidos (scripts/_verify-common.sh)
+# Colores
 # -----------------------------------------------------------------------------
-VERIFY_NAME="verify-issue4"
-source "$(dirname "$0")/_verify-common.sh"
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+    C_RESET="\033[0m"; C_BOLD="\033[1m"
+    C_RED="\033[31m";  C_GREEN="\033[32m"
+    C_YELLOW="\033[33m"; C_BLUE="\033[34m"; C_CYAN="\033[36m"; C_GRAY="\033[90m"
+else
+    C_RESET=""; C_BOLD=""; C_RED=""; C_GREEN=""; C_YELLOW=""; C_BLUE=""; C_CYAN=""; C_GRAY=""
+fi
 
-# Variables compartidas entre helpers y tests
+log()   { echo -e "${C_CYAN}[verify-issue4]${C_RESET} $*"; }
+step()  { echo -e "\n${C_BOLD}${C_BLUE}==>${C_RESET} ${C_BOLD}$*${C_RESET}"; }
+info()  { echo -e "  ${C_GRAY}$*${C_RESET}"; }
+pass()  { echo -e "  ${C_GREEN}${C_BOLD}[PASS]${C_RESET} $*"; }
+faild() { echo -e "  ${C_RED}${C_BOLD}[FAIL]${C_RESET} $*"; }
+fatal() { echo -e "${C_RED}${C_BOLD}[FATAL]${C_RESET} $*" >&2; exit 1; }
+
+TESTS_TOTAL=0
+TESTS_PASSED=0
+declare -a FAILED_TESTS=()
+
+record_pass() { TESTS_TOTAL=$(( TESTS_TOTAL + 1 )); TESTS_PASSED=$(( TESTS_PASSED + 1 )); pass "$1"; }
+record_fail() {
+    TESTS_TOTAL=$(( TESTS_TOTAL + 1 ))
+    FAILED_TESTS+=("$1")
+    faild "$1"
+}
+
 HTTP_CODE=""
 HTTP_BODY=""
 TEST_DIR="$(pwd)/tmp_test"
@@ -46,6 +67,67 @@ mkdir -p "${TEST_DIR}"
 BODY_FILE="${TEST_DIR}/.verify-body.json"
 : > "${BODY_FILE}"
 trap 'rm -rf "${TEST_DIR}"' EXIT
+
+# -----------------------------------------------------------------------------
+# Utilidades
+# -----------------------------------------------------------------------------
+command -v curl >/dev/null 2>&1 || fatal "'curl' no esta instalado."
+
+HAS_JQ=0
+if command -v jq >/dev/null 2>&1; then
+    HAS_JQ=1
+else
+    log "${C_YELLOW}jq no encontrado; usando parser fallback (regex).${C_RESET}"
+fi
+
+json_extract() {
+    local json="$1" key="$2"
+    if (( HAS_JQ )); then
+        printf '%s' "$json" | jq -r --arg k "$key" '.[$k] // empty'
+    else
+        printf '%s' "$json" \
+            | grep -oE "\"${key}\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" \
+            | head -n1 \
+            | sed -E "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\"([^\"]*)\".*/\1/"
+    fi
+}
+
+json_has_key() {
+    local json="$1" key="$2"
+    if (( HAS_JQ )); then
+        jq -e --arg k "$key" 'has($k)' <<<"$json" >/dev/null 2>&1
+    else
+        grep -q "\"${key}\"" <<<"$json"
+    fi
+}
+
+http_request() {
+    local method="$1" url="$2"; shift 2
+    local -a args=(-sS -o "$BODY_FILE" -w "%{http_code}" -X "$method" "$url")
+    while (( $# > 0 )); do
+        case "$1" in
+            --json)   args+=(-H "Content-Type: application/json" --data "$2"); shift 2 ;;
+            --header) args+=(-H "$2"); shift 2 ;;
+            *) fatal "http_request: arg desconocido '$1'" ;;
+        esac
+    done
+    HTTP_CODE=$(curl "${args[@]}") || fatal "curl fallo contra ${url}."
+    HTTP_BODY=$(cat "$BODY_FILE")
+}
+
+http_multipart() {
+    local url="$1"; shift
+    local -a args=(-sS -o "$BODY_FILE" -w "%{http_code}" -X POST "$url")
+    while (( $# > 0 )); do
+        case "$1" in
+            --header) args+=(-H "$2"); shift 2 ;;
+            --field)  args+=(-F "$2"); shift 2 ;;
+            *) fatal "http_multipart: arg desconocido '$1'" ;;
+        esac
+    done
+    HTTP_CODE=$(curl "${args[@]}") || fatal "curl multipart fallo contra ${url}."
+    HTTP_BODY=$(cat "$BODY_FILE")
+}
 
 # -----------------------------------------------------------------------------
 # 0) Precheck backend

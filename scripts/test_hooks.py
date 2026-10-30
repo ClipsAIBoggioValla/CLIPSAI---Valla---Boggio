@@ -40,14 +40,18 @@ def _load_segments(video: Path, transcript: str | None, use_mock: bool) -> list[
             else:
                 segs.append({"start":0,"end":3,"text":line})
         if segs:
+            print(f"[test] transcript file -> {len(segs)} segmentos")
             return segs
     if use_mock:
         return []
     try:
         from backend_fastapi.app.services.whisper_service import transcribe_video
+        print(f"[test] transcribiendo {video} con Whisper...")
         segs = transcribe_video(str(video))
+        print(f"[test] Whisper -> {len(segs)} segmentos")
         return [{"start": float(s["start"]), "end": float(s["end"]), "text": str(s["text"])} for s in segs]
     except Exception as exc:
+        print(f"[test] Whisper fallo: {exc}, usando mock")
         import traceback; traceback.print_exc()
         return []
 
@@ -63,12 +67,14 @@ def main() -> None:
     try:
         video = _resolve_video(args.video)
     except FileNotFoundError as exc:
-        pass
+        print(f"[error] {exc}", file=sys.stderr); sys.exit(1)
+    print(f"[1/3] Video: {video} ({video.stat().st_size} bytes)")
     try:
         import subprocess; subprocess.run(["ffmpeg","-version"], capture_output=True, check=True, timeout=5)
+        print("[1/3] FFmpeg OK")
     except Exception as exc:
+        print(f"[error] FFmpeg no disponible: {exc}", file=sys.stderr); sys.exit(1)
 
-        pass
     segments = _load_segments(video, args.transcript, use_mock=False if not args.mock else True)
     if args.mock or not segments:
         if not segments:
@@ -76,6 +82,8 @@ def main() -> None:
 
             raw = _mock_segments(duration=60)
             segments = [{"start": float(s["start"]), "end": float(s["end"]), "text": s["text"]} for s in raw]
+            print(f"[test] mock -> {len(segments)} segmentos")
+    print(f"[2/3] Invocando LLM hook detector (transcript {len(segments)} segs)...")
     try:
         from backend_fastapi.app.services.hook_service import detect_hooks
         import subprocess
@@ -83,15 +91,26 @@ def main() -> None:
         dur = float(probe.stdout.strip()) if probe.returncode==0 and probe.stdout.strip() else None
         clips = detect_hooks(segments, duration_hint=dur, mock=args.mock)
     except Exception as exc:
+        print(f"[error] LLM fallo: {exc}", file=sys.stderr)
         import traceback; traceback.print_exc(); sys.exit(1)
 
     if not clips:
+        print("[result] LLM devolvio 0 clips")
         sys.exit(0)
 
+    print(f"\n[result] {len(clips)} clips detectados:\n{'='*60}")
     for i, c in enumerate(clips, 1):
         hk = c["hook"]
+        print(f" #{i} {c['title']}")
+        print(f"    Score: {c['viral_score']} | {c['reasoning']}")
+        print(f"    Clip:  {c['start_time']:.1f} -> {c['end_time']:.1f} ({c['end_time']-c['start_time']:.1f}s)")
+        print(f"    Hook:  \"{hk['text']}\" ({hk['duration']:.1f}s)")
+        print(f"           {hk['start_time']:.1f} -> {hk['end_time']:.1f} (dentro del clip: {c['start_time']<=hk['start_time'] and hk['end_time']<=c['end_time']})")
+        print(f"    Final: Hook {hk['duration']:.1f}s + Clip {c['end_time']-c['start_time']:.1f}s = {hk['duration']+c['end_time']-c['start_time']:.1f}s total")
+        print()
 
     if args.render and clips:
+        print("[3/3] Renderizando primer hook+clip con ASS shift...")
         from backend_fastapi.app.services.ass_generator import generate_hooked_ass
         from backend_fastapi.app.services.ffmpeg_service import build_hook_clip, burn_subtitles
         import tempfile
@@ -101,15 +120,20 @@ def main() -> None:
         hooked_video = Path(tmp_out.name)
         try:
             generate_hooked_ass(segments, c["start_time"], c["end_time"], hk["start_time"], hk["end_time"], tmp_ass.name, title=c["title"])
+            print(f"      ASS hook: {tmp_ass.name} ({Path(tmp_ass.name).stat().st_size} bytes)")
             for line in Path(tmp_ass.name).read_text(encoding="utf-8").splitlines()[:8]:
-                pass
+                print(f"        {line}")
             build_hook_clip(video, c["start_time"], c["end_time"], hk["start_time"], hk["end_time"], hooked_video)
+            print(f"      Hook video (sin subs): {hooked_video} ({hooked_video.stat().st_size} bytes)")
             # burn subtitles over concatenated video
             final_out = Path(tempfile.gettempdir()) / f"{video.stem}_hooked_subtitled.mp4"
             burn_subtitles(hooked_video, tmp_ass.name, final_out)
+            print(f"      [OK] Final hook+clip subtitulado: {final_out} ({final_out.stat().st_size} bytes)")
+            print(f"      Duracion hook {hk['duration']:.1f}s desplazada: hook 0->{hk['duration']:.1f}s, clip {hk['duration']:.1f}->{hk['duration']+c['end_time']-c['start_time']:.1f}s")
             if not args.keep:
-                pass
+                print("      (tmp ASS/video intermedios limpiados)")
         except Exception as exc:
+            print(f"[error] render fallo: {exc}", file=sys.stderr)
             import traceback; traceback.print_exc()
         finally:
             if not args.keep:
@@ -117,7 +141,8 @@ def main() -> None:
                     try: Path(p).unlink(missing_ok=True)
                     except Exception: pass
             else:
+                print(f"      KEEP ASS: {tmp_ass.name}")
+                print(f"      KEEP hook video: {hooked_video}")
 
-                pass
 if __name__ == "__main__":
     main()
