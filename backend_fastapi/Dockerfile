@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -49,7 +50,30 @@ COPY main.py ./main.py
 COPY whisper_transcriber.py ./whisper_transcriber.py
 COPY audio_analyzer.py ./audio_analyzer.py
 COPY backend_fastapi/runpod_worker.py ./runpod_worker.py
-COPY backend_fastapi/docker-sitecustomize.py /usr/local/lib/python3.11/site-packages/sitecustomize.py
+
+# Sitecustomize embebido inline: reordena PATH para priorizar FFmpeg del sistema
+# (con libx264 en /usr/local/bin) sobre /opt/conda/bin. Python lo importa auto.
+COPY <<'PYEOF' /usr/local/lib/python3.11/site-packages/sitecustomize.py
+import os
+
+_PRIORITY = [
+    "/usr/local/sbin",
+    "/usr/local/bin",
+    "/usr/sbin",
+    "/usr/bin",
+    "/sbin",
+    "/bin",
+]
+
+
+def _fix_path() -> None:
+    current = os.environ.get("PATH", "")
+    partes = [p for p in current.split(os.pathsep) if p and p not in _PRIORITY]
+    os.environ["PATH"] = os.pathsep.join(_PRIORITY + partes)
+
+
+_fix_path()
+PYEOF
 
 # Crear directorios y permisos
 RUN mkdir -p /app/storage/clips /app/storage/uploads \
