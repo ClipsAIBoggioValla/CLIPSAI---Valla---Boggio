@@ -30,13 +30,26 @@ META_TOKEN_URL = "https://graph.facebook.com/v18.0/oauth/access_token"
 META_LONG_LIVED_URL = "https://graph.facebook.com/oauth/access_token"
 
 DEFAULT_REDIRECT_URI = "https://api.clipsai.xyz/auth/social/instagram/callback"
+from .social_common import (
+    decode_state as _decode_state,
+    encode_state as _encode_state,
+    require_access_token,
+    validate_user_id,
+)
+
+
+
+def _first_env(*names: str) -> str:
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value.strip()
+    return ""
 
 
 def _get_instagram_config() -> tuple[str, str, str]:
-    client_id = os.getenv("INSTAGRAM_CLIENT_ID") or os.getenv("META_APP_ID") or os.getenv("FB_CLIENT_ID") or ""
-    client_id = client_id.strip()
-    client_secret = os.getenv("INSTAGRAM_CLIENT_SECRET") or os.getenv("META_APP_SECRET") or os.getenv("FB_CLIENT_SECRET") or ""
-    client_secret = client_secret.strip()
+    client_id = _first_env("INSTAGRAM_CLIENT_ID", "META_APP_ID", "FB_CLIENT_ID")
+    client_secret = _first_env("INSTAGRAM_CLIENT_SECRET", "META_APP_SECRET", "FB_CLIENT_SECRET")
     public_base = os.getenv("PUBLIC_BACKEND_URL", "https://api.clipsai.xyz").strip().rstrip("/")
     default_uri = f"{public_base}/auth/social/instagram/callback"
     redirect_uri = os.getenv("INSTAGRAM_REDIRECT_URI", default_uri).strip() or default_uri
@@ -44,29 +57,6 @@ def _get_instagram_config() -> tuple[str, str, str]:
         redirect_uri = default_uri
     return client_id, client_secret, redirect_uri
 
-
-def _encode_state(user_id: str) -> str:
-    payload = json.dumps({"user_id": str(user_id)}, separators=(",", ":"))
-    return base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
-
-
-def _decode_state(state: str) -> str | None:
-    if not state:
-        return None
-    padded = state + "=" * (-len(state) % 4)
-    for decoder in (base64.urlsafe_b64decode, base64.b64decode):
-        try:
-            decoded = decoder(padded.encode()).decode()
-            try:
-                data = json.loads(decoded)
-                if isinstance(data, dict) and "user_id" in data:
-                    return str(data["user_id"])
-            except Exception:
-                pass
-            return decoded
-        except Exception:
-            continue
-    return state
 
 
 def get_instagram_auth_url(user_id: str) -> str:
@@ -213,16 +203,9 @@ def exchange_code_for_tokens(code: str) -> dict[str, Any]:
 
 
 def save_instagram_tokens(db: Session, user_id: str, tokens: dict[str, Any]) -> SocialAccount:
-    import uuid
+    uid = validate_user_id(user_id)
 
-    try:
-        uid = uuid.UUID(str(user_id))
-    except ValueError as exc:
-        raise ValueError(f"user_id inválido: {user_id}") from exc
-
-    access_token = tokens.get("access_token")
-    if not access_token:
-        raise ValueError("tokens sin access_token")
+    access_token = require_access_token(tokens)
 
     refresh_token = tokens.get("access_token")
     expires_in = tokens.get("expires_in")
@@ -261,18 +244,15 @@ def save_instagram_tokens(db: Session, user_id: str, tokens: dict[str, Any]) -> 
             dbg_url = f"https://graph.facebook.com/debug_token?input_token={access_token}&access_token={app_token}"
             dbg_resp = requests.get(dbg_url, timeout=10)
             logger.info("[IG DEBUG] debug_token status=%s body=%s", dbg_resp.status_code, dbg_resp.text)
-            print(f"[IG DEBUG] debug_token status={dbg_resp.status_code} body={dbg_resp.text}")
             if dbg_resp.status_code == 200:
                 try:
                     dbg_data = dbg_resp.json()
                     scopes = dbg_data.get("data", {}).get("scopes", [])
                     logger.info("[IG DEBUG] scopes concedidos: %s", scopes)
-                    print(f"[IG DEBUG] scopes concedidos: {scopes}")
                 except Exception:
                     pass
     except Exception as e:
         logger.warning(f"[IG DEBUG] debug_token failed: {e}")
-        print(f"[IG DEBUG] debug_token failed: {e}")
 
     existing: SocialAccount | None = db.execute(
         select(SocialAccount).where(SocialAccount.user_id == uid, func.lower(SocialAccount.platform) == "instagram")

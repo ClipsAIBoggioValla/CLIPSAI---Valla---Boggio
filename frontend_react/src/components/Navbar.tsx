@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
+import QuickCreateDropdown from './navbar/QuickCreateDropdown'
 
 interface NavbarProps {
   onToggleDesktop: () => void
@@ -9,7 +10,6 @@ interface NavbarProps {
 export default function Navbar({ onToggleDesktop, onToggleMobile }: NavbarProps) {
   const navigate = useNavigate()
   const location = useLocation()
-  const [quickOpen, setQuickOpen] = useState(false)
   const [search, setSearch] = useState('')
   const quickRef = useRef<HTMLDivElement>(null)
   const notifRef = useRef<HTMLDivElement>(null)
@@ -17,7 +17,9 @@ export default function Navbar({ onToggleDesktop, onToggleMobile }: NavbarProps)
 
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
-      if (quickRef.current && !quickRef.current.contains(e.target as Node)) setQuickOpen(false)
+      if (quickRef.current && !quickRef.current.contains(e.target as Node)) {
+        // quick dropdown handled in subcomponent
+      }
       if (notifRef.current && !notifRef.current.contains(e.target as Node)) setNotifOpen(false)
     }
     document.addEventListener('mousedown', onDocClick)
@@ -78,30 +80,8 @@ export default function Navbar({ onToggleDesktop, onToggleMobile }: NavbarProps)
           <i className="bi bi-list" />
         </button>
 
-        <div className="dropdown" ref={quickRef} style={{ position: 'relative' }}>
-          <button className="btn-quick-action" type="button" onClick={() => setQuickOpen((v) => !v)} aria-expanded={quickOpen}>
-            <i className="bi bi-plus-lg" />
-            <span>Crear</span>
-          </button>
-          {quickOpen && (
-            <ul className="dropdown-menu dropdown-menu-quick-action show" style={{ display: 'block', position: 'absolute', top: '100%', left: 0 }}>
-              <li className="dropdown-header">Crear nuevo</li>
-              <li>
-                <a
-                  className="dropdown-item"
-                  href="#"
-                  onClick={(e) => {
-                    e.preventDefault()
-                    setQuickOpen(false)
-                    navigate('/upload')
-                  }}
-                >
-                  <i className="bi bi-cloud-arrow-up" /> Subir video
-                </a>
-              </li>
-            </ul>
-          )}
-        </div>
+        <QuickCreateDropdown />
+
       </div>
 
       <div className="navbar-search-wrapper">

@@ -12,6 +12,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..database import Base
+from .mixins import TimestampMixin
 
 
 class JobStatus(str, enum.Enum):
@@ -21,7 +22,7 @@ class JobStatus(str, enum.Enum):
     FAILED = "failed"
 
 
-class Job(Base):
+class Job(Base, TimestampMixin):
     __tablename__ = "jobs"
     __table_args__ = {"extend_existing": True}
 
@@ -60,17 +61,6 @@ class Job(Base):
         nullable=True,
     )
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.current_timestamp(),
-        nullable=False,
-    )
-
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.current_timestamp(),
-        nullable=False,
-    )
 
     video: Mapped[object] = relationship("Video", back_populates="jobs", lazy="joined")
 

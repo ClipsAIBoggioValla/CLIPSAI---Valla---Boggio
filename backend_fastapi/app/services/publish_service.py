@@ -1,3 +1,11 @@
+def _first_env(*names: str) -> str:
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value.strip()
+    return ""
+
+
 from __future__ import annotations
 
 import asyncio
@@ -49,11 +57,10 @@ def _get_ngrok_domain() -> str:
         domain = public_url.replace("https://", "").replace("http://", "").strip().strip("/")
         if domain:
             return domain
-    # Si PUBLIC_BACKEND_URL no está seteada, usar BACKEND_URL/API_BASE_URL
-    backend = os.getenv("BACKEND_URL", "").strip() or os.getenv("API_BASE_URL", "").strip() or os.getenv("PUBLIC_BACKEND_URL", "").strip()
+    backend = _first_env("BACKEND_URL", "API_BASE_URL", "PUBLIC_BACKEND_URL")
     if backend:
         domain = backend.replace("https://", "").replace("http://", "").strip().strip("/")
-        if domain and "decorator" not in domain and "guns-camps" not in domain and "ngrok" not in domain:
+        if domain and all(tok not in domain for tok in ("decorator", "guns-camps", "ngrok")):
             return domain
     domain = os.getenv("NGROK_DOMAIN", "").strip()
     if domain and "decorator" not in domain:
@@ -508,7 +515,6 @@ def _publish_instagram(account: SocialAccount, clip: Clip, caption: str | None) 
     # Asegurar reemplazo global por si la base URL contenía http://
     public_mp4_url = public_mp4_url.replace("http://", "https://")
     logger.info(f"[IG PUBLISH] Enviando video_url a Instagram: {public_mp4_url}")
-    print(f"[IG PUBLISH] Enviando video_url a Instagram: {public_mp4_url}")
 
     caption_text = caption or clip.title or ""
 
@@ -521,14 +527,12 @@ def _publish_instagram(account: SocialAccount, clip: Clip, caption: str | None) 
             if resp_check.status_code != 200:
                 msg = f"[IG PUBLISH ALERT] La URL pública no responde: {public_mp4_url} - Status: {resp_check.status_code}"
                 logger.error(msg)
-                print(msg)
                 raise HTTPException(status_code=400, detail=f"URL pública no accesible ({resp_check.status_code}): el túnel Cloudflare está caído o la URL venció - {public_mp4_url}")
         except HTTPException:
             raise
         except Exception as e:
             msg = f"[IG PUBLISH ALERT] La URL pública no responde: {public_mp4_url} - Error: {e}"
             logger.error(msg)
-            print(msg)
             raise HTTPException(status_code=400, detail=f"URL pública no accesible: el túnel Cloudflare está caído o la URL venció - {public_mp4_url} ({e})")
     except ImportError:
         # Fallback a requests si httpx no está instalado
@@ -537,14 +541,12 @@ def _publish_instagram(account: SocialAccount, clip: Clip, caption: str | None) 
             if r.status_code != 200:
                 msg = f"[IG PUBLISH ALERT] La URL pública no responde: {public_mp4_url} - Status: {r.status_code}"
                 logger.error(msg)
-                print(msg)
                 raise HTTPException(status_code=400, detail=f"URL pública no accesible ({r.status_code}): el túnel Cloudflare está caído o la URL venció - {public_mp4_url}")
         except HTTPException:
             raise
         except Exception as e:
             msg = f"[IG PUBLISH ALERT] La URL pública no responde: {public_mp4_url} - Error: {e}"
             logger.error(msg)
-            print(msg)
             raise HTTPException(status_code=400, detail=f"URL pública no accesible: el túnel Cloudflare está caído o la URL venció - {public_mp4_url} ({e})")
 
     # Paso 1 (Crear Container): POST https://graph.facebook.com/v18.0/{ig_user_id}/media
@@ -602,13 +604,10 @@ def _publish_instagram(account: SocialAccount, clip: Clip, caption: str | None) 
                                 err_data = err_resp.json()
                                 err_msg = err_data.get("status") or err_data
                                 logger.error(f"[IG ERROR DETAIL] container {creation_id} status_code ERROR -> status: {err_msg} | full: {err_data} | raw: {err_resp.text}")
-                                print(f"[IG ERROR DETAIL] container {creation_id} status: {err_msg}")
                             except Exception:
                                 logger.error(f"[IG ERROR DETAIL] container {creation_id} raw response: {err_resp.text}")
-                                print(f"[IG ERROR DETAIL] container {creation_id} raw: {err_resp.text}")
                         except Exception as e_err:
                             logger.error(f"[IG ERROR DETAIL] fallo al obtener status para {creation_id}: {e_err}")
-                            print(f"[IG ERROR DETAIL] fallo al obtener status: {e_err}")
                         raise HTTPException(status_code=400, detail=f"Instagram container error: {st_data} - procesamiento falló")
                     else:
                         logger.info(f"[IG POLLING] container {creation_id} estado desconocido {sc} intento {attempt+1}/60")
@@ -667,7 +666,6 @@ def _publish_tiktok(account: SocialAccount, clip: Clip, caption: str | None) -> 
         _acc_exists = bool(getattr(account, "access_token", None))
         _prefix = (account.access_token[:10] if _acc_exists and account.access_token else "None")
         logger.error(f"[AUDITORIA BD] user_social_accounts platform=tiktok platform_account_id={getattr(account, 'platform_account_id', None)} access_token_exists={_acc_exists} access_token_prefix={_prefix} refresh_token_exists={bool(getattr(account, 'refresh_token', None))}")
-        print(f"[AUDITORIA BD] user_social_accounts platform=tiktok access_token_exists={_acc_exists} prefix={_prefix}")
     except Exception as e:
         logger.error(f"[AUDITORIA BD] tiktok audit error {e}")
 
@@ -701,13 +699,11 @@ def _publish_tiktok(account: SocialAccount, clip: Clip, caption: str | None) -> 
         raise HTTPException(status_code=400, detail=f"Archivo local vacío {file_path}")
 
     logger.info(f"[TIKTOK PUBLISH] Archivo local {file_path} video_size={file_size} bytes")
-    print(f"[TIKTOK PUBLISH] Archivo local {file_path} video_size={file_size}")
 
     title = (caption or clip.title or "ClipsAI")[:150]
 
     # Auditoría: verifica API v2 de TikTok con FILE_UPLOAD
     logger.info("[AUDITORIA TIKTOK] Usando API v2 https://open.tiktokapis.com/v2/post/publish/video/init/ con FILE_UPLOAD")
-    print("[AUDITORIA TIKTOK] API v2 FILE_UPLOAD")
 
     url = "https://open.tiktokapis.com/v2/post/publish/video/init/"
     headers = {
@@ -732,16 +728,13 @@ def _publish_tiktok(account: SocialAccount, clip: Clip, caption: str | None) -> 
 
     logger.info(f"[TIKTOK PAYLOAD] {payload}")
     logger.info(f"[TIKTOK PUBLISH] POST {url} body={payload}")
-    print(f"[TIKTOK PUBLISH] POST {url} FILE_UPLOAD video_size={file_size}")
     resp = requests.post(url, headers=headers, json=payload, timeout=30)
     # Logs detallados de respuesta TikTok
     try:
         logger.info(f"[TIKTOK API RESPONSE] status={resp.status_code} body={resp.text[:2000]}")
-        print(f"[TIKTOK API RESPONSE] status={resp.status_code} body={resp.text[:2000]}")
         try:
             j = resp.json()
             logger.info(f"[TIKTOK API] error_code={j.get('error_code')} message={j.get('message')} data={j.get('data')}")
-            print(f"[TIKTOK API] error_code={j.get('error_code')} message={j.get('message')}")
             if j.get("error_code") not in (None, 0, "0", ""):
                 logger.error(f"[TIKTOK API ERROR] error_code={j.get('error_code')} message={j.get('message')} body={resp.text}")
         except Exception:
@@ -795,15 +788,12 @@ def _publish_tiktok(account: SocialAccount, clip: Clip, caption: str | None) -> 
             "Content-Range": f"bytes 0-{file_size - 1}/{file_size}",
         }
         logger.info(f"[TIKTOK UPLOAD] PUT {upload_url} Content-Range={headers_put['Content-Range']} size={file_size}")
-        print(f"[TIKTOK UPLOAD] PUT {upload_url} size={file_size}")
         resp_put = requests.put(upload_url, headers=headers_put, data=file_bytes, timeout=60)
         logger.info(f"[TIKTOK UPLOAD] status={resp_put.status_code} body={resp_put.text[:2000]}")
-        print(f"[TIKTOK UPLOAD] status={resp_put.status_code} body={resp_put.text[:1000]}")
         if resp_put.status_code not in (200, 201, 204):
             logger.error(f"[TIKTOK UPLOAD ERROR] status={resp_put.status_code} body={resp_put.text[:2000]}")
             raise HTTPException(status_code=400, detail=f"TikTok upload error {resp_put.status_code}: {resp_put.text[:1000]}")
         logger.info(f"[TIKTOK UPLOAD] Confirmación subida exitosa status={resp_put.status_code}")
-        print(f"[TIKTOK UPLOAD] Confirmación subida exitosa status={resp_put.status_code}")
     except HTTPException:
         raise
     except Exception as e:
@@ -825,14 +815,12 @@ def publish_clip_task(clip_id: uuid.UUID, platform: str, caption: str | None, we
     try:
         clip: Clip | None = db.get(Clip, clip_id)
         if clip is None:
-            print(f"[publish] clip {clip_id} no encontrado")
             return None
 
         clip.status = "PUBLISHING"
         clip.publication_status = "PUBLISHING"
         clip.published_platform = platform
         db.commit()
-        print(f"[publish] iniciando publicación clip={clip_id} platform={platform} caption={caption!r}")
 
         # Resolve user_id if not provided
         resolved_user_id = user_id
@@ -872,7 +860,6 @@ def publish_clip_task(clip_id: uuid.UUID, platform: str, caption: str | None, we
                         "file_path": clip.storage_path,
                         "title": clip.title,
                     }
-                    print(f"[publish] enviando webhook POST {webhook} payload={payload}")
                     resp = requests.post(webhook, json=payload, timeout=10)
                     if resp.status_code < 400:
                         try:
@@ -886,7 +873,6 @@ def publish_clip_task(clip_id: uuid.UUID, platform: str, caption: str | None, we
                     else:
                         raise RuntimeError(f"webhook status {resp.status_code}")
                 except Exception as e:
-                    print(f"[publish] webhook error {e} — generación real con ID único")
                     social_post_id = _generate_fake_id()
                     social_post_url = f"{PLATFORM_URLS.get(platform_norm, PLATFORM_URLS['webhook'])}{social_post_id}"
                     result = {"status": "published", "platform": platform_norm, "post_id": social_post_id, "url": social_post_url}
@@ -1023,12 +1009,10 @@ def publish_clip_task(clip_id: uuid.UUID, platform: str, caption: str | None, we
         except Exception:
             pass
         db.commit()
-        print(f"[publish] ✓ clip {clip_id} PUBLISHED platform={platform_norm} post_id={result.get('post_id')} url={result.get('url')}")
         logger.info(f"[publish] ✓ clip {clip_id} PUBLISHED platform={platform_norm}")
         return result
 
     except HTTPException as he:
-        print(f"[publish] http error clip={clip_id} {he.detail}")
         logger.error(f"[publish] http error clip={clip_id} {he.detail}")
         try:
             clip = db.get(Clip, clip_id)
@@ -1048,7 +1032,6 @@ def publish_clip_task(clip_id: uuid.UUID, platform: str, caption: str | None, we
                 pass
         return {"status": "failed", "platform": platform, "error": str(he.detail), "code": he.status_code}
     except Exception as exc:
-        print(f"[publish] error clip={clip_id} exc={exc}")
         logger.error(f"[publish] error clip={clip_id} exc={exc}", exc_info=True)
         try:
             clip = db.get(Clip, clip_id)

@@ -11,9 +11,10 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..database import Base
+from .mixins import TimestampMixin
 
 
-class Clip(Base):
+class Clip(Base, TimestampMixin):
     __tablename__ = "clips"
     __table_args__ = {"extend_existing": True}
 
@@ -88,17 +89,6 @@ class Clip(Base):
 
     error_log: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.current_timestamp(),
-        nullable=False,
-    )
-
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.current_timestamp(),
-        nullable=False,
-    )
 
     video: Mapped[object | None] = relationship("Video", backref="clips", lazy="joined")
     job: Mapped[object | None] = relationship("Job", backref="clips", lazy="joined")

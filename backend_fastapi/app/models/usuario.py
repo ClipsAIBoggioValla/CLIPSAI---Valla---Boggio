@@ -14,9 +14,10 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..database import Base
+from .mixins import TimestampMixin
 
 
-class Usuario(Base):
+class Usuario(Base, TimestampMixin):
     __tablename__ = "usuarios"
     __table_args__ = {"extend_existing": True}
 
@@ -31,16 +32,6 @@ class Usuario(Base):
     avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     theme_preference: Mapped[str | None] = mapped_column(String(20), nullable=True, server_default="dark")
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.current_timestamp(),
-        nullable=False,
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.current_timestamp(),
-        nullable=False,
-    )
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"<Usuario id={self.id} email={self.email!r}>"

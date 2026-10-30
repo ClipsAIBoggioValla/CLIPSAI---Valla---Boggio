@@ -11,14 +11,94 @@ import uuid
 from pathlib import Path
 from typing import Literal, Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, Query, Response, status
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 logger = logging.getLogger(__name__)
 
 from ..deps import CurrentUser, DbSession
+from ._clip_common import assert_clip_ownership as _assert_ownership, get_clip_or_404 as _get_clip_or_404
+from ..models import Clip, Video
+from ..schemas import ClipListItem, ClipListResponse, ClipResponse, ClipUpdate
+
+router = APIRouter(prefix="/clips", tags=["clips"])
+
+
+def _clip_has_ass(tags: object) -> bool:
+    if not isinstance(tags, dict):
+        return False
+    # FIX: has_ass explícito tiene prioridad (re-render)
+    if "has_ass" in tags:
+        return bool(tags.get("has_ass"))
+    if isinstance(tags.get("ass"), dict) and tags["ass"].get("applied"):
+        return True
+    r = tags.get("_render")
+    return r in ("ass", "hook+ass")
+
+
+def _clip_has_hook(tags: object) -> bool:
+    if not isinstance(tags, dict):
+        return False
+    if "has_hook" in tags:
+        return bool(tags.get("has_hook"))
+    if isinstance(tags.get("hook"), dict) and tags["hook"].get("applied"):
+        return True
+    r = tags.get("_render")
+    return r in ("hook", "hook+ass")
+
+
+def _clip_duration(start: float, end: float) -> float | None:
+    try:
+        return float(end) - float(start)
+    except Exception:
+        return None
+
+
+def _clip_file_path(clip: Clip) -> str | None:
+    return getattr(clip, "storage_path", None)
+
+
+def _clip_stream_url(clip_id: uuid.UUID) -> str:
+    return f"/clips/{clip_id}/descarga"
+
+
+def _enrich_clip_response(clip: Clip) -> dict:
+    return {
+        "id": clip.id,
+        "video_id": getattr(clip, "video_id", None),
+        "job_id": clip.job_id,
+        "title": clip.title,
+        "start_time": clip.start_time,
+        "end_time": clip.end_time,
+        "score": clip.score,
+        "tags": clip.tags,
+        "storage_path": getattr(clip, "storage_path", None),
+        "file_path": _clip_file_path(clip),
+        "stream_url": _clip_stream_url(clip.id),
+        "duration": _clip_duration(clip.start_time, clip.end_time),
+        "has_ass": _clip_has_ass(clip.tags),
+        "has_hook": _clip_has_hook(clip.tags),
+        "status": clip.status,
+        "published_platform": getattr(clip, "published_platform", None),
+        "social_post_id": getattr(clip, "social_post_id", None),
+        "social_post_url": getattr(clip, "social_post_url", None),
+        "published_at": getattr(clip, "published_at", None),
+        "publication_status": getattr(clip, "publication_status", None),
+        "social_network": getattr(clip, "social_network", None),
+        "created_at": clip.created_at,
+        "updated_at": clip.updated_at,
+    }
+
+
+class ReRenderRequest(BaseModel):
+    enable_ass: bool = True
+    enable_hook: bool = True
+
+
+from ..deps import CurrentUser, DbSession
+from ._clip_common import assert_clip_ownership as _assert_ownership, get_clip_or_404 as _get_clip_or_404, resolve_clip_video as _resolve_clip_video
 from ..models import Clip, Video
 from ..schemas import ClipListItem, ClipListResponse, ClipResponse, ClipUpdate
 
@@ -104,16 +184,8 @@ def _run_re_render(clip_id: uuid.UUID, enable_ass: bool, enable_hook: bool) -> N
         clip = db.get(Clip, clip_id)
         if clip is None:
             return
-        # Resolver video
-        video = None
-        if clip.video_id is not None:
-            video = db.get(Video, clip.video_id)
-        if video is None and clip.job_id is not None:
-            from ..models import Job
-
-            job = db.get(Job, clip.job_id)
-            if job is not None:
-                video = db.get(Video, job.video_id)
+        # Resolver video usando helper compartido
+        video = _resolve_clip_video(db, clip)
         if video is None or not Path(str(video.filepath)).is_file():
             clip.status = "FAILED"
             clip.error_log = "Video origen no encontrado para re-render"
@@ -323,27 +395,6 @@ def _run_re_render(clip_id: uuid.UUID, enable_ass: bool, enable_hook: bool) -> N
 # Auditoría 2026-09-21: pipeline real 100% — sin fallback de prueba. El worker escribe MP4 físico en /app/storage/clips.
 
 
-def _get_clip_or_404(db: DbSession, clip_id: uuid.UUID) -> Clip:
-    clip = db.get(Clip, clip_id)
-    if clip is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clip no encontrado")
-    return clip
-
-
-def _assert_ownership(db: DbSession, clip: Clip, current_user) -> None:
-    video = None
-    if clip.video_id is not None:
-        video = db.get(Video, clip.video_id)
-    if video is None and clip.job_id is not None:
-        from ..models import Job
-
-        job = db.get(Job, clip.job_id)
-        if job is not None:
-            video = db.get(Video, job.video_id)
-    if video is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clip no encontrado")
-    if video.user_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado para este clip")
 
 
 @router.get(
@@ -351,20 +402,57 @@ def _assert_ownership(db: DbSession, clip: Clip, current_user) -> None:
     response_model=ClipListResponse,
     summary="Listar clips del usuario (biblioteca con búsqueda, filtros y paginación)",
 )
+def _clip_list_item(clip, video_transcript) -> ClipListItem:
+    transcript: str | None = None
+    if video_transcript:
+        transcript = str(video_transcript)[:500]
+    return ClipListItem(
+        id=clip.id,
+        job_id=clip.job_id,
+        title=clip.title,
+        score=clip.score,
+        start_time=clip.start_time,
+        end_time=clip.end_time,
+        transcript=transcript,
+        status=getattr(clip, "status", None),
+        published_platform=getattr(clip, "published_platform", None),
+        social_post_url=getattr(clip, "social_post_url", None),
+        published_at=getattr(clip, "published_at", None),
+        created_at=clip.created_at,
+        updated_at=getattr(clip, "updated_at", None),
+        file_path=_clip_file_path(clip),
+        stream_url=_clip_stream_url(clip.id),
+        duration=_clip_duration(clip.start_time, clip.end_time),
+        has_ass=_clip_has_ass(clip.tags),
+        has_hook=_clip_has_hook(clip.tags),
+        tags=clip.tags if isinstance(clip.tags, (dict, list)) else None,
+    )
+
+
+class ClipListQuery(BaseModel):
+    q: Optional[str] = Field(default=None, description="Búsqueda por título o transcripción (case-insensitive)")
+    min_score: Optional[float] = Field(default=None, ge=0, le=100, description="Score mínimo (0-100)")
+    sort_by: Literal["created_at_desc", "created_at_asc", "score_desc", "score_asc"] = Field(default="created_at_desc", description="Orden de resultados")
+    page: int = Field(default=1, ge=1, description="Número de página")
+    limit: int = Field(default=10, ge=1, le=100, description="Tamaño de página")
+    video_id: Optional[uuid.UUID] = Field(default=None, description="Filtrar por video")
+    status: Optional[str] = Field(default=None, description="Filtrar por status")
+    job_id: Optional[uuid.UUID] = Field(default=None, description="Filtrar por job")
+
+
 def list_clips(
     db: DbSession,
     current_user: CurrentUser,
-    q: Optional[str] = Query(default=None, description="Búsqueda por título o transcripción (case-insensitive)"),
-    min_score: Optional[float] = Query(default=None, ge=0, le=100, description="Score mínimo (0-100)"),
-    sort_by: Literal["created_at_desc", "created_at_asc", "score_desc", "score_asc"] = Query(
-        default="created_at_desc", description="Orden de resultados"
-    ),
-    page: int = Query(default=1, ge=1, description="Número de página"),
-    limit: int = Query(default=10, ge=1, le=100, description="Tamaño de página"),
-    video_id: Optional[uuid.UUID] = Query(default=None, description="Filtrar por video"),
-    status: Optional[str] = Query(default=None, description="Filtrar por status"),
-    job_id: Optional[uuid.UUID] = Query(default=None, description="Filtrar por job"),
+    params: ClipListQuery = Depends(),
 ) -> ClipListResponse:
+    q = params.q
+    min_score = params.min_score
+    sort_by = params.sort_by
+    page = params.page
+    limit = params.limit
+    video_id = params.video_id
+    status = params.status
+    job_id = params.job_id
     from ..models import Job
 
     base = (
@@ -409,34 +497,7 @@ def list_clips(
 
     rows = db.execute(base).all()
 
-    items: list[ClipListItem] = []
-    for clip, video_transcript in rows:
-        transcript: str | None = None
-        if video_transcript:
-            transcript = str(video_transcript)[:500]
-        items.append(
-            ClipListItem(
-                id=clip.id,
-                job_id=clip.job_id,
-                title=clip.title,
-                score=clip.score,
-                start_time=clip.start_time,
-                end_time=clip.end_time,
-                transcript=transcript,
-                status=getattr(clip, "status", None),
-                published_platform=getattr(clip, "published_platform", None),
-                social_post_url=getattr(clip, "social_post_url", None),
-                published_at=getattr(clip, "published_at", None),
-                created_at=clip.created_at,
-                updated_at=getattr(clip, "updated_at", None),
-                file_path=_clip_file_path(clip),
-                stream_url=_clip_stream_url(clip.id),
-                duration=_clip_duration(clip.start_time, clip.end_time),
-                has_ass=_clip_has_ass(clip.tags),
-                has_hook=_clip_has_hook(clip.tags),
-                tags=clip.tags if isinstance(clip.tags, (dict, list)) else None,
-            )
-        )
+    items: list[ClipListItem] = [_clip_list_item(clip, video_transcript) for clip, video_transcript in rows]
 
     return ClipListResponse(items=items, total=total, page=page, limit=limit, total_pages=total_pages)
 
@@ -606,7 +667,6 @@ def download_clip(
 
     # Log requerido
     msg = f"[CLIP DESCARGA] Sirviendo archivo real: {ruta_final} (Tamaño: {size} bytes)"
-    print(msg)
     logger.info(msg)
 
     # 3. Respuesta HTTP con media_type video/mp4

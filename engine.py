@@ -118,11 +118,8 @@ def procesar_video(video_path: str, transcripcion_path: str) -> ProcesamientoRes
         >>> resultado = procesar_video("video.mp4", "transcripcion.txt")
         >>> if resultado.exito:
         ...     for clip in resultado.clips:
-        ...         print(f"Clip: {clip.archivo} ({clip.inicio}-{clip.fin})")
         ... else:
-        ...     print(f"Error [{resultado.error_tipo}]: {resultado.error}")
         ...     if resultado.error_detalle:
-        ...         print(f"Detalle: {resultado.error_detalle}")
     """
     # 1. Validaciones de entrada tempranas
     error_validacion = _validar_entradas(video_path, transcripcion_path)
@@ -351,27 +348,21 @@ def _main_cli():
 
     args = parser.parse_args()
 
-    print(f"Procesando: {args.video} + {args.transcripcion}")
-    print("-" * 50)
 
     resultado = procesar_video(args.video, args.transcripcion)
 
     if args.json:
-        print(json.dumps(resultado.to_dict(), indent=2, ensure_ascii=False))
+        pass
     else:
         if resultado.exito:
-            print(f"✓ ÉXITO - {len(resultado.clips)} clips generados")
-            print(f"  Carpeta: {resultado.carpeta_salida}")
             for i, clip in enumerate(resultado.clips, 1):
-                print(f"  {i}. {os.path.basename(clip.archivo)} | {clip.inicio}-{clip.fin} | Score: {clip.score} | {clip.titulo_sugerido[:50]}")
+                pass
         else:
-            print(f"✗ ERROR [{resultado.error_tipo}]: {resultado.error}")
             if resultado.error_detalle:
-                print(f"  Detalle: {resultado.error_detalle}")
 
+                pass
     if not args.no_cleanup and resultado.exito:
         limpiar_directorio_trabajo(resultado.carpeta_salida)
-        print("  (Directorio temporal limpiado)")
 
 
 if __name__ == "__main__":
