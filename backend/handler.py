@@ -2,6 +2,8 @@
 
 Este handler es COMPLETAMENTE independiente de FastAPI y PostgreSQL.
 Solo usa engine.py para procesar video + transcripcion -> clips.
+Después de generar clips horizontales, los procesa a verticales 9:16 con subs+hook
+y los sube a R2, devolviendo URLs en vez de paths locales.
 """
 
 from __future__ import annotations
@@ -29,6 +31,68 @@ MAX_TRANSCRIPT_BYTES = 10 * 1024 * 1024
 DOWNLOAD_CHUNK_BYTES = 1024 * 1024
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 TRANSCRIPT_EXTENSIONS = {".txt", ".srt", ".vtt"}
+
+
+def _upload_to_r2(file_path: str, bucket: str, key: str) -> str:
+    """Sube un archivo a R2 y devuelve la URL pública.
+    
+    Args:
+        file_path: Ruta local del archivo
+        bucket: Nombre del bucket R2
+        key: Key del objeto en R2
+    
+    Returns:
+        URL pública del archivo en R2
+    
+    Raises:
+        RuntimeError: Si falla el upload
+    """
+    try:
+        import boto3
+        from botocore.config import Config
+    except ImportError as exc:
+        raise RuntimeError(f"boto3 no está instalado: {exc}") from exc
+    
+    access_key = os.getenv("AWS_ACCESS_KEY_ID", "").strip()
+    secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "").strip()
+    endpoint_url = os.getenv("AWS_ENDPOINT_URL", "").strip() or None
+    
+    if not access_key or not secret_key:
+        raise RuntimeError("Faltan AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY para subir a R2")
+    
+    s3 = boto3.client(
+        "s3",
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        endpoint_url=endpoint_url,
+        region_name=os.getenv("AWS_REGION", "auto"),
+        config=Config(signature_version="s3v4"),
+    )
+    
+    try:
+        print(f"[R2 Upload] Subiendo {file_path} -> {bucket}/{key}")
+        s3.upload_file(file_path, bucket, key)
+        
+        # Construir URL pública
+        # Formato: https://<bucket>.<account>.r2.cloudflarestorage.com/<key>
+        # O usar endpoint_url si está configurado
+        if endpoint_url:
+            url = f"{endpoint_url.rstrip('/')}/{bucket}/{key}"
+        else:
+            # Fallback: construir URL estándar de R2
+            # El account ID debe estar en AWS_ACCOUNT_ID
+            account_id = os.getenv("AWS_ACCOUNT_ID", "").strip()
+            if account_id:
+                url = f"https://{bucket}.{account_id}.r2.cloudflarestorage.com/{key}"
+            else:
+                # Sin account ID, usar endpoint_url o fallar
+                raise RuntimeError("AWS_ACCOUNT_ID no configurado y AWS_ENDPOINT_URL vacío")
+        
+        print(f"[R2 Upload] ✓ Subido: {url}")
+        return url
+        
+    except Exception as exc:
+        raise RuntimeError(f"Error subiendo a R2: {exc}") from exc
 
 
 def _download_file(url: str, destination: Path, max_bytes: int) -> None:
@@ -171,21 +235,87 @@ def process_video_job(job: dict[str, Any]) -> dict[str, Any]:
 
         clips = result.clips
         transcription_segments = getattr(result, 'transcription_segments', None) or []
-        print(f"[RunPod Handler] EXITO: {len(clips)} clips generados, {len(transcription_segments)} segmentos de transcripción")
+        print(f"[RunPod Handler] EXITO: {len(clips)} clips horizontales generados, {len(transcription_segments)} segmentos de transcripción")
+
+        # Procesar clips horizontales a verticales 9:16 con subs+hook y subir a R2
+        print("[RunPod Handler] Procesando clips verticales 9:16 + subs + hook...")
+        from video_processor import process_clip_vertical
+        
+        bucket = os.getenv("BUCKET_NAME", "clipsai-videos").strip()
+        clips_verticales = []
+        
+        for idx, clip in enumerate(clips):
+            print(f"[RunPod Handler] Procesando clip {idx+1}/{len(clips)}...")
+            
+            # Convertir timestamps de string a segundos
+            def ts_to_seconds(ts_str: str) -> float:
+                parts = ts_str.split(":")
+                if len(parts) == 3:
+                    return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+                elif len(parts) == 2:
+                    return int(parts[0]) * 60 + float(parts[1])
+                return float(ts_str)
+            
+            clip_start = ts_to_seconds(clip.inicio)
+            clip_end = ts_to_seconds(clip.fin)
+            
+            # Procesar clip vertical
+            horizontal_path = clip.archivo
+            vertical_path = horizontal_path.replace(".mp4", "_vertical.mp4")
+            
+            success = process_clip_vertical(
+                input_video=str(video_path),
+                output_video=vertical_path,
+                segments=transcription_segments,
+                clip_start=clip_start,
+                clip_end=clip_end,
+                hook_text=clip.hook_texto if clip.hook_texto else None
+            )
+            
+            if not success or not os.path.exists(vertical_path):
+                print(f"[RunPod Handler] ⚠ Clip {idx+1} falló procesamiento vertical, saltando")
+                continue
+            
+            # Subir a R2
+            try:
+                r2_key = f"clips/{video_id}/{idx}_vertical.mp4"
+                r2_url = _upload_to_r2(vertical_path, bucket, r2_key)
+                
+                clips_verticales.append({
+                    "index": idx,
+                    "url_r2": r2_url,
+                    "titulo": clip.titulo_sugerido,
+                    "hook_texto": clip.hook_texto,
+                    "score": clip.score,
+                    "inicio": clip.inicio,
+                    "fin": clip.fin,
+                    "duracion": int(clip_end - clip_start),
+                    "criterio_principal": clip.criterio_principal,
+                    "primer_segundo": clip.primer_segundo,
+                    "motivo": clip.motivo,
+                })
+                
+                print(f"[RunPod Handler] ✓ Clip {idx+1} subido a R2: {r2_url}")
+                
+            except Exception as exc:
+                print(f"[RunPod Handler] ⚠ Error subiendo clip {idx+1} a R2: {exc}")
+                continue
+        
+        print(f"[RunPod Handler] {len(clips_verticales)} clips verticales procesados y subidos a R2")
 
         response = {
             "status": "COMPLETED",
             "video_id": video_id,
             "engine": "clipsai_native",
-            "clips": [_serialize_clip(clip) for clip in clips],
-            "clip_count": len(clips),
+            "clips": clips_verticales,
+            "clip_count": len(clips_verticales),
             "output_folder": result.carpeta_salida,
             "transcription_segments": transcription_segments,
         }
         
         # Mensaje informativo si no hay clips
-        if len(clips) == 0:
-            response["message"] = "No se encontraron clips relevantes en el video. El contenido puede no tener momentos virales claros o la transcripción puede estar vacía."
+        if len(clips_verticales) == 0:
+            response["message"] = "No se pudieron procesar clips verticales. Revisa los logs para más detalles."
         
         return response
 
