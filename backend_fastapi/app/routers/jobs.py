@@ -584,6 +584,7 @@ def _fallback_result(video: Video | None) -> dict:  # type: ignore[no-redef]
 
 def _run_job(job_id: uuid.UUID) -> None:
     db = SessionLocal()
+    ENABLE_ASS_HOOK = True  # default defensivo; sync con la constante del módulo (línea 55)
     try:
         # Wrapper global — inicio con log inmediato y flush
         logger.info(f"[JOB {job_id}] Inicio de procesamiento de job.")
