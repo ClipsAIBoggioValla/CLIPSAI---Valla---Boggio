@@ -383,7 +383,7 @@ backend/
 
 **Reglas:** solo `core` es compartido (PR + review de ambos); track A nunca importa track_b ni viceversa; stubs mock compilan sin FFmpeg ni API keys; handoff tipado A→B (`TranscriptData`+`AudioFeatures`) y salida a redes (`ScheduledPost`).
 
-**Integración actual:** `backend_fastapi/app/main.py` resuelve la raíz del repo e importa condicionalmente `backend.api.routes.retrim` y `stream` (`try/except` → `None` si no existen), montándolos si el import tiene éxito. Pendiente: que ambos backends importen `backend.core.schemas` en vez de sus schemas duplicados.
+**Integración actual:** `backend_fastapi/app/main.py` importa condicionalmente `backend.api.routes.retrim` y `stream`. Antes eso hacía que la superficie dependiera del layout (60 rutas en Docker vs 62 desde la raíz); **desde Issue 35 bis es determinista**: la imagen copia `backend/` y `docker-sitecustomize.py` (como `sitecustomize.py`) reenvía `backend_fastapi.*` → `app.*` reutilizando los mismos módulos. Resultado: **62 rutas en ambos layouts**, incluidas `POST /clips/{clip_id}/retrim` y `GET /jobs/{job_id}/stream`. Pendiente: que ambos backends importen `backend.core.schemas` en vez de sus schemas duplicados.
 
 **SSE de jobs** (`stream.py`): mapea `pending→0%`, `processing→55% scoring`, `completed/failed→100%` sobre `AutopilotJobStatus`.
 
@@ -457,6 +457,8 @@ backend/
 | `GET/PATCH/DELETE /clips/:clipId` | ownership (404 antes de validar body, como FastAPI) |
 | `GET /clips/:clipId/descarga` | FileResponse / dummy |
 | `POST /clips/:clipId/re-render` | re-render ASS/Hook (necesita ffmpeg) |
+| `POST /clips/:clipId/retrim` | re-corte FFmpeg a nuevo rango 5–90s (router opcional de `backend/api/routes/retrim.py`) |
+| `GET /jobs/:jobId/stream` | SSE progreso del job (router opcional de `backend/api/routes/stream.py`) |
 | `POST/GET /clips/:clipId/subtitles` (+ `/status`) | pipeline ASS + fallback a `videos.transcript` |
 | `POST /clips/:clipId/publicar` + `/publish` `202` | `runPublish()` 2s → `PUBLISHED` o webhook real |
 | `GET /clips/:clipId/publish-stream` | SSE publicación (EventSource vía `?token=`) |
@@ -476,20 +478,24 @@ backend/
 ```bash
 cd backend_express
 npm run typecheck              # tsc --noEmit
-npm run audit:openapi          # 56 rutas montadas = 56 documentadas
-npm run audit:parity           # FastAPI 60 ≈ Express 62 (paridad 1:1)
+npm run audit:openapi          # 58 rutas montadas = 58 documentadas
+npm run audit:parity           # FastAPI 62 ≈ Express 64 (paridad 1:1, 0 diferencias)
 ```
 
 `scripts/audit-parity.mjs` compara el inventario real de FastAPI (`scripts/fastapi-routes.json`,
 snapshot autoritativo) contra las rutas que Express monta en `app.ts` + `routes/*.ts`. Regenerar el
-snapshot (source actual, no la imagen stale):
-```bash
-docker compose run --rm --no-deps -v "$(pwd)/backend_fastapi/app:/app/app:ro" -T backend_fastapi python -c "
-import json
-from app.main import app
-print(json.dumps([{'path': r.path, 'methods': sorted(m for m in getattr(r,'methods',[]) or [])} for r in app.routes]))
-" > backend_express/scripts/fastapi-routes.json
+snapshot con la imagen ya construida (que incluye `backend/` y el alias `backend_fastapi.*` →
+`app.*`):
 ```
+docker compose build backend_fastapi
+docker compose run --rm --no-deps -T backend_fastapi python -c "..." > backend_express/scripts/fastapi-routes.json
+```
+
+**Manejo de errores (estandarizado, Issue 35):** `lib/apiClient.ts` (React) y `api/client.ts`
+(Vue) comparten la misma política de fallo de sesión: `/jobs/*` reintento silencioso, rutas
+`/me` sin destruir sesión, cualquier otro fallo de sesión → limpiar token + `/login`. Acepta
+**401 y 403 "Not authenticated"** porque FastAPI responde 403 al faltar el header (OAuth2) y
+Express 401.
 
 **Comandos:** `npm run dev` (tsx watch), `npm run build`, `npm run typecheck`, `npm start`.
 
@@ -751,9 +757,9 @@ Fuente detallada: [`ISSUES.md`](./ISSUES.md) (sincronizada con GitHub, Sep 2026)
 
 | Estado | Cantidad | Lista |
 |--------|----------|-------|
-| ✅ Completado | 23 | 1, 2, 3, 4, 5, 6, 7, 14, 17, 18, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 32, 33, 34 (+ PR #34 Spark) |
+| ✅ Completado | 24 | 1, 2, 3, 4, 5, 6, 7, 14, 17, 18, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 32, 33, 34, 35 (+ PR #34 Spark) |
 | ⚠️ Parcial | 1 | 13 (seguridad/compose) |
-| ⏳ Pendiente | 2 | 31, 35 (GitHub #51, #55) |
+| ⏳ Pendiente | 1 | 31 (GitHub #51) |
 | ↩️ Cerradas vía otras | 3 | 8, 9, 10/11/12 → Issues 27/28/29 |
 
 ### 17.2 Estado por área

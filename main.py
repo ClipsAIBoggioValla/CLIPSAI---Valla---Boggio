@@ -50,8 +50,10 @@ def cargar_env(ruta: str = ".env") -> None:
 cargar_env()
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5-5")
+ANTHROPIC_FALLBACK_MODEL = os.environ.get("ANTHROPIC_FALLBACK_MODEL", "claude-haiku-5-5")
 ANTHROPIC_VERSION = os.environ.get("ANTHROPIC_VERSION", "2023-06-01")
+ANTHROPIC_WORKSPACE_ID = os.environ.get("ANTHROPIC_WORKSPACE_ID", "")
 ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages"
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
@@ -465,10 +467,12 @@ def llamar_claude(prompt: str) -> str:
         "anthropic-version": ANTHROPIC_VERSION,
         "content-type": "application/json",
     }
+    if ANTHROPIC_WORKSPACE_ID:
+        headers["anthropic-workspace-id"] = ANTHROPIC_WORKSPACE_ID
     body = {
         "model": ANTHROPIC_MODEL,
         "max_tokens": 8192,
-        "thinking": {"type": "disabled"},
+        "thinking": {"type": "between_tools"},
         "messages": [{"role": "user", "content": prompt}],
     }
 

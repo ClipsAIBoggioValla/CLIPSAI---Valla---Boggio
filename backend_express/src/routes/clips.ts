@@ -214,16 +214,13 @@ clipsRouter.patch('/:clipId', authMiddleware, async (req: AuthRequest, res) => {
   const userId = req.user!.id
   const clipId = String(req.params.clipId)
   const { title, tags } = req.body as Record<string, unknown>
+  if (title === undefined && tags === undefined) return res.status(400).json({ detail: 'Nada para actualizar' })
+  if (title !== undefined && title !== null && typeof title !== 'string') return res.status(422).json({ detail: 'title debe ser string' })
+  if (tags !== undefined && tags !== null && !Array.isArray(tags)) return res.status(422).json({ detail: 'tags debe ser array' })
 
   const client = await pool.connect()
   try {
-    // Paridad FastAPI (`update_clip`): primero existencia/ownership (404), luego body (400/422).
     await getClipOr404(clipId, String(userId), client)
-
-    if (title === undefined && tags === undefined) return res.status(400).json({ detail: 'Nada para actualizar' })
-    if (title !== undefined && title !== null && typeof title !== 'string') return res.status(422).json({ detail: 'title debe ser string' })
-    if (tags !== undefined && tags !== null && !Array.isArray(tags)) return res.status(422).json({ detail: 'tags debe ser array' })
-
     const updates: string[] = []
     const values: unknown[] = []
     let idx = 1

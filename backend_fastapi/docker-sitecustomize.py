@@ -21,11 +21,7 @@ Se instala como `sitecustomize.py` (Python lo importa automáticamente al arranc
 antes de cualquier código de la app) e instala un meta-path finder que reenvía
 `backend_fastapi.*` a `app.*` **reutilizando los mismos objetos módulo**. Así no se
 duplica el `MetaData`/registry de SQLAlchemy ni se crea un segundo engine: sigue
-habiendo una única fuente de verdad. Actúa **solo como fallback**: si el módulo real
-`backend_fastapi.*` es importable (p. ej. al correr desde la raíz del repo, donde
-los tests y cualquier consumidor legítimo lo usan), se devuelve `None` y el import
-normal sigue su curso. Así no se interfiere con el layout de repo; solo se arregla
-la imagen Docker, donde ese paquete no existe.
+habiendo una única fuente de verdad.
 """
 
 from __future__ import annotations
