@@ -54,6 +54,7 @@ COPY engine.py ./engine.py
 COPY main.py ./main.py
 COPY whisper_transcriber.py ./whisper_transcriber.py
 COPY audio_analyzer.py ./audio_analyzer.py
+COPY video_processor.py ./video_processor.py
 COPY backend/ ./backend/
 COPY backend_fastapi/runpod_worker.py ./runpod_worker.py
 
