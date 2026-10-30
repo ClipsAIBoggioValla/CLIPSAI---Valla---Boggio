@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import time
+import uuid
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
@@ -12,6 +14,13 @@ import requests
 
 class RunPodError(RuntimeError):
     """Raised when RunPod configuration or processing fails."""
+
+
+def is_runpod_configured() -> bool:
+    return bool(
+        os.getenv("RUNPOD_API_KEY", "").strip()
+        and os.getenv("RUNPOD_ENDPOINT_ID", "").strip()
+    )
 
 
 def _settings(endpoint_id: str | None = None) -> tuple[str, str, int, int, float, str]:
@@ -33,6 +42,82 @@ def _settings(endpoint_id: str | None = None) -> tuple[str, str, int, int, float
 
     api_base = os.getenv("RUNPOD_API_BASE_URL", "https://api.runpod.ai/v2").rstrip("/")
     return api_key, resolved_endpoint_id, request_timeout, total_timeout, poll_interval, api_base
+
+
+def process_local_video_via_runpod(
+    video_path: str | Path,
+    *,
+    transcription_path: str | Path | None = None,
+    video_id: str | None = None,
+) -> dict[str, Any]:
+    """Upload a local source to S3/R2 and process it in RunPod Serverless."""
+    source = Path(video_path)
+    if not source.is_file():
+        raise RunPodError(f"Video fuente inexistente o vacío; no se puede enviar a RunPod: {source}")
+    try:
+        if source.stat().st_size <= 0:
+            raise RunPodError(f"Video fuente inexistente o vacío; no se puede enviar a RunPod: {source}")
+    except OSError as exc:
+        raise RunPodError(f"No se pudo leer el video fuente para enviarlo a RunPod: {source}") from exc
+
+    transcript_text: str | None = None
+    if transcription_path is not None:
+        transcript_file = Path(transcription_path)
+        if transcript_file.is_file():
+            if transcript_file.stat().st_size > 10 * 1024 * 1024:
+                raise RunPodError("La transcripción supera el máximo de 10 MB permitido por el worker RunPod")
+            transcript_text = transcript_file.read_text(encoding="utf-8", errors="ignore")
+
+    _, _, _, total_timeout, _, _ = _settings()
+
+    try:
+        import boto3
+        from botocore.config import Config
+    except ImportError as exc:
+        raise RunPodError("boto3 no está instalado; se necesita para enviar el video local a R2") from exc
+
+    access_key = os.getenv("AWS_ACCESS_KEY_ID", "").strip()
+    secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "").strip()
+    endpoint_url = os.getenv("AWS_ENDPOINT_URL", "").strip() or None
+    if not access_key or not secret_key:
+        raise RunPodError(
+            "Faltan AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY para subir el video local a R2 antes de RunPod"
+        )
+
+    bucket = os.getenv("BUCKET_NAME", "clipsai-videos").strip()
+    key = f"runpod-inputs/{uuid.uuid4().hex}{source.suffix or '.mp4'}"
+    s3 = boto3.client(
+        "s3",
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        endpoint_url=endpoint_url,
+        region_name=os.getenv("AWS_REGION", "auto"),
+        config=Config(signature_version="s3v4"),
+    )
+    uploaded = False
+    try:
+        s3.upload_file(str(source), bucket, key)
+        uploaded = True
+        video_url = s3.generate_presigned_url(
+            ClientMethod="get_object",
+            Params={"Bucket": bucket, "Key": key},
+            ExpiresIn=min(max(total_timeout + 600, 3600), 604800),
+        )
+        return process_video_via_runpod(
+            video_url,
+            transcription_text=transcript_text,
+            video_id=video_id,
+        )
+    except RunPodError:
+        raise
+    except Exception as exc:
+        raise RunPodError(f"No se pudo subir/procesar el video local mediante RunPod: {exc}") from exc
+    finally:
+        if uploaded:
+            try:
+                s3.delete_object(Bucket=bucket, Key=key)
+            except Exception:
+                pass
 
 
 def _decode_response(response: requests.Response) -> dict[str, Any]:

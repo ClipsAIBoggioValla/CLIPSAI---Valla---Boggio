@@ -56,7 +56,7 @@ const swaggerDefinition = {
             Token: {
                 type: 'object',
                 properties: {
-                    access_token: { type: 'string', example: '<jwt-token>' },
+                    access_token: { type: 'string', example: 'eyJhbGciOiJIUzI1NiJ9...' },
                     token_type: { type: 'string', example: 'bearer' },
                 },
             },
@@ -456,14 +456,18 @@ const swaggerDefinition = {
             post: {
                 tags: ['clips'],
                 summary: 'Re-trim del clip con FFmpeg',
-                description: 'Recorta el clip a un nuevo rango [start_time, end_time) con FFmpeg. ' +
-                    'Ruta provista por `backend/api/routes/retrim.py` (montada en FastAPI cuando el import tiene éxito, incluido en la imagen desplegada).',
+                description: 'Recorta el clip a un nuevo rango [start_time, end_time) usando FFmpeg, guarda el archivo generado ' +
+                    'en `storage/retrims/` y actualiza `start_time`, `end_time` y `file_path` del clip. ' +
+                    'La duración resultante debe estar entre 5 y 90 segundos. Ruta provista por `backend/api/routes/retrim.py` ' +
+                    '(`GET /jobs/{jobId}/stream` y esta ruta existen cuando FastAPI puede importar ese paquete).',
                 security: [{ bearerAuth: [] }],
                 parameters: [{ name: 'clipId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
                 requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/RetrimRequest' } } } },
                 responses: {
                     '200': { description: 'Clip re-trimado', content: { 'application/json': { schema: { $ref: '#/components/schemas/RetrimResponse' } } } },
-                    '404': { description: 'Clip no encontrado', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+                    '404': { description: 'Clip no encontrado o video origen no disponible', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+                    '422': { description: 'Rango inválido (end_time <= start_time, duración <5s o >90s)', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+                    '500': { description: 'FFmpeg falló o no produjo archivo', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
                 },
             },
         },
@@ -497,13 +501,17 @@ const swaggerDefinition = {
             get: {
                 tags: ['jobs'],
                 summary: 'SSE stream del estado de un Job',
-                description: 'Stream SSE de progreso de un job. Ruta provista por `backend/api/routes/stream.py` ' +
-                    'montada en FastAPI cuando el import tiene éxito.',
+                description: 'Server-Sent Events que emite un evento en cada cambio de estado del job (cada ~1s). ' +
+                    'Cierra con `event: done` al llegar a `completed`/`failed`, o con `event: error` si el job no existe o no pertenece al usuario. ' +
+                    'Requiere un cliente SSE: Swagger UI no puede consumirlo. Ruta provista por `backend/api/routes/stream.py`.',
                 security: [{ bearerAuth: [] }],
                 parameters: [{ name: 'jobId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
                 responses: {
-                    '200': { description: 'stream text/event-stream', content: { 'text/event-stream': { schema: { $ref: '#/components/schemas/JobStreamEvent' } } } },
-                    '404': { description: 'Job no encontrado', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+                    '200': {
+                        description: 'Stream SSE de progreso',
+                        content: { 'text/event-stream': { schema: { $ref: '#/components/schemas/JobStreamEvent' } } },
+                    },
+                    '422': { description: 'job_id debe ser UUID válido', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
                 },
             },
         },

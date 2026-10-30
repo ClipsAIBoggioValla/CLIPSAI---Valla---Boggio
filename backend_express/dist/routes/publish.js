@@ -10,7 +10,7 @@ const URLS = {
     webhook: 'https://webhook.clipsai.local/publish/',
 };
 function isValidUuid(v) {
-    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 }
 async function ensurePublishColumns() {
     try {
