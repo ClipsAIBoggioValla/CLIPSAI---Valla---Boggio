@@ -44,7 +44,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copiar código
 COPY backend_fastapi/app ./app
-COPY backend ./backend
 # Embebido: engine.py
 COPY <<'ENGINE_PY_EOF' ./engine.py
 #!/usr/bin/env python3
