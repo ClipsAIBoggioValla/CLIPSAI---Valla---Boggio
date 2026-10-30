@@ -28,10 +28,10 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./backend_fastapi/Dockerfile
+          file: ./worker.Dockerfile
           push: true
           tags: |
-            mfboggio/clipsai-worker:v21
+            mfboggio/clipsai-worker:v22
             mfboggio/clipsai-worker:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
