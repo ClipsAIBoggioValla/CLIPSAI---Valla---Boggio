@@ -31,7 +31,7 @@ jobs:
           file: ./worker.Dockerfile
           push: true
           tags: |
-            mfboggio/clipsai-worker:v22
+            mfboggio/clipsai-worker:v23
             mfboggio/clipsai-worker:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
