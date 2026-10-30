@@ -39,12 +39,15 @@ RUN python --version \
 COPY backend_fastapi/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# CUDA 12 runtime para CTranslate2/faster-whisper en GPU: cuDNN 8 aporta
-# libcudnn_ops_infer.so.8 y cuBLAS/cuda-runtime los sonames CUDA 12.
-RUN pip install --no-cache-dir "nvidia-cudnn-cu12==8.*" "nvidia-cublas-cu12==12.*" \
-    && ls /usr/local/lib/python3.10/dist-packages/nvidia/cudnn/lib/libcudnn_ops_infer.so.8
-
-ENV LD_LIBRARY_PATH="/usr/local/lib/python3.10/dist-packages/nvidia/cudnn/lib:/usr/local/lib/python3.10/dist-packages/nvidia/cublas/lib:/usr/local/lib/python3.10/dist-packages/nvidia/cuda_runtime/lib:${LD_LIBRARY_PATH}"
+# CUDA 12 runtime para CTranslate2/faster-whisper en GPU.
+# Registramos las rutas dinámicamente vía ldconfig (no hardcodear paths ni sonames):
+# la imagen base pytorch/pytorch es CONDA, así que los paquetes van a
+# /opt/conda/lib/python3.10/site-packages/nvidia/... (no a /usr/local/lib/...).
+RUN pip install --no-cache-dir "nvidia-cudnn-cu12==8.*" "nvidia-cublas-cu12==12.*" && \
+    SITE=$(python -c "import site; print(site.getsitepackages()[0])") && \
+    { find "$SITE/nvidia" -maxdepth 2 -type d -name lib 2>/dev/null || true; } > /etc/ld.so.conf.d/nvidia-pip.conf && \
+    ldconfig && \
+    echo "[worker-docker] nvidia lib dirs registrados en ld.so.conf:" && cat /etc/ld.so.conf.d/nvidia-pip.conf
 
 # Copiar scripts del worker (desde la raíz del repo)
 COPY engine.py ./engine.py
