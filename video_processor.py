@@ -119,18 +119,10 @@ def reframe_and_burn_subtitles(
         ass_escaped = ass_file.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
         filters.append(f"ass={ass_escaped}")
     
-    # 4. Hook text en primeros 3 segundos (opcional)
-    if hook_text:
-        # Escapar texto para drawtext
-        hook_escaped = hook_text.replace("'", "").replace('"', '').replace(":", " -")
-        hook_escaped = hook_escaped.upper()[:100]
-        filters.append(
-            f"drawtext=text='{hook_escaped}'"
-            f":fontsize=60:fontcolor=white:borderw=3:bordercolor=black"
-            f":x=(w-text_w)/2:y=h*0.75"
-            f":enable='between(t,0,3)'"
-        )
-    
+    # NOTA: drawtext REMOVIDO — el ffmpeg estático de RunPod no tiene libfreetype
+    # (falla con "No such filter: 'drawtext'", rc=8). El hook_text se recibe pero
+    # no se usa; se agregará después vía ASS o recompilando ffmpeg.
+
     vf = ",".join(filters)
     
     command = [
