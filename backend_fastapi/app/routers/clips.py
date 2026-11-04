@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Literal, Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Response, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
 
@@ -569,6 +569,11 @@ def download_clip(
     if not raw_path:
         logger.error(f"[CLIP DESCARGA] clip {clip_id} sin ruta en BD (file_path/video_path/output_path vacíos)")
         raise HTTPException(status_code=400, detail="El archivo de clip no existe o está vacío")
+
+    # Clips procesados por el worker RunPod: storage_path es una URL R2 → redirigir
+    if raw_path.lower().startswith(("http://", "https://")):
+        logger.info(f"[CLIP DESCARGA] clip {clip_id} es URL remota (R2) — redirigiendo: {raw_path[:120]}")
+        return RedirectResponse(url=raw_path, status_code=302)
 
     # 2. Verificación de ruta — modo 100% real: solo ubicaciones válidas de storage, sin fallback de prueba
     ruta_final = raw_path
