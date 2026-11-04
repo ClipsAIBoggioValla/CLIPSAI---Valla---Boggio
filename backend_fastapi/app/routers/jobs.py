@@ -778,6 +778,69 @@ def _run_job(job_id: uuid.UUID) -> None:
         clips_payload = _filtered
         # Sin truncamiento [:6] / max_clips — se devuelven TODOS los válidos (3, 8, 15)
 
+        # --- Worker R2 path: si RunPod devolvió clips con url_r2, el worker ya generó
+        # el clip vertical 9:16 + subtítulos ASS y lo subió a R2. NO ejecutar ffmpeg/
+        # reframe/editor local: persistir las URLs, marcar 100% y COMPLETED.
+        r2_clips = [
+            c for c in clips_payload
+            if isinstance(c, dict) and str(c.get("url_r2") or "").strip().lower().startswith(("http://", "https://"))
+        ]
+        if r2_clips:
+            from ..models import Clip as ClipR2
+
+            logger.info("[jobs] worker devolvió %s/%s clips con url_r2 (job=%s) — omitiendo render local", len(r2_clips), len(clips_payload), job_id)
+            clips_r2_to_create = []
+            for item in r2_clips:
+                url_r2 = str(item.get("url_r2") or "").strip()
+                title = item.get("titulo") or item.get("title") or item.get("titulo_sugerido") or item.get("name") or "Clip"
+                start = _parse_time_to_seconds(item.get("inicio", item.get("start_time", item.get("start", 0))))
+                end = _parse_time_to_seconds(item.get("fin", item.get("end_time", item.get("end", 0))))
+                if end <= start:
+                    end = start + 30.0
+                try:
+                    score_val = float(item["score"]) if item.get("score") is not None else None
+                except (TypeError, ValueError):
+                    score_val = None
+                tags_r2: dict = {"url_r2": url_r2, "_render": "runpod_r2", "has_ass": True}
+                if item.get("criterio_principal"):
+                    tags_r2["criterio_principal"] = str(item.get("criterio_principal"))
+                if item.get("hook_texto"):
+                    tags_r2["hook_texto"] = str(item.get("hook_texto"))
+                clips_r2_to_create.append(
+                    ClipR2(
+                        video_id=video.id,
+                        job_id=job_id,
+                        title=str(title)[:255],
+                        start_time=float(start),
+                        end_time=float(end),
+                        score=score_val,
+                        tags=tags_r2,
+                        storage_path=url_r2,
+                        status="ready",
+                    )
+                )
+
+            _cur_r2 = db.get(Job, job_id)
+            if _cur_r2 is None:
+                return
+            if isinstance(result, dict):
+                result["_source"] = "runpod_r2"
+                result["_r2_clip_count"] = len(clips_r2_to_create)
+                result["_render_stats"] = {"total": len(clips_payload), "runpod_r2": len(clips_r2_to_create)}
+            _cur_r2.result_metadata = result
+            _cur_r2.status = JobStatus.COMPLETED.value
+            _cur_r2.progress = 100
+            _cur_r2.error_message = None
+            for c in clips_r2_to_create:
+                db.add(c)
+            db.commit()
+            try:
+                sys.stdout.flush()
+            except Exception:
+                pass
+            logger.info("[jobs] job %s COMPLETED 100%% con %s clips del worker (URLs R2 persistidas, sin ffmpeg local)", job_id, len(clips_r2_to_create))
+            return
+
         # --- Issue #29: preparar segmentos y hooks para ASS + teaser — flujo obligatorio Claude sin fallback heurístico
         segments: list[dict] = []
         if ENABLE_ASS_HOOK:
