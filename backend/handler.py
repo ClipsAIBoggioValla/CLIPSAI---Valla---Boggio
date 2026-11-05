@@ -73,20 +73,14 @@ def _upload_to_r2(file_path: str, bucket: str, key: str) -> str:
         print(f"[R2 Upload] Subiendo {file_path} -> {bucket}/{key}")
         s3.upload_file(file_path, bucket, key)
         
-        # Construir URL pública
-        # Formato: https://<bucket>.<account>.r2.cloudflarestorage.com/<key>
-        # O usar endpoint_url si está configurado
-        if endpoint_url:
-            url = f"{endpoint_url.rstrip('/')}/{bucket}/{key}"
-        else:
-            # Fallback: construir URL estándar de R2
-            # El account ID debe estar en AWS_ACCOUNT_ID
-            account_id = os.getenv("AWS_ACCOUNT_ID", "").strip()
-            if account_id:
-                url = f"https://{bucket}.{account_id}.r2.cloudflarestorage.com/{key}"
-            else:
-                # Sin account ID, usar endpoint_url o fallar
-                raise RuntimeError("AWS_ACCOUNT_ID no configurado y AWS_ENDPOINT_URL vacío")
+        # Construir URL PÚBLICA vía custom domain del bucket.
+        # R2_PUBLIC_URL (ej: https://videos.clipsai.xyz o el bucket r2.dev para dev).
+        # El custom domain ya apunta al bucket: la key va SIN el nombre del bucket.
+        # Las URLs *.r2.cloudflarestorage.com son PRIVADAS (403 sin firma) — no se usan.
+        public_base_url = os.getenv("R2_PUBLIC_URL", "").strip().rstrip("/")
+        if not public_base_url:
+            public_base_url = "https://videos.clipsai.xyz"
+        url = f"{public_base_url}/{key.lstrip('/')}"
         
         print(f"[R2 Upload] ✓ Subido: {url}")
         return url
