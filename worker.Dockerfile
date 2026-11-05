@@ -11,8 +11,13 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 WORKDIR /app
 
-# Instalar curl si no está disponible
-RUN apt-get update && apt-get install -y --no-install-recommends curl \
+# Instalar curl + fuentes para libass: el ffmpeg estático renderiza ASS vía
+# fontconfig; sin fuentes .ttf instaladas los subtítulos/hook salen invisibles (rc=0).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl \
+        fonts-dejavu-core \
+        fontconfig \
+    && fc-cache -f \
     && rm -rf /var/lib/apt/lists/*
 
 # Descargar FFmpeg estático con todos los codecs (incluido libx264)
