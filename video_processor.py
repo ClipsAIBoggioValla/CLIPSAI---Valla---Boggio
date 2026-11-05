@@ -1,10 +1,20 @@
 """Procesamiento de clips verticales 9:16 con subtítulos y hook."""
 
+import logging
 import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import List, Dict, Any
+
+logger = logging.getLogger("video_processor")
+if not logger.handlers:
+    _handler = logging.StreamHandler(sys.stdout)
+    _handler.setLevel(logging.INFO)
+    _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+    logger.addHandler(_handler)
+logger.setLevel(logging.INFO)
 
 
 def generate_ass_from_segments(
@@ -99,6 +109,39 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         ass_content += f"Dialogue: 0,{start_h}:{start_m:02d}:{start_s:05.2f},{end_h}:{end_m:02d}:{end_s:05.2f},Default,,0,0,0,,{text}\n"
     
     Path(output_path).write_text(ass_content, encoding="utf-8")
+
+    # --- Diagnóstico ASS: validar estructura y volcar contenido (debug subs ausentes) ---
+    written = Path(output_path)
+    try:
+        size = written.stat().st_size if written.exists() else 0
+    except OSError:
+        size = -1
+    lines = ass_content.splitlines()
+    dialogue_lines = [l for l in lines if l.startswith("Dialogue:")]
+    hook_events = [l for l in dialogue_lines if ",Hook," in l]
+    default_events = [l for l in dialogue_lines if ",Default," in l]
+    has_script = "[Script Info]" in ass_content
+    has_styles = "[V4+ Styles]" in ass_content
+    has_events = "[Events]" in ass_content
+    logger.info(
+        "[video_processor] ASS generado: %s (%s bytes, %s líneas, %s Dialogue: hook=%s default=%s)",
+        output_path, size, len(lines), len(dialogue_lines), len(hook_events), len(default_events),
+    )
+    if size <= 0:
+        logger.warning("[video_processor] ERROR: ASS VACÍO o inexistente tras escritura: %s (size=%s)", output_path, size)
+    if not (has_script and has_styles and has_events):
+        logger.warning("[video_processor] ERROR: ASS sin estructura completa: ScriptInfo=%s V4Styles=%s Events=%s", has_script, has_styles, has_events)
+    if not dialogue_lines:
+        logger.warning("[video_processor] ERROR: ASS sin eventos Dialogue — ffmpeg quemará SIN subtítulos (segments fuera de ventana o vacío)")
+    if hook_text:
+        if hook_events:
+            logger.info("[video_processor] OK: Hook presente como evento estilo Hook: %s", hook_events[0][:140])
+        else:
+            logger.warning("[video_processor] ERROR: hook_text pedido ('%s') pero NO hay evento estilo Hook en [Events]", hook_text[:60])
+    logger.info("[video_processor] ---- %s | PRIMERAS 20 LINEAS ----", output_path)
+    for line in lines[:20]:
+        logger.info("[video_processor] ASS| %s", line)
+    logger.info("[video_processor] ---- FIN ASS ----")
     return output_path
 
 
@@ -134,10 +177,20 @@ def reframe_and_burn_subtitles(
     filters.append("setsar=1")
     
     # 3. Quemar subtítulos ASS si existe
-    if ass_file and os.path.exists(ass_file):
-        # Escapar path para ffmpeg (backslashes y comillas)
-        ass_escaped = ass_file.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
-        filters.append(f"ass={ass_escaped}")
+    if ass_file:
+        if os.path.exists(ass_file):
+            ass_size = os.path.getsize(ass_file)
+            # Escape ffmpeg: backslashes a /, y ':' / ',' (separadores de filtro)
+            # escapados con backslash. Sin comillas alrededor del path.
+            ass_escaped = (
+                ass_file.replace("\\", "/").replace(":", "\\:").replace(",", "\\,").replace("'", "\\'")
+            )
+            filters.append(f"ass={ass_escaped}")
+            logger.info("[video_processor] Filtro ASS OK: ass=%s (%s bytes)", ass_escaped, ass_size)
+            if ass_size == 0:
+                logger.warning("[video_processor] ERROR: ASS de 0 bytes — el clip saldrá SIN subtítulos: %s", ass_file)
+        else:
+            logger.warning("[video_processor] ERROR: ass_file indicado pero NO existe: %s — se quema SIN subtítulos", ass_file)
     
     # NOTA: sin drawtext — el ffmpeg estático de RunPod no tiene libfreetype
     # ("No such filter: 'drawtext'", rc=8). El hook se QUEMA VÍA ASS:
@@ -163,6 +216,11 @@ def reframe_and_burn_subtitles(
     
     print(f"[video_processor] Reframe vertical + subs + hook...")
     print(f"[video_processor] Filtros: {vf[:200]}...")
+    logger.info("[video_processor] Comando ffmpeg COMPLETO: %s", " ".join(command))
+    if "ass=" not in vf:
+        logger.warning("[video_processor] ERROR: Filtergraph SIN filtro ass — el clip saldrá SIN subtítulos")
+    else:
+        logger.info("[video_processor] Filtergraph incluye ass: OK")
     
     try:
         result = subprocess.run(
@@ -171,7 +229,11 @@ def reframe_and_burn_subtitles(
             text=True,
             timeout=timeout_seconds
         )
-        
+
+        # stderr SIEMPRE se loguea (no solo al fallar) para ver warnings de libass/ffmpeg
+        stderr_tail = (result.stderr or "")[-3000:]
+        logger.info("[video_processor] ffmpeg stderr (rc=%s):\n%s", result.returncode, stderr_tail if stderr_tail.strip() else "<vacío>")
+
         if result.returncode != 0:
             print(f"[video_processor] ffmpeg FAILED rc={result.returncode}")
             print(f"[video_processor] stderr: {result.stderr[-1000:]}")
