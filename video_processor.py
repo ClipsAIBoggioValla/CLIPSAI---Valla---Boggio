@@ -12,17 +12,22 @@ def generate_ass_from_segments(
     clip_start: float,
     clip_end: float,
     output_path: str,
-    title: str = "clipsai"
+    title: str = "clipsai",
+    hook_text: str | None = None
 ) -> str:
     """Genera archivo ASS desde segmentos de transcripción para un clip específico.
-    
+
+    El hook se integra como PRIMER evento con estilo "Hook" (texto grande arriba,
+    primeros 3s) — evita drawtext, que no existe en el ffmpeg estático de RunPod.
+
     Args:
         segments: Lista de segmentos con start, end, text
         clip_start: Inicio del clip en segundos
         clip_end: Fin del clip en segundos
         output_path: Ruta donde guardar el archivo ASS
         title: Título del video
-    
+        hook_text: Texto del hook para los primeros 3 segundos (opcional)
+
     Returns:
         Ruta del archivo ASS generado
     """
@@ -60,11 +65,26 @@ PlayResY: 1920
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Default,Arial,70,&H00FFFFFF,&H00000000,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,4,2,2,40,40,280,1
+Style: Hook,Arial,80,&H00FFFFFF,&H00000000,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,6,3,8,40,40,120,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-    
+
+    # 1) Hook como PRIMER evento (0-3s, estilo grande arriba). drawtext no: ffmpeg
+    # estático de RunPod carece de libfreetype.
+    if hook_text:
+        hook_clean = " ".join(str(hook_text).upper().split())
+        hook_clean = hook_clean.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
+        hook_clean = hook_clean[:100]
+        if hook_clean:
+            hook_dur = min(3.0, max(0.5, clip_end - clip_start))
+            eh = int(hook_dur // 3600)
+            em = int((hook_dur % 3600) // 60)
+            es = hook_dur % 60
+            ass_content += f"Dialogue: 0,0:00:00.00,{eh}:{em:02d}:{es:05.2f},Hook,,0,0,0,,{hook_clean}\n"
+
+    # 2) Subtítulos normales después, con su estilo Default (abajo, más chico)
     for seg in clipped:
         start_h = int(seg["start"] // 3600)
         start_m = int((seg["start"] % 3600) // 60)
@@ -95,8 +115,8 @@ def reframe_and_burn_subtitles(
     Args:
         input_video: Ruta del video horizontal de entrada
         output_video: Ruta del video vertical de salida
-        ass_file: Ruta del archivo ASS (opcional)
-        hook_text: Texto del hook para mostrar en primeros 3s (opcional)
+        ass_file: Ruta del archivo ASS (opcional) — ya incluye el hook como evento estilo "Hook"
+        hook_text: Sin efecto en este filtro (se integra en el ASS); se mantiene por compatibilidad de firma
         clip_start: Inicio del clip en segundos (para hook timing)
         timeout_seconds: Timeout de ffmpeg
     
@@ -119,9 +139,10 @@ def reframe_and_burn_subtitles(
         ass_escaped = ass_file.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
         filters.append(f"ass={ass_escaped}")
     
-    # NOTA: drawtext REMOVIDO — el ffmpeg estático de RunPod no tiene libfreetype
-    # (falla con "No such filter: 'drawtext'", rc=8). El hook_text se recibe pero
-    # no se usa; se agregará después vía ASS o recompilando ffmpeg.
+    # NOTA: sin drawtext — el ffmpeg estático de RunPod no tiene libfreetype
+    # ("No such filter: 'drawtext'", rc=8). El hook se QUEMA VÍA ASS:
+    # generate_ass_from_segments lo agrega como primer evento con estilo "Hook"
+    # (arriba, 0-3s). Este filtergraph solo usa crop+scale+setsar+ass.
 
     vf = ",".join(filters)
     
@@ -220,8 +241,8 @@ def process_clip_vertical(
             print(f"[video_processor] Corte FAILED")
             return False
         
-        # 2. Generar ASS
-        generate_ass_from_segments(segments, clip_start, clip_end, ass_file)
+        # 2. Generar ASS (incluye el hook como primer evento estilo Hook 0-3s)
+        generate_ass_from_segments(segments, clip_start, clip_end, ass_file, hook_text=hook_text)
         
         # 3. Reframe vertical + quemar subs + hook
         return reframe_and_burn_subtitles(
