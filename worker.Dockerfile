@@ -20,6 +20,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && fc-cache -f \
     && rm -rf /var/lib/apt/lists/*
 
+# Verificar que libass tendrá fuentes disponibles (sin fuentes los subs salen invisibles)
+RUN fc-list | grep -i "dejavu" || (echo "ERROR: fuentes DejaVu no instaladas — subs/hook invisibles" && exit 1)
+
 # Descargar FFmpeg estático con todos los codecs (incluido libx264)
 RUN curl -sSL https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz -o ffmpeg-release.tar.xz \
     && tar -xf ffmpeg-release.tar.xz \
