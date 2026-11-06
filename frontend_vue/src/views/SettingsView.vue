@@ -1,3 +1,38 @@
+<template>
+  <div class="max-w-4xl mx-auto">
+    <div class="page-header" style="margin-bottom: 2rem">
+      <div class="flex items-center gap-4">
+        <span class="inline-flex h-12 w-12 items-center justify-center rounded-xl shrink-0 bg-[#B4F105] text-[#080C14] border border-[rgba(180,241,5,0.3)] shadow-[0_0_16px_rgba(180,241,5,0.35)]"><i class="bi bi-gear" style="font-size: 1.35rem" /></span>
+        <Avatar :name="fullName || undefined" :email="email" :size="56" />
+        <div>
+          <div class="flex flex-wrap items-center gap-3 mb-1">
+            <h1 class="page-title" style="margin-bottom: 0; font-size: 2.35rem; font-weight: 800; letter-spacing: -0.03em; line-height: 1.1; color: #F1F5F9">Ajustes</h1>
+            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-[#B4F105] text-[#080C14] shadow-[0_0_12px_rgba(180,241,5,0.25)]"><i class="bi bi-shield-check" /> Seguro</span>
+          </div>
+          <p class="page-subtitle" style="margin-bottom: 0; font-size: 0.98rem; font-weight: 500; color: #94A3B8; line-height: 1.6">Gestiona tu perfil y preferencias. Sesión activa como {{ email }}</p>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="loadingProfile" class="flex items-center justify-center" style="min-height: 60vh">
+      <span class="h-8 w-8 animate-spin rounded-full border-2 border-[var(--brand-forest-medium)]/30 border-t-[var(--brand-forest-medium)]" />
+    </div>
+
+    <SettingsForms
+      v-else
+      :full-name="fullName" :email="email" :avatar-url="avatarUrl" :loading-profile="loadingProfile"
+      :profile-error="profileError" :saving-profile="savingProfile" :profile-toast="profileToast"
+      :current-password="currentPassword" :new-password="newPassword" :confirm-password="confirmPassword"
+      :saving-password="savingPassword" :password-error="passwordError" :password-toast="passwordToast"
+      :theme="theme" :export-format="exportFormat" :pref-toast="prefToast"
+      @save-profile="handleSaveProfile" @change-password="handleChangePassword" @save-preferences="handleSavePreferences"
+      @update:full-name="fullName = $event" @update:email="email = $event" @update:avatar-url="avatarUrl = $event"
+      @update:current-password="currentPassword = $event" @update:new-password="newPassword = $event" @update:confirm-password="confirmPassword = $event"
+      @update:theme="theme = $event" @update:export-format="exportFormat = $event"
+    />
+  </div>
+</template>
+
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
@@ -5,6 +40,7 @@ import { useAuthStore } from '@/stores/auth'
 import { userService } from '@/api/services'
 import { ApiError } from '@/types/api'
 import Avatar from '@/components/Avatar.vue'
+import SettingsForms from '@/components/settings/SettingsForms.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -94,102 +130,5 @@ async function handleChangePassword() {
   } finally { savingPassword.value = false }
 }
 </script>
-
-<template>
-  <div class="max-w-4xl mx-auto">
-    <div class="page-header" style="margin-bottom: 2rem">
-      <div class="flex items-center gap-4">
-        <span class="inline-flex h-12 w-12 items-center justify-center rounded-xl shrink-0 bg-[#B4F105] text-[#080C14] border border-[rgba(180,241,5,0.3)] shadow-[0_0_16px_rgba(180,241,5,0.35)]"><i class="bi bi-gear" style="font-size: 1.35rem" /></span>
-        <Avatar :name="fullName || undefined" :email="email" :size="56" />
-        <div>
-          <div class="flex flex-wrap items-center gap-3 mb-1">
-            <h1 class="page-title" style="margin-bottom: 0; font-size: 2.35rem; font-weight: 800; letter-spacing: -0.03em; line-height: 1.1; color: #F1F5F9">Ajustes</h1>
-            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-[#B4F105] text-[#080C14] shadow-[0_0_12px_rgba(180,241,5,0.25)]"><i class="bi bi-shield-check" /> Seguro</span>
-          </div>
-          <p class="page-subtitle" style="margin-bottom: 0; font-size: 0.98rem; font-weight: 500; color: #94A3B8; line-height: 1.6">Gestiona tu perfil y preferencias. Sesión activa como {{ email }}</p>
-        </div>
-      </div>
-    </div>
-
-    <div v-if="loadingProfile" class="flex items-center justify-center" style="min-height: 60vh">
-      <span class="h-8 w-8 animate-spin rounded-full border-2 border-[var(--brand-forest-medium)]/30 border-t-[var(--brand-forest-medium)]" />
-    </div>
-
-    <template v-else>
-      <form class="card-spark mb-4" @submit.prevent="handleSaveProfile">
-        <h2 class="card-title mb-4 flex items-center gap-2"><Avatar :name="fullName || undefined" :email="email" :size="24" /> Editar Perfil</h2>
-        <div v-if="profileError" role="alert" class="alert-custom alert-custom-danger">
-          <i class="bi bi-exclamation-triangle-fill alert-custom-icon" />
-          <div class="alert-custom-content">{{ profileError }}</div>
-        </div>
-        <div v-if="profileToast" role="status" class="alert-custom alert-custom-success">
-          <i class="bi bi-check-circle-fill alert-custom-icon" />
-          <div class="alert-custom-content">{{ profileToast }}</div>
-        </div>
-        <div class="mb-3">
-          <label class="form-label-custom">Nombre de usuario / Nombre completo</label>
-          <input v-model="fullName" placeholder="Tu nombre" class="form-control-custom" />
-        </div>
-        <div class="mb-3">
-          <label class="form-label-custom">Correo electrónico</label>
-          <input v-model="email" placeholder="email@ejemplo.com" class="form-control-custom" />
-        </div>
-        <div class="mb-4">
-          <label class="form-label-custom">Avatar URL</label>
-          <input v-model="avatarUrl" placeholder="https://..." class="form-control-custom" />
-        </div>
-        <button type="submit" :disabled="savingProfile" class="btn-custom btn-custom-primary">{{ savingProfile ? 'Guardando...' : 'Guardar Perfil' }}</button>
-      </form>
-
-      <form class="card-spark mb-4" @submit.prevent="handleChangePassword">
-        <h2 class="card-title mb-4">Seguridad y Contraseña</h2>
-        <div v-if="passwordError" role="alert" class="alert-custom alert-custom-danger">
-          <i class="bi bi-exclamation-triangle-fill alert-custom-icon" />
-          <div class="alert-custom-content">{{ passwordError }}</div>
-        </div>
-        <div v-if="passwordToast" role="status" class="alert-custom alert-custom-success">
-          <i class="bi bi-check-circle-fill alert-custom-icon" />
-          <div class="alert-custom-content">{{ passwordToast }}</div>
-        </div>
-        <div class="mb-3">
-          <label class="form-label-custom">Contraseña Actual</label>
-          <input v-model="currentPassword" type="password" class="form-control-custom" />
-          <div v-if="passwordError === 'La contraseña actual es incorrecta'" class="form-feedback-custom invalid-custom">La contraseña actual es incorrecta</div>
-        </div>
-        <div class="mb-3">
-          <label class="form-label-custom">Nueva Contraseña</label>
-          <input v-model="newPassword" type="password" placeholder="Mínimo 8 caracteres" class="form-control-custom" />
-        </div>
-        <div class="mb-4">
-          <label class="form-label-custom">Confirmar Nueva Contraseña</label>
-          <input v-model="confirmPassword" type="password" class="form-control-custom" />
-        </div>
-        <button type="submit" :disabled="savingPassword" class="btn-custom btn-custom-primary">{{ savingPassword ? 'Actualizando...' : 'Cambiar Contraseña' }}</button>
-      </form>
-
-      <form class="card-spark" @submit.prevent="handleSavePreferences">
-        <h2 class="card-title mb-4">Preferencias de la app</h2>
-        <div v-if="prefToast" role="status" class="alert-custom alert-custom-success">
-          <i class="bi bi-check-circle-fill alert-custom-icon" />
-          <div class="alert-custom-content">Ajustes actualizados correctamente</div>
-        </div>
-        <div class="mb-3">
-          <label class="form-label-custom">Tema Claro/Oscuro</label>
-          <select v-model="theme" class="form-select-custom">
-            <option value="light">Claro</option>
-            <option value="dark">Oscuro</option>
-            <option value="system">Sistema</option>
-          </select>
-        </div>
-        <div class="mb-4">
-          <label class="form-label-custom">Formato preferido de exportación CSV/JSON</label>
-          <select v-model="exportFormat" class="form-select-custom">
-            <option value="csv">CSV (.csv)</option>
-            <option value="json">JSON (.json)</option>
-          </select>
-        </div>
-        <button type="submit" class="btn-custom btn-custom-primary">Guardar Cambios</button>
-      </form>
-    </template>
-  </div>
-</template>
+EOF
+echo "written ($(wc -l < frontend_vue/src/views/SettingsView.vue) lines)"

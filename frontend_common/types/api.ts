@@ -1,0 +1,262 @@
+export interface UserRegister {
+  email: string
+  password: string
+  full_name?: string
+}
+
+export interface UserLogin {
+  email: string
+  password: string
+}
+
+export interface AuthToken {
+  access_token: string
+  token_type: string
+}
+
+export interface AuthUser {
+  id: string
+  email: string
+  full_name: string | null
+  avatar_url?: string | null
+  theme_preference?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface VideoUploadResponse {
+  id: string
+  filename: string
+  title: string
+  created_at: string
+}
+
+export interface RunPodProcessedClip {
+  title?: string
+  titulo?: string
+  titulo_sugerido?: string
+  start_time?: number | string
+  end_time?: number | string
+  inicio?: number | string
+  fin?: number | string
+  score?: number
+  [key: string]: unknown
+}
+
+export interface RunPodProcessResponse {
+  status?: string
+  video_id?: string
+  engine?: string
+  clip_count?: number
+  clips: RunPodProcessedClip[]
+  [key: string]: unknown
+}
+
+export type JobStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED'
+
+export interface Clip {
+  titulo: string
+  inicio: string
+  fin: string
+  score?: number
+  transcript_preview?: string
+}
+
+export interface JobResultMetadata {
+  clips?: Clip[]
+  video?: string
+  engine?: string
+  [key: string]: unknown
+}
+
+export type Job = JobResponse
+
+export interface JobResponse {
+  id: string
+  job_id: string
+  video_id: string
+  status: JobStatus
+  progress: number
+  error_message: string | null
+  result_metadata?: JobResultMetadata | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ClipResponse {
+  id: string
+  video_id: string | null
+  job_id: string
+  title: string | null
+  start_time: number
+  end_time: number
+  score: number | null
+  tags: Record<string, unknown> | string[] | null
+  storage_path: string | null
+  file_path: string | null
+  stream_url: string | null
+  duration: number | null
+  has_ass: boolean
+  has_hook: boolean
+  status: string
+  published_platform: string | null
+  social_post_id: string | null
+  social_post_url: string | null
+  published_at: string | null
+  publication_status: string | null
+  social_network: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ReRenderRequest {
+  enable_ass: boolean
+  enable_hook: boolean
+}
+
+export interface ReRenderResponse {
+  detail: string
+  clip_id: string
+  status: string
+  enable_ass: boolean
+  enable_hook: boolean
+}
+
+export type PublishPlatform = 'tiktok' | 'instagram' | 'youtube' | 'webhook'
+
+export interface PublishClipPayload {
+  platform: PublishPlatform
+  caption?: string | null
+  webhook_override_url?: string | null
+}
+
+export interface PublishClipResponse {
+  detail: string
+  clip_id: string
+  status: string
+  platform: string
+}
+
+export interface ClipUpdate {
+  title?: string
+  tags?: string[]
+}
+
+export interface ApiErrorDetail {
+  detail: string | ValidationErrorDetail[]
+}
+
+export interface ValidationErrorDetail {
+  loc: (string | number)[]
+  msg: string
+  type: string
+}
+
+export type HttpErrorCode = 400 | 401 | 403 | 404 | 409 | 422 | 500
+
+export class ApiError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly detail: string,
+    public readonly raw?: ApiErrorDetail,
+  ) {
+    super(detail)
+    this.name = 'ApiError'
+  }
+}
+
+export interface ScoreDistributionItem {
+  range: string
+  count: number
+  label: string
+}
+
+export interface RecentJobSummary {
+  id: string
+  status: string
+  created_at: string
+}
+
+export interface StatsSummary {
+  total_videos: number
+  total_clips: number
+  avg_score: number
+  estimated_time_saved_minutes: number
+  score_distribution: ScoreDistributionItem[]
+  recent_job: RecentJobSummary | null
+}
+
+export interface RecentActivityItem {
+  date: string
+  jobs: number
+  clips: number
+  minutes_processed: number
+}
+
+export interface MetricsResponse {
+  total_jobs: number
+  total_clips: number
+  total_minutes_processed: number
+  time_saved_hours: number
+  platform_distribution: Record<string, number>
+  recent_activity: RecentActivityItem[]
+}
+
+export interface ClipListItem {
+  id: string
+  job_id: string
+  title: string | null
+  score: number | null
+  start_time: number
+  end_time: number
+  transcript: string | null
+  status?: string | null
+  published_platform?: string | null
+  social_post_url?: string | null
+  published_at?: string | null
+  created_at: string
+  updated_at?: string | null
+  file_path: string | null
+  stream_url: string | null
+  duration: number | null
+  has_ass: boolean
+  has_hook: boolean
+  tags?: Record<string, unknown> | string[] | null
+}
+
+export interface ClipListResponse {
+  items: ClipListItem[]
+  total: number
+  page: number
+  limit: number
+  total_pages: number
+}
+
+export type ClipSortBy = 'created_at_desc' | 'created_at_asc' | 'score_desc' | 'score_asc'
+
+export interface ClipListParams {
+  q?: string
+  min_score?: number
+  sort_by?: ClipSortBy
+  page?: number
+  limit?: number
+  video_id?: string
+  job_id?: string
+  status?: string
+}
+
+export interface UserProfile {
+  id: string
+  email: string
+  full_name: string | null
+  avatar_url?: string | null
+  theme_preference?: string
+  created_at: string
+  updated_at?: string
+}
+
+export type ThemePreference = 'dark' | 'light' | 'system'
+
+export function getJobId(job: JobResponse): string {
+  return job.job_id ?? job.id
+}

@@ -8,6 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from fastapi.responses import StreamingResponse
 
 from ..deps import CurrentUser, DbSession
+from ._clip_common import assert_clip_ownership as _assert_ownership, get_clip_or_404 as _get_clip_or_404
 from ..models import Clip, Video
 from ..schemas import PublishClipRequest, PublishClipResponse
 
@@ -16,27 +17,6 @@ router = APIRouter(prefix="/clips", tags=["clips"])
 ALLOWED_PLATFORMS = {"tiktok", "instagram", "youtube", "webhook"}
 
 
-def _get_clip_or_404(db: DbSession, clip_id: uuid.UUID) -> Clip:
-    clip = db.get(Clip, clip_id)
-    if clip is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clip no encontrado")
-    return clip
-
-
-def _assert_ownership(db: DbSession, clip: Clip, current_user) -> None:
-    video = None
-    if clip.video_id is not None:
-        video = db.get(Video, clip.video_id)
-    if video is None and clip.job_id is not None:
-        from ..models import Job
-
-        job = db.get(Job, clip.job_id)
-        if job is not None:
-            video = db.get(Video, job.video_id)
-    if video is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clip no encontrado")
-    if video.user_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado para este clip")
 
 
 @router.post(

@@ -1,10 +1,9 @@
 # Spark Admin — Referencia de Diseño
 
-> Extraído de `spark-admin-1.0.0/` (template Bootstrap 5). **No es código del proyecto**: resumen para que `frontend_react` y `frontend_vue` compartan tokens. No se modificó ningún componente.
+> Tokens extraídos del template Spark Admin (Bootstrap 5). **El template completo (`spark-admin-1.0.0/`, 2.1 MB) se eliminó del repo en el Issue 42 (deduplicación) porque era un vendored de referencia no referenciado por código.** Solo quedan los tokens resumidos en este archivo.
 
 Archivos leídos:
-- `spark-admin-1.0.0/assets/css/main.css` (~3187 líneas, 24 secciones)
-- `spark-admin-1.0.0/index.html`, `tables-basic.html`, `ui-buttons.html`, `ui-forms.html`, `page-login.html`, `page-404.html`
+- (plantilla eliminada; los tokens ya están resumidos abajo)
 
 ---
 

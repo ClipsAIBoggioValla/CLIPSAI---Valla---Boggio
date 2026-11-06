@@ -256,7 +256,6 @@ Video (.mp4/.mov/.avi) + Transcripción (.txt/.srt)
 │
 ├── storage/                     # clips renderizados + uploads + sample_test.mp4
 ├── gaming_procesado/            # salida de ejemplo (audio.json, momentos_virales.json, clips/)
-├── spark-admin-1.0.0/           # plantilla visual de referencia
 ├── scripts/                     # verify-auth.sh, verify-db.sh, verify-issue4/5.sh,
 │                                # test_hooks.py, test_subtitles.py
 ├── tests/                       # fixtures
@@ -542,7 +541,7 @@ Express 401.
 
 ## 11. Tema y diseño Cyber-Tech Dark
 
-`spark.css` unificado en ambos frontends (`frontend_react/src/styles/` y `frontend_vue/src/assets/`), derivado de la plantilla `spark-admin-1.0.0` (tokens en `docs/design-reference.md`).
+`spark.css` unificado en ambos frontends (`frontend_react/src/styles/` y `frontend_vue/src/assets/`), derivado de la plantilla Spark Admin (tokens ya extraídos en `docs/design-reference.md`).
 
 - **Tokens:** `--bg-app:#0B0F17`, `--bg-sidebar:#080C14`, `--bg-card:#121824`, `--border-subtle:rgba(255,255,255,0.08)`, `--text-primary:#F1F5F9`, `--text-secondary:#94A3B8`, `--brand-lime:#B4F105`, glow `0 0 20px rgba(180,241,5,0.35)`.
 - **Sidebar:** link active `rgba(180,241,5,0.12)` + border + glow.
