@@ -320,6 +320,40 @@ def tiktok_connect(current_user: CurrentUser):
 
 
 @router.get("/tiktok/callback", summary="Callback OAuth2 de TikTok")
+def _decode_tiktok_state(state: str | None):
+    """Decodifica el state de TikTok y retorna (user_id, code_verifier)."""
+    user_id: str | None = None
+    code_verifier: str | None = None
+    if not state:
+        return user_id, code_verifier
+    import base64 as _b64
+    import json as _json
+    padded = state + "=" * (-len(state) % 4)
+    try:
+        decoded = _b64.urlsafe_b64decode(padded.encode()).decode()
+        data = _json.loads(decoded)
+        if isinstance(data, dict):
+            user_id = str(data.get("user_id")) if data.get("user_id") else None
+            code_verifier = str(data.get("code_verifier")) if data.get("code_verifier") else None
+    except Exception:
+        try:
+            user_id = tt_decode_state(state)  # type: ignore
+        except Exception:
+            try:
+                user_id = yt_decode_state(state)
+            except Exception:
+                user_id = None
+    if not code_verifier:
+        try:
+            padded2 = state + "=" * (-len(state) % 4)
+            d2 = _json.loads(_b64.urlsafe_b64decode(padded2.encode()).decode())
+            if isinstance(d2, dict) and d2.get("code_verifier"):
+                code_verifier = str(d2.get("code_verifier"))
+        except Exception:
+            pass
+    return user_id, code_verifier
+
+
 def tiktok_callback(
     request: Request,
     db: DbSession,
@@ -348,32 +382,7 @@ def tiktok_callback(
         import base64 as _b64
         import json as _json
 
-        user_id: str | None = None
-        code_verifier: str | None = None
-        if state:
-            padded = state + "=" * (-len(state) % 4)
-            try:
-                decoded = _b64.urlsafe_b64decode(padded.encode()).decode()
-                data = _json.loads(decoded)
-                if isinstance(data, dict):
-                    user_id = str(data.get("user_id")) if data.get("user_id") else None
-                    code_verifier = str(data.get("code_verifier")) if data.get("code_verifier") else None
-            except Exception:
-                try:
-                    user_id = tt_decode_state(state)  # type: ignore
-                except Exception:
-                    try:
-                        user_id = yt_decode_state(state)
-                    except Exception:
-                        user_id = None
-            if not code_verifier and state:
-                try:
-                    padded2 = state + "=" * (-len(state) % 4)
-                    d2 = _json.loads(_b64.urlsafe_b64decode(padded2.encode()).decode())
-                    if isinstance(d2, dict) and d2.get("code_verifier"):
-                        code_verifier = str(d2.get("code_verifier"))
-                except Exception:
-                    pass
+        user_id, code_verifier = _decode_tiktok_state(state)
 
         if not user_id:
             raise ValueError("invalid_state")

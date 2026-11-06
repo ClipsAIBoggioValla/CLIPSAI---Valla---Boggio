@@ -529,6 +529,31 @@ def llamar_openai_compatible(prompt: str) -> str:
         raise ValueError(f"Respuesta inválida de la API: {e}")
 
 
+def _llamar_llm_con_fallback(prompt: str, proveedor: str) -> str:
+    """Llama al LLM elegido y aplica fallback si falla."""
+    try:
+        if ANTHROPIC_API_KEY:
+            return llamar_claude(prompt)
+        return llamar_openai_compatible(prompt)
+    except Exception:
+        logger.exception("Fallo llamada LLM proveedor=%s, intentando fallback alternativo", proveedor)
+        fallback = None
+        if ANTHROPIC_API_KEY:
+            try:
+                if proveedor != "Claude (Anthropic)":
+                    fallback = llamar_claude(prompt)
+            except Exception:
+                logger.exception("Fallback Anthropic también falló")
+        if fallback is None and (OPENROUTER_API_KEY or OPENAI_API_KEY or os.getenv("DEEPSEEK_API_KEY", "")):
+            try:
+                fallback = llamar_openai_compatible(prompt)
+            except Exception:
+                logger.exception("Fallback OpenAI/OpenRouter/DeepSeek falló")
+        if fallback is not None:
+            return fallback
+        raise
+
+
 def obtener_clips_ia(transcripcion: str, datos_audio: List[Dict], datos_enriquecidos: Dict = None) -> List[Dict]:
     """Envía datos a la IA y retorna los clips detectados. Fallback robusto con logger."""
     has_anthropic = bool(ANTHROPIC_API_KEY)
@@ -557,31 +582,8 @@ def obtener_clips_ia(transcripcion: str, datos_audio: List[Dict], datos_enriquec
 
     prompt = construir_prompt(transcripcion, datos_audio, datos_enriquecidos)
 
-    try:
-        if ANTHROPIC_API_KEY:
-            contenido = llamar_claude(prompt)
-        else:
-            contenido = llamar_openai_compatible(prompt)
-    except Exception:
-        logger.exception("Fallo llamada LLM proveedor=%s, intentando fallback alternativo", proveedor)
-        fallback = None
-        if ANTHROPIC_API_KEY:
-            try:
-                fallback = llamar_claude(prompt) if proveedor != "Claude (Anthropic)" else None
-            except Exception:
-                logger.exception("Fallback Anthropic también falló")
-        if fallback is None and (OPENROUTER_API_KEY or OPENAI_API_KEY or has_deepseek):
-            try:
-                contenido = llamar_openai_compatible(prompt)
-                fallback = contenido
-            except Exception:
-                logger.exception("Fallback OpenAI/OpenRouter/DeepSeek falló")
-        if fallback is not None:
-            contenido = fallback
-        else:
-            raise
+    contenido = _llamar_llm_con_fallback(prompt, proveedor)
 
-    
     json_match = re.search(r'\[[\s\S]*\]', contenido)
     if not json_match:
         raise ValueError("No se encontró JSON válido en la respuesta")

@@ -63,7 +63,7 @@ async function runClipEngine(videoPath: string, transcriptionPath: string): Prom
     throw new Error(`Transcripción no encontrada en disco: ${transcriptionPath}`)
   }
   const provider = getProvider()
-  console.log(`[engine:express] provider=${provider} ANTHROPIC=${!!process.env.ANTHROPIC_API_KEY} OPENAI=${!!process.env.OPENAI_API_KEY} OPENROUTER=${!!process.env.OPENROUTER_API_KEY}`)
+  console.info(`[engine:express] provider=${provider} ANTHROPIC=${!!process.env.ANTHROPIC_API_KEY} OPENAI=${!!process.env.OPENAI_API_KEY} OPENROUTER=${!!process.env.OPENROUTER_API_KEY}`)
   // Try real Python engine via child_process (soporta ANTHROPIC_API_KEY/OPENAI_API_KEY/OPENROUTER_API_KEY/DEEPSEEK)
   try {
     const { spawnSync } = await import('child_process')
@@ -81,7 +81,7 @@ async function runClipEngine(videoPath: string, transcriptionPath: string): Prom
             throw new Error(parsed.error || 'engine falló')
           }
           if (parsed?.clips && Array.isArray(parsed.clips) && parsed.clips.length > 0) {
-            console.log(`[engine:express] engine real OK ${parsed.clips.length} clips`)
+            console.info(`[engine:express] engine real OK ${parsed.clips.length} clips`)
             return { clips: parsed.clips, engine: 'real', provider }
           }
           if (parsed?.clips) return { clips: parsed.clips, engine: 'real', provider }
@@ -106,7 +106,7 @@ async function runClipEngine(videoPath: string, transcriptionPath: string): Prom
   // Intento directo Anthropic/OpenRouter si python falló y hay key — log con traceback
   if (provider !== 'none') {
     try {
-      console.log(`[engine:express] intento LLM directo provider=${provider} no implementado full`)
+      console.info(`[engine:express] intento LLM directo provider=${provider} no implementado full`)
     } catch (e) {
       console.error('[engine:express] LLM directo fallo', e, e instanceof Error ? e.stack : '')
     }
@@ -125,6 +125,23 @@ function buildFallback(_videoId: string, _preview: string): Record<string, unkno
  * Exportado para que `routes/videos.ts` pueda lanzar el job del video de
  * muestra (`POST /videos/sample`) en background, igual que FastAPI.
  */
+function buildJobErrorMessage(err: unknown, jobId: string, stack: string): string {
+  let rawMsg = err instanceof Error ? String(err.message).trim() : String(err).trim()
+  let descriptive = rawMsg
+  if (!rawMsg || rawMsg === '4' || rawMsg.length <= 4) {
+    descriptive = `${err instanceof Error ? err.name : 'Error'}: ${rawMsg || 'error sin mensaje'} — Fallo en pipeline Job ${jobId}. Posibles causas: segments vacío (Whisper sin audio), filepath no existe, o FFmpeg args inválidos. Stack: ${stack.slice(0, 1500)}`
+  } else {
+    descriptive = `${err instanceof Error ? err.name + ': ' : ''}${rawMsg}${stack ? `\n${stack.slice(0, 1200)}` : ''}`
+  }
+  if (stack.includes('segments') && (stack.includes('RangeError') || stack.includes('index') || rawMsg.includes('index'))) {
+    descriptive = `No se detectaron segmentos de audio suficientes en el video — Whisper devolvió lista vacía. Job ${jobId}: ${rawMsg}${stack ? `\n${stack.slice(0, 1200)}` : ''}`
+  }
+  if (rawMsg.includes('0 clips') || rawMsg.includes('no devolvió clips')) {
+    descriptive = `No se detectaron segmentos de audio suficientes en el video — engine devolvió 0 clips. Job ${jobId}: verificar transcripción y audio. ${rawMsg}`
+  }
+  return descriptive
+}
+
 export async function runJob(jobId: string): Promise<void> {
   const client = await pool.connect()
   try {
@@ -176,25 +193,12 @@ export async function runJob(jobId: string): Promise<void> {
         [videoId, jobId, String(title).slice(0, 255), start, end, score, tags ? JSON.stringify(tags) : null, storage, 'ready']
       )
     }
-    console.log(`[jobs:express] job ${jobId} completado 100% real ${clipsPayload.length} clips`)
+    console.info(`[jobs:express] job ${jobId} completado 100% real ${clipsPayload.length} clips`)
   } catch (err: unknown) {
     // FIX: Capturar e imprimir Traceback completo en lugar de solo str(err) == "4"
     const stack = err instanceof Error ? err.stack ?? '' : ''
     console.error(`[jobs:express] fallo irrecuperable job=${jobId} — modo 100% real sin fallback`, err, stack ? `\nStack: ${stack}` : '')
-    let rawMsg = err instanceof Error ? String(err.message).trim() : String(err).trim()
-    let descriptive = rawMsg
-    if (!rawMsg || rawMsg === '4' || rawMsg.length <= 4) {
-      descriptive = `${err instanceof Error ? err.name : 'Error'}: ${rawMsg || 'error sin mensaje'} — Fallo en pipeline Job ${jobId}. Posibles causas: segments vacío (Whisper sin audio), filepath no existe, o FFmpeg args inválidos. Stack: ${stack.slice(0,1500)}`
-    } else {
-      descriptive = `${err instanceof Error ? err.name + ': ' : ''}${rawMsg}${stack ? `\n${stack.slice(0,1200)}` : ''}`
-    }
-    if (stack.includes('segments') && (stack.includes('RangeError') || stack.includes('index') || rawMsg.includes('index'))) {
-      descriptive = `No se detectaron segmentos de audio suficientes en el video — Whisper devolvió lista vacía. Job ${jobId}: ${rawMsg}${stack ? `\n${stack.slice(0,1200)}` : ''}`
-    }
-    // Validación de arrays vacíos: mensaje descriptivo si clips vacíos
-    if (rawMsg.includes('0 clips') || rawMsg.includes('no devolvió clips')) {
-      descriptive = `No se detectaron segmentos de audio suficientes en el video — engine devolvió 0 clips. Job ${jobId}: verificar transcripción y audio. ${rawMsg}`
-    }
+    const descriptive = buildJobErrorMessage(err, jobId, stack)
     try {
       const tbMeta = JSON.stringify({ error: descriptive.slice(0,2000), error_type: err instanceof Error ? err.name : 'Unknown', traceback: stack.slice(0,3000), engine: 'real', failed: true })
       await pool.query("UPDATE jobs SET status = 'failed', error_message = $1, result_metadata = $2::jsonb, updated_at = NOW() WHERE id = $3", [descriptive.slice(0, 2000), tbMeta, jobId])

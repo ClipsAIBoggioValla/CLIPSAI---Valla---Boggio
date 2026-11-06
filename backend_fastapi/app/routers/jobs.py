@@ -219,9 +219,6 @@ def _detect_hooks_for_segments(segments: list[dict], video: Video) -> list[dict]
     if not segments:
         logger.warning("[jobs] _detect_hooks_for_segments: segments vacío — no se generan hooks")
         return []
-    if len(segments) == 0:
-        logger.warning("[jobs] _detect_hooks_for_segments: len(segments)==0 — omitiendo hook detection")
-        return []
     try:
         from ..services.hook_service import detect_hooks
 
@@ -512,6 +509,91 @@ def _fallback_result(video: Video | None) -> dict:  # type: ignore[no-redef]
     raise RuntimeError("Modo fallback deshabilitado — se requiere procesamiento real (Whisper + FFmpeg + LLM). Verificar video/transcripción y claves LLM.")
 
 
+def _validate_job_video_and_transcription(video: Video) -> tuple[str, str, bool]:
+    """Valida el archivo de video y resuelve la transcripción. Retorna (video_path_str, transcription_path_str, has_transcript_text)."""
+    video_path_str = str(video.filepath or "").strip()
+    if not video_path_str:
+        raise FileNotFoundError("video.filepath está vacío en BD — no se puede procesar")
+    if not os.path.exists(video_path_str):
+        raise FileNotFoundError(f"Archivo de video no existe en disco: {video_path_str}")
+    if not Path(video_path_str).is_file():
+        raise FileNotFoundError(f"Video no es archivo regular: {video_path_str}")
+    try:
+        if Path(video_path_str).stat().st_size == 0:
+            raise RuntimeError(f"Video vacío (0 bytes): {video_path_str}")
+    except FileNotFoundError:
+        raise
+
+    transcription_path_str = str(video.transcription_filepath or "").strip()
+    has_transcript_text = bool(video.transcript and video.transcript.strip())
+    if not transcription_path_str and not has_transcript_text:
+        logger.warning("[jobs] video %s sin transcription_filepath ni transcript — intentando Whisper como fallback", video.id)
+    elif transcription_path_str and not os.path.exists(transcription_path_str):
+        logger.warning("[jobs] transcription_filepath no existe: %s — se usará transcript en BD si existe (len=%s)", transcription_path_str, len(video.transcript or ""))
+        if not has_transcript_text:
+            raise FileNotFoundError(f"Transcripción no encontrada ni en disco ni en BD: {transcription_path_str}")
+        transcription_path_str = ""
+    return video_path_str, transcription_path_str, has_transcript_text
+
+
+def _persist_transcription_diagnosis(db, job, job_id, has_transcript_text, transcription_path_str):
+    """Persiste progress segun si hay transcripcion previa o se usara Whisper."""
+    transcript_data = has_transcript_text
+    transcription_filepath = transcription_path_str
+    if transcript_data or transcription_filepath:
+        logger.info(f"[JOB {job_id}] Transcripción provista por el usuario. Omitiendo Whisper y avanzando a 35%.")
+        try:
+            cur_diag = db.get(Job, job_id)
+            if cur_diag is not None:
+                _set_progress(db, cur_diag, 35)
+                job = cur_diag
+        except Exception as _diag_e:
+            logger.warning(f"[JOB {job_id}] No se pudo persistir progress 35% tras diagnóstico transcripción: {_diag_e}")
+    else:
+        logger.warning(f"[JOB {job_id}] No se detectó transcripción previa. Ejecutando Whisper como fallback.")
+        try:
+            cur_diag2 = db.get(Job, job_id)
+            if cur_diag2 is not None:
+                _set_progress(db, cur_diag2, 10)
+                job = cur_diag2
+        except Exception as _diag_e2:
+            logger.warning(f"[JOB {job_id}] No se pudo persistir progress 10% tras diagnóstico transcripción: {_diag_e2}")
+    return job
+
+
+def _log_claude_config():
+    """Verifica y registra si ANTHROPIC_API_KEY está configurada."""
+    try:
+        _claude_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+        if not _claude_key:
+            try:
+                from ..config import get_settings
+                _claude_key = (get_settings().anthropic_api_key or "").strip()
+            except Exception:
+                _claude_key = ""
+        if _claude_key:
+            logger.info("[jobs] ANTHROPIC_API_KEY presente (prefijo %s...), modelo=%s — se usará Claude para selección semántica", _claude_key[:10], os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5-5"))
+        else:
+            logger.warning("[jobs] ANTHROPIC_API_KEY no configurada — se usará heurística nativa (revisar backend_fastapi/app/config.py y docker-compose.yml)")
+    except Exception:
+        pass
+
+
+def _ensure_clips_payload(clips_payload, job_id, video, segments_available):
+    """Lanza RuntimeError descriptivo si el engine no devolvió clips."""
+    if clips_payload:
+        return
+    segs_dbg = segments_available if segments_available is not None else "N/A (antes de ASS/Hook)"
+    raise RuntimeError(
+        f"El engine real no devolvió clips (0 clips). "
+        f"Posibles causas: transcripción vacía o sin segmentos detectables, "
+        f"Whisper no generó segmentos (verificar audio/idioma), "
+        f"LLM sin respuesta o filtrado por score. "
+        f"Debug: clips_payload vacío, job={job_id}, video={video.id}, segments_detectados={segs_dbg}. "
+        f"Revisar logs whisper/LLM y verificar que el video tenga audio nítido y transcripción válida."
+    )
+
+
 def _run_job(job_id: uuid.UUID) -> None:
     db = SessionLocal()
     try:
@@ -539,74 +621,17 @@ def _run_job(job_id: uuid.UUID) -> None:
         if video is None:
             raise RuntimeError("Video asociado no encontrado")
 
-        # Validaciones previas exhaustivas antes de llamar al engine/Whisper/FFmpeg
-        # 1) Verificar filepath del video en disco
-        video_path_str = str(video.filepath or "").strip()
-        if not video_path_str:
-            raise FileNotFoundError("video.filepath está vacío en BD — no se puede procesar")
-        if not os.path.exists(video_path_str):
-            raise FileNotFoundError(f"Archivo de video no existe en disco: {video_path_str}")
-        if not Path(video_path_str).is_file():
-            raise FileNotFoundError(f"Video no es archivo regular: {video_path_str}")
-        try:
-            if Path(video_path_str).stat().st_size == 0:
-                raise RuntimeError(f"Video vacío (0 bytes): {video_path_str}")
-        except FileNotFoundError:
-            raise
-        # 2) Verificar transcripción (puede ser filepath o texto en BD)
-        transcription_path_str = str(video.transcription_filepath or "").strip()
-        has_transcript_text = bool(video.transcript and video.transcript.strip())
-        if not transcription_path_str and not has_transcript_text:
-            logger.warning("[jobs] video %s sin transcription_filepath ni transcript — intentando Whisper como fallback", video.id)
-        elif transcription_path_str and not os.path.exists(transcription_path_str):
-            logger.warning("[jobs] transcription_filepath no existe: %s — se usará transcript en BD si existe (len=%s)", transcription_path_str, len(video.transcript or ""))
-            if not has_transcript_text:
-                raise FileNotFoundError(f"Transcripción no encontrada ni en disco ni en BD: {transcription_path_str}")
-            transcription_path_str = ""  # forzar uso de transcript en BD vía fallback interno
+        video_path_str, transcription_path_str, has_transcript_text = _validate_job_video_and_transcription(video)
 
         # 3. Diagnóstico Claro de la Transcripción — logs explícitos y persistencia inmediata de progreso
-        transcript_data = has_transcript_text
-        transcription_filepath = transcription_path_str
-        if transcript_data or transcription_filepath:
-            logger.info(f"[JOB {job_id}] Transcripción provista por el usuario. Omitiendo Whisper y avanzando a 35%.")
-            try:
-                cur_diag = db.get(Job, job_id)
-                if cur_diag is not None:
-                    _set_progress(db, cur_diag, 35)
-                    # Actualizar referencia job para siguientes _set_progress
-                    job = cur_diag
-            except Exception as _diag_e:
-                logger.warning(f"[JOB {job_id}] No se pudo persistir progress 35% tras diagnóstico transcripción: {_diag_e}")
-        else:
-            logger.warning(f"[JOB {job_id}] No se detectó transcripción previa. Ejecutando Whisper como fallback.")
-            try:
-                cur_diag2 = db.get(Job, job_id)
-                if cur_diag2 is not None:
-                    _set_progress(db, cur_diag2, 10)
-                    job = cur_diag2
-            except Exception as _diag_e2:
-                logger.warning(f"[JOB {job_id}] No se pudo persistir progress 10% tras diagnóstico transcripción: {_diag_e2}")
+        job = _persist_transcription_diagnosis(db, job, job_id, has_transcript_text, transcription_path_str)
 
         from ..services.engine import run_clip_engine
 
         # Modo 100% real — sin fallback sintético. Si el engine falla, el job pasa a FAILED con traceback completo.
         logger.info("[jobs] invocando run_clip_engine video=%s transcripcion=%s job=%s", video_path_str, transcription_path_str or "<transcript BD>", job_id)
         # Log de configuración Claude (verificación .env) — verifica API Key leyendo de entorno
-        try:
-            _claude_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
-            if not _claude_key:
-                # Reintentar via Settings
-                try:
-                    from ..config import get_settings
-                    _claude_key = (get_settings().anthropic_api_key or "").strip()
-                except Exception:
-                    _claude_key = ""
-            if _claude_key:
-                logger.info("[jobs] ANTHROPIC_API_KEY presente (prefijo %s...), modelo=%s — se usará Claude para selección semántica", _claude_key[:10], os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5-5"))
-            else:
-                logger.warning("[jobs] ANTHROPIC_API_KEY no configurada — se usará heurística nativa (revisar backend_fastapi/app/config.py y docker-compose.yml)")
-        except Exception:
-            pass
+        _log_claude_config()
 
         # Callback inmediato post-Whisper: actualiza progress=35 ANTES de Claude con commit y log explícito
         def _on_whisper_done(pct: int = 35) -> None:
@@ -685,18 +710,8 @@ def _run_job(job_id: uuid.UUID) -> None:
         elif isinstance(result, list):
             clips_payload = result
 
-        if not clips_payload:
-            # Control de arrays vacíos: mensaje descriptivo en lugar de error críptico o "4"
-            # Esto evita que el frontend reciba solo "4" y permite diagnóstico real
-            segs_dbg = len(segments) if 'segments' in locals() else "N/A (antes de ASS/Hook)"
-            raise RuntimeError(
-                f"El engine real no devolvió clips (0 clips). "
-                f"Posibles causas: transcripción vacía o sin segmentos detectables, "
-                f"Whisper no generó segmentos (verificar audio/idioma), "
-                f"LLM sin respuesta o filtrado por score. "
-                f"Debug: clips_payload vacío, job={job_id}, video={video.id}, segments_detectados={segs_dbg}. "
-                f"Revisar logs whisper/LLM y verificar que el video tenga audio nítido y transcripción válida."
-            )
+        _segments_available = len(segments) if 'segments' in locals() else None
+        _ensure_clips_payload(clips_payload, job_id, video, _segments_available)
 
         # Filtrado por score medio-alto sin límite máximo (prompt: eliminar [:6]/max_clips)
         # Preservar start/end de Whisper; solo descartar por score < umbral

@@ -174,6 +174,17 @@ async def _save_upload_file(upload: UploadFile, dest: Path) -> None:
     status_code=status.HTTP_201_CREATED,
     summary="Subir video y transcripcion",
 )
+def _cleanup_upload_files(video_dest, transcript_dest):
+    for p in (video_dest, transcript_dest) if transcript_dest else (video_dest,):
+        if p is None:
+            continue
+        try:
+            if p.exists():
+                p.unlink()
+        except Exception:
+            pass
+
+
 async def upload_video(
     db: DbSession,
     current_user: CurrentUser,
@@ -199,24 +210,10 @@ async def upload_video(
         if transcription is not None and transcript_dest is not None:
             await _save_upload_file(transcription, transcript_dest)
     except HTTPException:
-        for p in (video_dest, transcript_dest) if transcript_dest else (video_dest,):
-            if p is None:
-                continue
-            try:
-                if p.exists():
-                    p.unlink()
-            except Exception:
-                pass
+        _cleanup_upload_files(video_dest, transcript_dest)
         raise
     except Exception as exc:
-        for p in (video_dest, transcript_dest) if transcript_dest else (video_dest,):
-            if p is None:
-                continue
-            try:
-                if p.exists():
-                    p.unlink()
-            except Exception:
-                pass
+        _cleanup_upload_files(video_dest, transcript_dest)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Error al guardar archivos: {exc}") from exc
     finally:
         try:

@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+
 def _first_env(*names: str) -> str:
     for name in names:
         value = os.getenv(name)
@@ -5,8 +8,6 @@ def _first_env(*names: str) -> str:
             return value.strip()
     return ""
 
-
-from __future__ import annotations
 
 import asyncio
 import json
@@ -84,6 +85,31 @@ def _get_public_video_url(clip: Clip) -> str:
     return public_url
 
 
+def _lookup_social_account_raw(db, uid_uuid, platform_norm):
+    """Fallback raw SQL lookup en user_social_accounts."""
+    try:
+        from sqlalchemy import text
+        row = db.execute(
+            text(
+                "SELECT id, user_id, platform, platform_account_id, access_token, refresh_token "
+                "FROM user_social_accounts WHERE user_id = :uid AND lower(platform) = :plat LIMIT 1"
+            ),
+            {"uid": str(uid_uuid), "plat": platform_norm},
+        ).mappings().first()
+        if row:
+            return SocialAccount(
+                user_id=uid_uuid,  # type: ignore
+                platform=row["platform"],
+                platform_account_id=row["platform_account_id"],
+                platform_username=row["platform_account_id"],
+                access_token=row["access_token"],
+                refresh_token=row["refresh_token"] or row["access_token"],
+            )
+    except Exception:
+        pass
+    return None
+
+
 def _get_social_account(db, user_id: str | uuid.UUID, platform: str) -> SocialAccount:
     from sqlalchemy import select
 
@@ -118,28 +144,7 @@ def _get_social_account(db, user_id: str | uuid.UUID, platform: str) -> SocialAc
 
     # Fallback raw SQL for legacy table name user_social_accounts
     if account is None:
-        try:
-            from sqlalchemy import text
-
-            row = db.execute(
-                text(
-                    "SELECT id, user_id, platform, platform_account_id, access_token, refresh_token "
-                    "FROM user_social_accounts WHERE user_id = :uid AND lower(platform) = :plat LIMIT 1"
-                ),
-                {"uid": str(uid_uuid), "plat": platform_norm},
-            ).mappings().first()
-            if row:
-                # create transient SocialAccount-like object
-                account = SocialAccount(
-                    user_id=uid_uuid,  # type: ignore
-                    platform=row["platform"],
-                    platform_account_id=row["platform_account_id"],
-                    platform_username=row["platform_account_id"],
-                    access_token=row["access_token"],
-                    refresh_token=row["refresh_token"] or row["access_token"],
-                )
-        except Exception:
-            pass
+        account = _lookup_social_account_raw(db, uid_uuid, platform_norm)
 
     if account is None or not getattr(account, "access_token", None):
         raise HTTPException(status_code=400, detail=f"Cuenta de {platform} no vinculada")
@@ -155,6 +160,166 @@ def _handle_token_expired(platform: str, resp: requests.Response):
         )
 
 
+def _refresh_tiktok_token(account, refresh_token, db) -> bool:
+    platform_norm = "tiktok"
+    # Fuente de credenciales: settings.TIKTOK_CLIENT_KEY y settings.TIKTOK_CLIENT_SECRET (única fuente, sin fallback hardcodeado)
+    _s = get_settings()
+    client_key = (_s.tiktok_client_key or "").strip() or os.getenv("TIKTOK_CLIENT_KEY", "").strip()
+    client_secret = (_s.tiktok_client_secret or "").strip() or os.getenv("TIKTOK_CLIENT_SECRET", "").strip()
+    # Verificación explícita de settings.TIKTOK_CLIENT_KEY / settings.TIKTOK_CLIENT_SECRET
+    if not client_key or not client_secret:
+        logger.warning("[TIKTOK REFRESH] TIKTOK_CLIENT_KEY/SECRET no configurados en settings.TIKTOK_CLIENT_KEY / settings.TIKTOK_CLIENT_SECRET")
+        return False
+    _tiktok_payload = {
+        "client_key": client_key,
+        "client_secret": "HIDDEN",
+        "grant_type": "refresh_token",
+        "refresh_token": (refresh_token[:10] + "..." if len(refresh_token) > 10 else refresh_token),
+    }
+    resp = requests.post(
+        "https://open.tiktokapis.com/v2/oauth/token/",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        data={
+            "client_key": client_key,
+            "client_secret": client_secret,
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+        },
+        timeout=15,
+    )
+    logger.info("[TIKTOK REFRESH RAW RESPONSE]: %s", resp.text[:1000])
+    logger.error(f"[DIAGNOSTICO TIKTOK] Refresh payload enviado: {_tiktok_payload} | Status: {resp.status_code} | Body respuesta: {resp.text}")
+    # Si la respuesta HTTP no es exitosa (status != 200 o JSON contiene error / error_code != 0)
+    if resp.status_code != 200:
+        logger.error(f"[publish] Error renovando token TikTok status={resp.status_code} body={resp.text}")
+        raise Exception(f"TikTok refresh failed status={resp.status_code} body={resp.text}")
+    try:
+        data = resp.json()
+    except Exception:
+        data = {}
+    # Detecta error en JSON aunque status 200
+    if data.get("error") or data.get("error_code") not in (None, 0, "0"):
+        logger.error(f"[publish] Error renovando token TikTok status={resp.status_code} body={resp.text}")
+        raise Exception(f"TikTok refresh error body={resp.text}")
+    if isinstance(data.get("data"), dict) and data["data"].get("error_code") not in (None, 0, "0"):
+        logger.error(f"[publish] Error renovando token TikTok status={resp.status_code} body={resp.text}")
+        raise Exception(f"TikTok refresh error body={resp.text}")
+    new_access_token = data.get("access_token") or (data.get("data", {}) if isinstance(data.get("data"), dict) else {}).get("access_token")
+    new_refresh_token = data.get("refresh_token") or (data.get("data", {}) if isinstance(data.get("data"), dict) else {}).get("refresh_token")
+    if new_access_token:
+        account.access_token = new_access_token
+        account.refresh_token = new_refresh_token # si aplica
+        if not new_refresh_token:
+            account.refresh_token = refresh_token
+        expires_in = data.get("expires_in") or (data.get("data", {}) if isinstance(data.get("data"), dict) else {}).get("expires_in")
+        if expires_in:
+            try:
+                account.token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))
+            except Exception:
+                pass
+        account.updated_at = datetime.now(timezone.utc)
+        db.add(account)
+        db.commit()
+        db.refresh(account)
+        logger.info(f"[TIKTOK TOKEN REFRESHED] user={account.user_id}")
+        return True
+    else:
+        logger.error(f"[publish] Error renovando token TikTok status={resp.status_code} body={resp.text}")
+        raise Exception(f"TikTok refresh failed - no access_token in body={resp.text}")
+
+def _refresh_youtube_token(account, refresh_token, db) -> bool:
+    platform_norm = "youtube"
+    client_id = os.getenv("GOOGLE_CLIENT_ID", "").strip()
+    client_secret = os.getenv("GOOGLE_CLIENT_SECRET", "").strip()
+    if not client_id or not client_secret:
+        logger.warning("[YOUTUBE REFRESH] GOOGLE_CLIENT_ID/SECRET no configurados")
+        return False
+    resp = requests.post(
+        "https://oauth2.googleapis.com/token",
+        data={
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token",
+        },
+        timeout=15,
+    )
+    logger.info("[YOUTUBE REFRESH RAW RESPONSE]: %s", resp.text[:1000])
+    if resp.status_code == 200:
+        try:
+            data = resp.json()
+        except Exception:
+            data = {}
+        new_access_token = data.get("access_token")
+        new_refresh_token = data.get("refresh_token")
+        if new_access_token:
+            account.access_token = new_access_token
+            if new_refresh_token:
+                account.refresh_token = new_refresh_token # si aplica
+            expires_in = data.get("expires_in")
+            if expires_in:
+                try:
+                    account.token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))
+                except Exception:
+                    pass
+            account.updated_at = datetime.now(timezone.utc)
+            db.add(account)
+            db.commit()
+            db.refresh(account)
+            logger.info(f"[YOUTUBE TOKEN REFRESHED] user={account.user_id}")
+            return True
+    else:
+        logger.warning(f"[YOUTUBE REFRESH FAILED] {resp.status_code} {resp.text[:500]}")
+
+def _refresh_instagram_token(account, refresh_token, db) -> bool:
+    platform_norm = "instagram"
+    # Fuente de credenciales: settings.FACEBOOK_CLIENT_ID y settings.FACEBOOK_CLIENT_SECRET (única fuente, sin fallback hardcodeado)
+    _s2 = get_settings()
+    # Usa settings.FACEBOOK_CLIENT_ID / settings.FACEBOOK_CLIENT_SECRET como fuente primaria
+    client_id = (_s2.facebook_client_id or "").strip() or (_s2.instagram_client_id or "").strip() or os.getenv("FACEBOOK_CLIENT_ID", "").strip() or os.getenv("INSTAGRAM_CLIENT_ID", "").strip()
+    client_secret = (_s2.facebook_client_secret or "").strip() or (_s2.instagram_client_secret or "").strip() or os.getenv("FACEBOOK_CLIENT_SECRET", "").strip() or os.getenv("INSTAGRAM_CLIENT_SECRET", "").strip()
+    if not client_id or not client_secret:
+        logger.warning("[INSTAGRAM REFRESH] FACEBOOK_CLIENT_ID/SECRET no configurados en settings.FACEBOOK_CLIENT_ID / settings.FACEBOOK_CLIENT_SECRET")
+        return False
+    # Meta long-lived token refresh via fb_exchange_token
+    resp = requests.get(
+        "https://graph.facebook.com/v18.0/oauth/access_token",
+        params={
+            "grant_type": "fb_exchange_token",
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "fb_exchange_token": refresh_token,
+        },
+        timeout=15,
+    )
+    logger.info("[INSTAGRAM REFRESH RAW RESPONSE]: %s", resp.text[:1000])
+    if resp.status_code == 200:
+        try:
+            data = resp.json()
+        except Exception:
+            data = {}
+        new_access_token = data.get("access_token")
+        new_refresh_token = data.get("refresh_token") or refresh_token
+        if new_access_token:
+            account.access_token = new_access_token
+            account.refresh_token = new_refresh_token # si aplica
+            if data.get("expires_in"):
+                try:
+                    account.token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=int(data["expires_in"]))
+                except Exception:
+                    pass
+            else:
+                account.token_expires_at = datetime.now(timezone.utc) + timedelta(days=60)
+            account.updated_at = datetime.now(timezone.utc)
+            db.add(account)
+            db.commit()
+            db.refresh(account)
+            logger.info(f"[INSTAGRAM TOKEN REFRESHED] user={account.user_id}")
+            return True
+    else:
+        logger.warning(f"[INSTAGRAM REFRESH FAILED] {resp.status_code} {resp.text[:500]}")
+
+
 def _refresh_account_token(account: SocialAccount, platform: str, db) -> bool:
     platform_norm = platform.lower().strip()
     try:
@@ -164,162 +329,11 @@ def _refresh_account_token(account: SocialAccount, platform: str, db) -> bool:
             return False
 
         if platform_norm == "tiktok":
-            # Fuente de credenciales: settings.TIKTOK_CLIENT_KEY y settings.TIKTOK_CLIENT_SECRET (única fuente, sin fallback hardcodeado)
-            _s = get_settings()
-            client_key = (_s.tiktok_client_key or "").strip() or os.getenv("TIKTOK_CLIENT_KEY", "").strip()
-            client_secret = (_s.tiktok_client_secret or "").strip() or os.getenv("TIKTOK_CLIENT_SECRET", "").strip()
-            # Verificación explícita de settings.TIKTOK_CLIENT_KEY / settings.TIKTOK_CLIENT_SECRET
-            if not client_key or not client_secret:
-                logger.warning("[TIKTOK REFRESH] TIKTOK_CLIENT_KEY/SECRET no configurados en settings.TIKTOK_CLIENT_KEY / settings.TIKTOK_CLIENT_SECRET")
-                return False
-            _tiktok_payload = {
-                "client_key": client_key,
-                "client_secret": "HIDDEN",
-                "grant_type": "refresh_token",
-                "refresh_token": (refresh_token[:10] + "..." if len(refresh_token) > 10 else refresh_token),
-            }
-            resp = requests.post(
-                "https://open.tiktokapis.com/v2/oauth/token/",
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-                data={
-                    "client_key": client_key,
-                    "client_secret": client_secret,
-                    "grant_type": "refresh_token",
-                    "refresh_token": refresh_token,
-                },
-                timeout=15,
-            )
-            logger.info("[TIKTOK REFRESH RAW RESPONSE]: %s", resp.text[:1000])
-            logger.error(f"[DIAGNOSTICO TIKTOK] Refresh payload enviado: {_tiktok_payload} | Status: {resp.status_code} | Body respuesta: {resp.text}")
-            # Si la respuesta HTTP no es exitosa (status != 200 o JSON contiene error / error_code != 0)
-            if resp.status_code != 200:
-                logger.error(f"[publish] Error renovando token TikTok status={resp.status_code} body={resp.text}")
-                raise Exception(f"TikTok refresh failed status={resp.status_code} body={resp.text}")
-            try:
-                data = resp.json()
-            except Exception:
-                data = {}
-            # Detecta error en JSON aunque status 200
-            if data.get("error") or data.get("error_code") not in (None, 0, "0"):
-                logger.error(f"[publish] Error renovando token TikTok status={resp.status_code} body={resp.text}")
-                raise Exception(f"TikTok refresh error body={resp.text}")
-            if isinstance(data.get("data"), dict) and data["data"].get("error_code") not in (None, 0, "0"):
-                logger.error(f"[publish] Error renovando token TikTok status={resp.status_code} body={resp.text}")
-                raise Exception(f"TikTok refresh error body={resp.text}")
-            new_access_token = data.get("access_token") or (data.get("data", {}) if isinstance(data.get("data"), dict) else {}).get("access_token")
-            new_refresh_token = data.get("refresh_token") or (data.get("data", {}) if isinstance(data.get("data"), dict) else {}).get("refresh_token")
-            if new_access_token:
-                account.access_token = new_access_token
-                account.refresh_token = new_refresh_token # si aplica
-                if not new_refresh_token:
-                    account.refresh_token = refresh_token
-                expires_in = data.get("expires_in") or (data.get("data", {}) if isinstance(data.get("data"), dict) else {}).get("expires_in")
-                if expires_in:
-                    try:
-                        account.token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))
-                    except Exception:
-                        pass
-                account.updated_at = datetime.now(timezone.utc)
-                db.add(account)
-                db.commit()
-                db.refresh(account)
-                logger.info(f"[TIKTOK TOKEN REFRESHED] user={account.user_id}")
-                return True
-            else:
-                logger.error(f"[publish] Error renovando token TikTok status={resp.status_code} body={resp.text}")
-                raise Exception(f"TikTok refresh failed - no access_token in body={resp.text}")
-
+            return _refresh_tiktok_token(account, refresh_token, db)
         elif platform_norm == "youtube":
-            client_id = os.getenv("GOOGLE_CLIENT_ID", "").strip()
-            client_secret = os.getenv("GOOGLE_CLIENT_SECRET", "").strip()
-            if not client_id or not client_secret:
-                logger.warning("[YOUTUBE REFRESH] GOOGLE_CLIENT_ID/SECRET no configurados")
-                return False
-            resp = requests.post(
-                "https://oauth2.googleapis.com/token",
-                data={
-                    "client_id": client_id,
-                    "client_secret": client_secret,
-                    "refresh_token": refresh_token,
-                    "grant_type": "refresh_token",
-                },
-                timeout=15,
-            )
-            logger.info("[YOUTUBE REFRESH RAW RESPONSE]: %s", resp.text[:1000])
-            if resp.status_code == 200:
-                try:
-                    data = resp.json()
-                except Exception:
-                    data = {}
-                new_access_token = data.get("access_token")
-                new_refresh_token = data.get("refresh_token")
-                if new_access_token:
-                    account.access_token = new_access_token
-                    if new_refresh_token:
-                        account.refresh_token = new_refresh_token # si aplica
-                    expires_in = data.get("expires_in")
-                    if expires_in:
-                        try:
-                            account.token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))
-                        except Exception:
-                            pass
-                    account.updated_at = datetime.now(timezone.utc)
-                    db.add(account)
-                    db.commit()
-                    db.refresh(account)
-                    logger.info(f"[YOUTUBE TOKEN REFRESHED] user={account.user_id}")
-                    return True
-            else:
-                logger.warning(f"[YOUTUBE REFRESH FAILED] {resp.status_code} {resp.text[:500]}")
-
+            return _refresh_youtube_token(account, refresh_token, db)
         elif platform_norm == "instagram":
-            # Fuente de credenciales: settings.FACEBOOK_CLIENT_ID y settings.FACEBOOK_CLIENT_SECRET (única fuente, sin fallback hardcodeado)
-            _s2 = get_settings()
-            # Usa settings.FACEBOOK_CLIENT_ID / settings.FACEBOOK_CLIENT_SECRET como fuente primaria
-            client_id = (_s2.facebook_client_id or "").strip() or (_s2.instagram_client_id or "").strip() or os.getenv("FACEBOOK_CLIENT_ID", "").strip() or os.getenv("INSTAGRAM_CLIENT_ID", "").strip()
-            client_secret = (_s2.facebook_client_secret or "").strip() or (_s2.instagram_client_secret or "").strip() or os.getenv("FACEBOOK_CLIENT_SECRET", "").strip() or os.getenv("INSTAGRAM_CLIENT_SECRET", "").strip()
-            if not client_id or not client_secret:
-                logger.warning("[INSTAGRAM REFRESH] FACEBOOK_CLIENT_ID/SECRET no configurados en settings.FACEBOOK_CLIENT_ID / settings.FACEBOOK_CLIENT_SECRET")
-                return False
-            # Meta long-lived token refresh via fb_exchange_token
-            resp = requests.get(
-                "https://graph.facebook.com/v18.0/oauth/access_token",
-                params={
-                    "grant_type": "fb_exchange_token",
-                    "client_id": client_id,
-                    "client_secret": client_secret,
-                    "fb_exchange_token": refresh_token,
-                },
-                timeout=15,
-            )
-            logger.info("[INSTAGRAM REFRESH RAW RESPONSE]: %s", resp.text[:1000])
-            if resp.status_code == 200:
-                try:
-                    data = resp.json()
-                except Exception:
-                    data = {}
-                new_access_token = data.get("access_token")
-                new_refresh_token = data.get("refresh_token") or refresh_token
-                if new_access_token:
-                    account.access_token = new_access_token
-                    account.refresh_token = new_refresh_token # si aplica
-                    if data.get("expires_in"):
-                        try:
-                            account.token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=int(data["expires_in"]))
-                        except Exception:
-                            pass
-                    else:
-                        account.token_expires_at = datetime.now(timezone.utc) + timedelta(days=60)
-                    account.updated_at = datetime.now(timezone.utc)
-                    db.add(account)
-                    db.commit()
-                    db.refresh(account)
-                    logger.info(f"[INSTAGRAM TOKEN REFRESHED] user={account.user_id}")
-                    return True
-            else:
-                logger.warning(f"[INSTAGRAM REFRESH FAILED] {resp.status_code} {resp.text[:500]}")
-
-        return False
+            return _refresh_instagram_token(account, refresh_token, db)
     except Exception as e:
         # Para TikTok, propaga el error con body exacto para auditoría
         if platform_norm == "tiktok" and ("TikTok refresh" in str(e) or "Error renovando token TikTok" in str(e)):
@@ -502,6 +516,37 @@ def _resolve_instagram_business_id(account):
     raise HTTPException(status_code=400, detail="No se encontró una cuenta de Instagram Business vinculada a las páginas de Facebook del usuario")
 
 
+def _validate_public_url(public_mp4_url: str) -> None:
+    """Valida que la URL pública del MP4 sea accesible."""
+    try:
+        import httpx
+        try:
+            resp_check = httpx.get(public_mp4_url, timeout=5, follow_redirects=True)
+            if resp_check.status_code != 200:
+                msg = f"[IG PUBLISH ALERT] La URL pública no responde: {public_mp4_url} - Status: {resp_check.status_code}"
+                logger.error(msg)
+                raise HTTPException(status_code=400, detail=f"URL pública no accesible ({resp_check.status_code}): el túnel Cloudflare está caído o la URL venció - {public_mp4_url}")
+        except HTTPException:
+            raise
+        except Exception as e:
+            msg = f"[IG PUBLISH ALERT] La URL pública no responde: {public_mp4_url} - Error: {e}"
+            logger.error(msg)
+            raise HTTPException(status_code=400, detail=f"URL pública no accesible: el túnel Cloudflare está caído o la URL venció - {public_mp4_url} ({e})")
+    except ImportError:
+        try:
+            r = requests.get(public_mp4_url, timeout=5)
+            if r.status_code != 200:
+                msg = f"[IG PUBLISH ALERT] La URL pública no responde: {public_mp4_url} - Status: {r.status_code}"
+                logger.error(msg)
+                raise HTTPException(status_code=400, detail=f"URL pública no accesible ({r.status_code}): el túnel Cloudflare está caído o la URL venció - {public_mp4_url}")
+        except HTTPException:
+            raise
+        except Exception as e:
+            msg = f"[IG PUBLISH ALERT] La URL pública no responde: {public_mp4_url} - Error: {e}"
+            logger.error(msg)
+            raise HTTPException(status_code=400, detail=f"URL pública no accesible: el túnel Cloudflare está caído o la URL venció - {public_mp4_url} ({e})")
+
+
 def _publish_instagram(account: SocialAccount, clip: Clip, caption: str | None) -> dict[str, Any]:
     access_token = account.access_token
     ig_user_id = _resolve_instagram_business_id(account)
@@ -519,35 +564,7 @@ def _publish_instagram(account: SocialAccount, clip: Clip, caption: str | None) 
     caption_text = caption or clip.title or ""
 
     # Pre-validación de la URL pública antes de llamar a Meta
-    try:
-        import httpx
-
-        try:
-            resp_check = httpx.get(public_mp4_url, timeout=5, follow_redirects=True)
-            if resp_check.status_code != 200:
-                msg = f"[IG PUBLISH ALERT] La URL pública no responde: {public_mp4_url} - Status: {resp_check.status_code}"
-                logger.error(msg)
-                raise HTTPException(status_code=400, detail=f"URL pública no accesible ({resp_check.status_code}): el túnel Cloudflare está caído o la URL venció - {public_mp4_url}")
-        except HTTPException:
-            raise
-        except Exception as e:
-            msg = f"[IG PUBLISH ALERT] La URL pública no responde: {public_mp4_url} - Error: {e}"
-            logger.error(msg)
-            raise HTTPException(status_code=400, detail=f"URL pública no accesible: el túnel Cloudflare está caído o la URL venció - {public_mp4_url} ({e})")
-    except ImportError:
-        # Fallback a requests si httpx no está instalado
-        try:
-            r = requests.get(public_mp4_url, timeout=5)
-            if r.status_code != 200:
-                msg = f"[IG PUBLISH ALERT] La URL pública no responde: {public_mp4_url} - Status: {r.status_code}"
-                logger.error(msg)
-                raise HTTPException(status_code=400, detail=f"URL pública no accesible ({r.status_code}): el túnel Cloudflare está caído o la URL venció - {public_mp4_url}")
-        except HTTPException:
-            raise
-        except Exception as e:
-            msg = f"[IG PUBLISH ALERT] La URL pública no responde: {public_mp4_url} - Error: {e}"
-            logger.error(msg)
-            raise HTTPException(status_code=400, detail=f"URL pública no accesible: el túnel Cloudflare está caído o la URL venció - {public_mp4_url} ({e})")
+    _validate_public_url(public_mp4_url)
 
     # Paso 1 (Crear Container): POST https://graph.facebook.com/v18.0/{ig_user_id}/media
     url1 = f"https://graph.facebook.com/v18.0/{ig_user_id}/media"
@@ -660,18 +677,8 @@ def _publish_instagram(account: SocialAccount, clip: Clip, caption: str | None) 
     return {"status": "published", "platform": "instagram", "post_id": str(post_id), "url": permalink}
 
 
-def _publish_tiktok(account: SocialAccount, clip: Clip, caption: str | None) -> dict[str, Any]:
-    # Auditoría de credenciales TikTok - logs explícitos
-    try:
-        _acc_exists = bool(getattr(account, "access_token", None))
-        _prefix = (account.access_token[:10] if _acc_exists and account.access_token else "None")
-        logger.error(f"[AUDITORIA BD] user_social_accounts platform=tiktok platform_account_id={getattr(account, 'platform_account_id', None)} access_token_exists={_acc_exists} access_token_prefix={_prefix} refresh_token_exists={bool(getattr(account, 'refresh_token', None))}")
-    except Exception as e:
-        logger.error(f"[AUDITORIA BD] tiktok audit error {e}")
-
-    access_token = account.access_token
-
-    # 1. Inicialización FILE_UPLOAD: leer archivo MP4 físico real (modo 100% real)
+def _resolve_clip_file_path(clip) -> str:
+    """Resuelve la ruta física del archivo MP4 del clip o lanza HTTPException."""
     file_path = None
     for attr in ("storage_path", "file_path", "video_path", "output_path"):
         v = getattr(clip, attr, None)
@@ -687,17 +694,31 @@ def _publish_tiktok(account: SocialAccount, clip: Clip, caption: str | None) -> 
                     break
             if file_path:
                 break
-    # Modo 100% real: si no hay archivo físico, error 404 real
     if not file_path or not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail=f"Archivo de clip no encontrado para TikTok: {clip.storage_path}. Debe existir .mp4 físico en storage antes de publicar.")
-
     try:
         file_size = os.path.getsize(file_path)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"No se pudo leer archivo local {file_path}: {e}")
     if file_size == 0:
         raise HTTPException(status_code=400, detail=f"Archivo local vacío {file_path}")
+    return file_path
 
+
+def _publish_tiktok(account: SocialAccount, clip: Clip, caption: str | None) -> dict[str, Any]:
+    # Auditoría de credenciales TikTok - logs explícitos
+    try:
+        _acc_exists = bool(getattr(account, "access_token", None))
+        _prefix = (account.access_token[:10] if _acc_exists and account.access_token else "None")
+        logger.error(f"[AUDITORIA BD] user_social_accounts platform=tiktok platform_account_id={getattr(account, 'platform_account_id', None)} access_token_exists={_acc_exists} access_token_prefix={_prefix} refresh_token_exists={bool(getattr(account, 'refresh_token', None))}")
+    except Exception as e:
+        logger.error(f"[AUDITORIA BD] tiktok audit error {e}")
+
+    access_token = account.access_token
+
+    # 1. Inicialización FILE_UPLOAD: leer archivo MP4 físico real (modo 100% real)
+    file_path = _resolve_clip_file_path(clip)
+    file_size = os.path.getsize(file_path)
     logger.info(f"[TIKTOK PUBLISH] Archivo local {file_path} video_size={file_size} bytes")
 
     title = (caption or clip.title or "ClipsAI")[:150]
@@ -810,6 +831,27 @@ def _publish_tiktok(account: SocialAccount, clip: Clip, caption: str | None) -> 
     return {"status": "published", "platform": "tiktok", "post_id": str(publish_id), "url": permalink}
 
 
+def _resolve_publish_user_id(db, clip):
+    """Resuelve el user_id a partir del clip (video o job)."""
+    resolved_user_id = None
+    try:
+        if clip.video_id is not None:
+            from ..models import Video
+            video = db.get(Video, clip.video_id)
+            if video is not None:
+                resolved_user_id = str(video.user_id)
+        if resolved_user_id is None and clip.job_id is not None:
+            from ..models import Job, Video
+            job = db.get(Job, clip.job_id)
+            if job is not None:
+                video2 = db.get(Video, job.video_id)
+                if video2 is not None:
+                    resolved_user_id = str(video2.user_id)
+    except Exception:
+        pass
+    return resolved_user_id
+
+
 def publish_clip_task(clip_id: uuid.UUID, platform: str, caption: str | None, webhook_url: str | None = None, user_id: str | None = None) -> dict[str, Any] | None:
     db = SessionLocal()
     try:
@@ -825,25 +867,7 @@ def publish_clip_task(clip_id: uuid.UUID, platform: str, caption: str | None, we
         # Resolve user_id if not provided
         resolved_user_id = user_id
         if resolved_user_id is None:
-            try:
-                if clip.video_id is not None:
-                    from ..models import Video
-
-                    video = db.get(Video, clip.video_id)
-                    if video is not None:
-                        resolved_user_id = str(video.user_id)
-                if resolved_user_id is None and clip.job_id is not None:
-                    from ..models import Job
-
-                    job = db.get(Job, clip.job_id)
-                    if job is not None:
-                        from ..models import Video
-
-                        video2 = db.get(Video, job.video_id)
-                        if video2 is not None:
-                            resolved_user_id = str(video2.user_id)
-            except Exception:
-                pass
+            resolved_user_id = _resolve_publish_user_id(db, clip)
 
         platform_norm = (platform or "").strip().lower()
         result: dict[str, Any] | None = None

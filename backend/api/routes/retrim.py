@@ -55,6 +55,26 @@ def _assert_ownership_and_get_clip(db, clip_id: str, user_id: uuid.UUID) -> Clip
 
 
 @router.post("/{clip_id}/retrim", response_model=RetrimResponse)
+def _resolve_retrim_source(clip, job, video):
+    src_candidates = []
+    if clip.storage_path and Path(clip.storage_path).exists():
+        src_candidates.append(Path(clip.storage_path))
+    if clip.video and hasattr(clip.video, "filepath") and clip.video.filepath:
+        src_candidates.append(Path(clip.video.filepath))
+    if video and video.filepath:
+        src_candidates.append(Path(video.filepath))
+    if job and job.video and hasattr(job.video, "filepath"):
+        src_candidates.append(Path(job.video.filepath))
+    src = None
+    for p in src_candidates:
+        if p and p.exists():
+            src = p
+            break
+    if src is None and src_candidates:
+        src = src_candidates[0]
+    return src
+
+
 async def retrim_clip(
     clip_id: str,
     body: RetrimRequest,
@@ -71,23 +91,7 @@ async def retrim_clip(
     job = db.execute(select(Job).where(Job.id == clip.job_id)).scalar_one_or_none()
     video = db.execute(select(Video).where(Video.id == job.video_id)).scalar_one_or_none() if job else None
 
-    src_candidates = []
-    if clip.storage_path and Path(clip.storage_path).exists():
-        src_candidates.append(Path(clip.storage_path))
-    if clip.video and hasattr(clip.video, "filepath") and clip.video.filepath:
-        src_candidates.append(Path(clip.video.filepath))
-    if video and video.filepath:
-        src_candidates.append(Path(video.filepath))
-    if job and job.video and hasattr(job.video, "filepath"):
-        src_candidates.append(Path(job.video.filepath))
-
-    src = None
-    for p in src_candidates:
-        if p and p.exists():
-            src = p
-            break
-    if src is None and src_candidates:
-        src = src_candidates[0]
+    src = _resolve_retrim_source(clip, job, video)
     if src is None or not src.exists():
         raise HTTPException(status_code=404, detail=f"Video origen no encontrado para re-trim: {src}")
 

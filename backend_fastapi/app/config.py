@@ -52,6 +52,12 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def _fix_redirect_uri(current: str, base: str, platform: str) -> str:
+    if "decorator" in current or "guns-camps" in current or "ngrok" in current:
+        return f"{base}/auth/social/{platform}/callback"
+    return current
+
+
 class Settings(BaseSettings):
     # ---- App ----
     app_name: str = "clipsai — FastAPI backend"
@@ -72,12 +78,9 @@ class Settings(BaseSettings):
         object.__setattr__(self, "database_url", _resolve_db_host(self.database_url))
         # Forzar que callbacks usen PUBLIC_BACKEND_URL como base si aún contienen URLs temporales antiguas
         base = self.public_backend_url.rstrip("/") if self.public_backend_url else "https://api.clipsai.xyz"
-        if "decorator" in self.google_redirect_uri or "guns-camps" in self.google_redirect_uri or "ngrok" in self.google_redirect_uri:
-            object.__setattr__(self, "google_redirect_uri", f"{base}/auth/social/youtube/callback")
-        if "decorator" in self.tiktok_redirect_uri or "guns-camps" in self.tiktok_redirect_uri or "ngrok" in self.tiktok_redirect_uri:
-            object.__setattr__(self, "tiktok_redirect_uri", f"{base}/auth/social/tiktok/callback")
-        if "decorator" in self.instagram_redirect_uri or "guns-camps" in self.instagram_redirect_uri or "ngrok" in self.instagram_redirect_uri:
-            object.__setattr__(self, "instagram_redirect_uri", f"{base}/auth/social/instagram/callback")
+        object.__setattr__(self, "google_redirect_uri", _fix_redirect_uri(self.google_redirect_uri, base, "youtube"))
+        object.__setattr__(self, "tiktok_redirect_uri", _fix_redirect_uri(self.tiktok_redirect_uri, base, "tiktok"))
+        object.__setattr__(self, "instagram_redirect_uri", _fix_redirect_uri(self.instagram_redirect_uri, base, "instagram"))
 
     # ---- JWT ----
     jwt_secret: str = Field(

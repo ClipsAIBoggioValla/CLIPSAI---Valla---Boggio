@@ -102,6 +102,27 @@ def exchange_short_for_long_lived_token(short_token: str) -> dict[str, Any]:
     return resp.json()
 
 
+def _fetch_ig_username_from_id(ig_id, access_token):
+    """Intenta obtener username desde el id del IG business account."""
+    try:
+        r2_url = f"https://graph.facebook.com/v18.0/{ig_id}?fields=id,username,name&access_token={access_token}"
+        logger.info("[META API CALL] Requesting %s", r2_url.replace(access_token, "HIDDEN_TOKEN"))
+        r2 = requests.get(r2_url, timeout=10)
+        logger.info("[META /me STATUS]: %s | [BODY]: %s", r2.status_code, r2.text)
+        if r2.status_code == 200:
+            try:
+                d2 = r2.json()
+                logger.info("[META /me RAW JSON]: %s", d2)
+            except Exception:
+                d2 = {}
+            username2 = d2.get("username") or d2.get("name")
+            if username2 and str(username2).strip():
+                return str(username2).strip()
+    except Exception as e2:
+        logger.error("[META /me EXCEPTION]: %s", str(e2), exc_info=True)
+    return None
+
+
 def _fetch_instagram_username(access_token: str) -> str | None:
     display_name: str | None = None
     try:
@@ -147,23 +168,9 @@ def _fetch_instagram_username(access_token: str) -> str | None:
                     if ig_name and str(ig_name).strip() and not display_name:
                         display_name = str(ig_name).strip()
                     if ig.get("id"):
-                        try:
-                            r2_url = f"https://graph.facebook.com/v18.0/{ig['id']}?fields=id,username,name&access_token={access_token}"
-                            logger.info("[META API CALL] Requesting %s", r2_url.replace(access_token, "HIDDEN_TOKEN"))
-                            r2 = requests.get(r2_url, timeout=10)
-                            logger.info("[META /me STATUS]: %s | [BODY]: %s", r2.status_code, r2.text)
-                            if r2.status_code == 200:
-                                try:
-                                    d2 = r2.json()
-                                    logger.info("[META /me RAW JSON]: %s", d2)
-                                except Exception:
-                                    d2 = {}
-                                username2 = d2.get("username") or d2.get("name")
-                                if username2 and str(username2).strip():
-                                    return str(username2).strip()
-                        except Exception as e2:
-                            logger.error("[META /me EXCEPTION]: %s", str(e2), exc_info=True)
-                            continue
+                        result = _fetch_ig_username_from_id(ig["id"], access_token)
+                        if result:
+                            return result
         else:
             try:
                 err_data = res_acc.json()
@@ -202,6 +209,26 @@ def exchange_code_for_tokens(code: str) -> dict[str, Any]:
     return tokens
 
 
+def _log_instagram_debug_token(access_token):
+    """Verifica y registra los scopes concedidos para el token de Instagram."""
+    try:
+        dbg_client_id, dbg_client_secret, _ = _get_instagram_config()
+        if dbg_client_id and dbg_client_secret and access_token:
+            app_token = f"{dbg_client_id}|{dbg_client_secret}"
+            dbg_url = f"https://graph.facebook.com/debug_token?input_token={access_token}&access_token={app_token}"
+            dbg_resp = requests.get(dbg_url, timeout=10)
+            logger.info("[IG DEBUG] debug_token status=%s body=%s", dbg_resp.status_code, dbg_resp.text)
+            if dbg_resp.status_code == 200:
+                try:
+                    dbg_data = dbg_resp.json()
+                    scopes = dbg_data.get("data", {}).get("scopes", [])
+                    logger.info("[IG DEBUG] scopes concedidos: %s", scopes)
+                except Exception:
+                    pass
+    except Exception as e:
+        logger.warning(f"[IG DEBUG] debug_token failed: {e}")
+
+
 def save_instagram_tokens(db: Session, user_id: str, tokens: dict[str, Any]) -> SocialAccount:
     uid = validate_user_id(user_id)
 
@@ -237,22 +264,7 @@ def save_instagram_tokens(db: Session, user_id: str, tokens: dict[str, Any]) -> 
     logger.info("[FINAL INSTAGRAM USERNAME SAVED] %s", final_username)
 
     # DEBUG: verificar scopes concedidos antes de guardar token
-    try:
-        dbg_client_id, dbg_client_secret, _ = _get_instagram_config()
-        if dbg_client_id and dbg_client_secret and access_token:
-            app_token = f"{dbg_client_id}|{dbg_client_secret}"
-            dbg_url = f"https://graph.facebook.com/debug_token?input_token={access_token}&access_token={app_token}"
-            dbg_resp = requests.get(dbg_url, timeout=10)
-            logger.info("[IG DEBUG] debug_token status=%s body=%s", dbg_resp.status_code, dbg_resp.text)
-            if dbg_resp.status_code == 200:
-                try:
-                    dbg_data = dbg_resp.json()
-                    scopes = dbg_data.get("data", {}).get("scopes", [])
-                    logger.info("[IG DEBUG] scopes concedidos: %s", scopes)
-                except Exception:
-                    pass
-    except Exception as e:
-        logger.warning(f"[IG DEBUG] debug_token failed: {e}")
+    _log_instagram_debug_token(access_token)
 
     existing: SocialAccount | None = db.execute(
         select(SocialAccount).where(SocialAccount.user_id == uid, func.lower(SocialAccount.platform) == "instagram")

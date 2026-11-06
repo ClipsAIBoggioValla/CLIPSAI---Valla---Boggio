@@ -212,6 +212,28 @@ def concat_videos(
             pass
 
 
+def _build_hook_filter_graph(hook_dur: float, fade_edge: float, has_audio: bool):
+    """Construye el filter_complex y los maps para el ensamblado teaser+cuerpo."""
+    hook_fade_start = max(0.0, hook_dur - fade_edge)
+    if has_audio:
+        filter_graph = (
+            f"[0:v]fade=t=out:st={hook_fade_start:.3f}:d={fade_edge:.3f},setsar=1[v0];"
+            f"[1:v]fade=t=in:st=0:d={fade_edge:.3f},setsar=1[v1];"
+            f"[0:a]afade=t=out:st={hook_fade_start:.3f}:d={fade_edge:.3f}[a0];"
+            f"[1:a]afade=t=in:st=0:d={fade_edge:.3f}[a1];"
+            "[v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a]"
+        )
+        maps = ["-map", "[v]", "-map", "[a]"]
+    else:
+        filter_graph = (
+            f"[0:v]fade=t=out:st={hook_fade_start:.3f}:d={fade_edge:.3f},setsar=1[v0];"
+            f"[1:v]fade=t=in:st=0:d={fade_edge:.3f},setsar=1[v1];"
+            "[v0][v1]concat=n=2:v=1:a=0[v]"
+        )
+        maps = ["-map", "[v]"]
+    return filter_graph, maps, hook_fade_start
+
+
 def build_hook_clip(
     input_video: str | Path,
     clip_start: float,
@@ -264,23 +286,7 @@ def build_hook_clip(
 
         # Atenúa 100ms al final del teaser y 100ms al inicio del cuerpo: transición total 200ms.
         fade_edge = min(transition_seconds / 2.0, hook_dur / 2.0, clip_dur / 2.0)
-        hook_fade_start = max(0.0, hook_dur - fade_edge)
-        if has_audio:
-            filter_graph = (
-                f"[0:v]fade=t=out:st={hook_fade_start:.3f}:d={fade_edge:.3f},setsar=1[v0];"
-                f"[1:v]fade=t=in:st=0:d={fade_edge:.3f},setsar=1[v1];"
-                f"[0:a]afade=t=out:st={hook_fade_start:.3f}:d={fade_edge:.3f}[a0];"
-                f"[1:a]afade=t=in:st=0:d={fade_edge:.3f}[a1];"
-                "[v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a]"
-            )
-            maps = ["-map", "[v]", "-map", "[a]"]
-        else:
-            filter_graph = (
-                f"[0:v]fade=t=out:st={hook_fade_start:.3f}:d={fade_edge:.3f},setsar=1[v0];"
-                f"[1:v]fade=t=in:st=0:d={fade_edge:.3f},setsar=1[v1];"
-                "[v0][v1]concat=n=2:v=1:a=0[v]"
-            )
-            maps = ["-map", "[v]"]
+        filter_graph, maps, _ = _build_hook_filter_graph(hook_dur, fade_edge, has_audio)
 
         out.parent.mkdir(parents=True, exist_ok=True)
         command = [

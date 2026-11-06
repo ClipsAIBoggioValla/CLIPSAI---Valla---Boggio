@@ -176,6 +176,75 @@ class ReRenderRequest(BaseModel):
     enable_hook: bool = True
 
 
+def _load_segments_and_hooks(video, enable_ass, enable_hook):
+    """Carga segmentos (whisper/parse) y detecta hooks si se requiere. Retorna (segments, hooks)."""
+    segments: list[dict] = []
+    hooks: list[dict] = []
+    if not (enable_ass or enable_hook):
+        return segments, hooks
+    try:
+        try:
+            from ..services.whisper_service import transcribe_video
+            segs = transcribe_video(str(video.filepath), language="es")
+            if segs:
+                segments = [{"start": float(s["start"]), "end": float(s["end"]), "text": str(s["text"])} for s in segs]
+        except Exception:
+            pass
+        if not segments:
+            import re
+            txt = None
+            if video.transcript:
+                txt = video.transcript
+            elif video.transcription_filepath and Path(str(video.transcription_filepath)).is_file():
+                txt = Path(str(video.transcription_filepath)).read_text(encoding="utf-8", errors="ignore")
+            if txt:
+                segs2: list[dict] = []
+                re_ts = re.compile(r"^(\d{1,2}:\d{2}(?::\d{2})?)\s*[-–]\s*(.+)$")
+                cursor = 0.0
+                for line in txt.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    m = re_ts.match(line)
+                    if m:
+                        ts_str = m.group(1); t = m.group(2).strip()
+                        try:
+                            parts = ts_str.split(":")
+                            if len(parts) == 3:
+                                s = int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+                            elif len(parts) == 2:
+                                s = int(parts[0]) * 60 + float(parts[1])
+                            else:
+                                s = float(parts[0])
+                            segs2.append({"start": s, "end": s + 3.0, "text": t})
+                            cursor = s + 3.0
+                            continue
+                        except Exception:
+                            pass
+                    segs2.append({"start": cursor, "end": cursor + 3.0, "text": line})
+                    cursor += 3.0
+                segments = segs2
+        if enable_hook and segments:
+            try:
+                from ..services.hook_service import detect_hooks
+                duration = None
+                try:
+                    if video.duration_seconds:
+                        duration = float(video.duration_seconds)
+                    elif segments:
+                        duration = float(segments[-1].get("end", 0))
+                except Exception:
+                    duration = None
+                hooks = detect_hooks(segments, duration_hint=duration, mock=False) or []
+            except Exception:
+                hooks = []
+    except Exception as e:
+        logger.warning(f"[re-render] segmentos/hooks fallo: {e}")
+        segments = []
+        hooks = []
+    return segments, hooks
+
+
 def _run_re_render(clip_id: uuid.UUID, enable_ass: bool, enable_hook: bool) -> None:
     from ..database import SessionLocal as _SessionLocal
 
@@ -193,75 +262,7 @@ def _run_re_render(clip_id: uuid.UUID, enable_ass: bool, enable_hook: bool) -> N
             return
 
         # Cargar segmentos si alguno de los flags activo
-        segments: list[dict] = []
-        hooks: list[dict] = []
-        if enable_ass or enable_hook:
-            try:
-                # Reusar lógica de jobs.py sin importar circular: intentar whisper + parse
-                try:
-                    from ..services.whisper_service import transcribe_video
-
-                    segs = transcribe_video(str(video.filepath), language="es")
-                    if segs:
-                        segments = [{"start": float(s["start"]), "end": float(s["end"]), "text": str(s["text"])} for s in segs]
-                except Exception:
-                    pass
-                if not segments:
-                    # Fallback parse transcript
-                    import re
-
-                    txt = None
-                    if video.transcript:
-                        txt = video.transcript
-                    elif video.transcription_filepath and Path(str(video.transcription_filepath)).is_file():
-                        txt = Path(str(video.transcription_filepath)).read_text(encoding="utf-8", errors="ignore")
-                    if txt:
-                        # parser simple HH:MM:SS - texto
-                        segs2: list[dict] = []
-                        re_ts = re.compile(r"^(\d{1,2}:\d{2}(?::\d{2})?)\s*[-–]\s*(.+)$")
-                        cursor = 0.0
-                        for line in txt.splitlines():
-                            line=line.strip()
-                            if not line:
-                                continue
-                            m=re_ts.match(line)
-                            if m:
-                                ts_str=m.group(1); t=m.group(2).strip()
-                                try:
-                                    parts=ts_str.split(":")
-                                    if len(parts)==3:
-                                        s=int(parts[0])*3600+int(parts[1])*60+float(parts[2])
-                                    elif len(parts)==2:
-                                        s=int(parts[0])*60+float(parts[1])
-                                    else:
-                                        s=float(parts[0])
-                                    segs2.append({"start": s, "end": s+3.0, "text": t})
-                                    cursor=s+3.0
-                                    continue
-                                except Exception:
-                                    pass
-                            segs2.append({"start": cursor, "end": cursor+3.0, "text": line})
-                            cursor+=3.0
-                        segments = segs2
-                if enable_hook and segments:
-                    try:
-                        from ..services.hook_service import detect_hooks
-
-                        duration = None
-                        try:
-                            if video.duration_seconds:
-                                duration=float(video.duration_seconds)
-                            elif segments:
-                                duration=float(segments[-1].get("end",0))
-                        except Exception:
-                            duration=None
-                        hooks = detect_hooks(segments, duration_hint=duration, mock=False) or []
-                    except Exception:
-                        hooks=[]
-            except Exception as e:
-                logger.warning(f"[re-render] segmentos/hooks fallo: {e}")
-                segments=[]
-                hooks=[]
+        segments, hooks = _load_segments_and_hooks(video, enable_ass, enable_hook)
 
         # Seleccionar hook si enable_hook
         hook_sel = None

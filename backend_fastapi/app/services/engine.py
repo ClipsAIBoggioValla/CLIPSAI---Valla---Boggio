@@ -330,44 +330,7 @@ def ensure_wav_audio(video_path: str) -> str:
     return wav_path
 
 
-def run_clip_engine(
-    video_path: str,
-    transcription_path: str,
-    progress_callback: Any | None = None,
-    *,
-    allow_runpod: bool = True,
-) -> dict[str, Any]:
-    vp = _validate_video_source(video_path)
-    tp = Path(transcription_path)
-    if not tp.exists():
-        raise FileNotFoundError(f"Transcripcion no encontrada: {transcription_path}")
-
-    if allow_runpod:
-        from .runpod_service import is_runpod_configured, process_local_video_via_runpod
-
-        if is_runpod_configured():
-            logging.getLogger(__name__).info("RunPod configurado; delegando transcripción y análisis fuera de Render")
-            result = process_local_video_via_runpod(
-                vp,
-                transcription_path=tp if tp.is_file() else None,
-            )
-            segments = result.get("transcription_segments")
-            if not isinstance(segments, list) or not segments:
-                raise RuntimeError(
-                    "RunPod no devolvió segmentos de transcripción; actualiza el worker para que los incluya "
-                    "y evitar cargar Whisper localmente en Render."
-                )
-            result.setdefault("engine", "runpod")
-            result.setdefault("video", str(vp))
-            result.setdefault("transcription", str(tp) if tp.is_file() else "")
-            if progress_callback is not None:
-                try:
-                    progress_callback(35)
-                except Exception as exc:
-                    logging.getLogger(__name__).warning("Callback de progreso RunPod falló: %s", exc)
-            return result
-
-    current_file = Path(__file__).resolve()
+def _configure_engine_paths(current_file):
     root = None
     for _p in current_file.parents:
         try:
@@ -432,6 +395,49 @@ def run_clip_engine(
     except Exception:
         pass
 
+        return root
+
+
+
+def run_clip_engine(
+    video_path: str,
+    transcription_path: str,
+    progress_callback: Any | None = None,
+    *,
+    allow_runpod: bool = True,
+) -> dict[str, Any]:
+    vp = _validate_video_source(video_path)
+    tp = Path(transcription_path)
+    if not tp.exists():
+        raise FileNotFoundError(f"Transcripcion no encontrada: {transcription_path}")
+
+    if allow_runpod:
+        from .runpod_service import is_runpod_configured, process_local_video_via_runpod
+
+        if is_runpod_configured():
+            logging.getLogger(__name__).info("RunPod configurado; delegando transcripción y análisis fuera de Render")
+            result = process_local_video_via_runpod(
+                vp,
+                transcription_path=tp if tp.is_file() else None,
+            )
+            segments = result.get("transcription_segments")
+            if not isinstance(segments, list) or not segments:
+                raise RuntimeError(
+                    "RunPod no devolvió segmentos de transcripción; actualiza el worker para que los incluya "
+                    "y evitar cargar Whisper localmente en Render."
+                )
+            result.setdefault("engine", "runpod")
+            result.setdefault("video", str(vp))
+            result.setdefault("transcription", str(tp) if tp.is_file() else "")
+            if progress_callback is not None:
+                try:
+                    progress_callback(35)
+                except Exception as exc:
+                    logging.getLogger(__name__).warning("Callback de progreso RunPod falló: %s", exc)
+            return result
+
+    current_file = Path(__file__).resolve()
+    root = _configure_engine_paths(current_file)
     _log = logging.getLogger(__name__)
 
 def _parse_transcript_native(text: str) -> list[dict]:
@@ -450,19 +456,10 @@ def _parse_transcript_native(text: str) -> list[dict]:
                 wav_path = ensure_wav_audio(str(vp))
                 _log.info("Extracción física WAV completada: %s", wav_path)
                 from .whisper_service import transcribe_audio  # type: ignore
-                try:
-                    wav_size = Path(wav_path).stat().st_size
-                    dur_res = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", wav_path], capture_output=True, text=True, timeout=10)
-                    wav_dur = dur_res.stdout.strip() if dur_res.returncode == 0 else "desconocida"
-                    _log.info("WAV extraído: %s (%.1f KB, duración %s s) — enviando a Whisper", wav_path, wav_size / 1024, wav_dur)
-                except Exception:
-                    pass
+                wav_size = Path(wav_path).stat().st_size if wav_path and Path(wav_path).exists() else 0
+                _log.info("WAV extraído: %s (%.1f KB) — enviando a Whisper", wav_path, wav_size / 1024)
                 segs = transcribe_audio(wav_path, language="es")
-                try:
-                    total_chars = sum(len(str(s.get("text", ""))) for s in segs)
-                    _log.info("Transcripción Whisper: %s segmentos, %s caracteres extraídos", len(segs) if segs else 0, total_chars)
-                except Exception:
-                    _log.info("Transcripción Whisper: %s segmentos", len(segs) if segs else 0)
+                _log.info("Transcripción Whisper: %s segmentos", len(segs) if segs else 0)
                 if segs and len(segs) > 0:
                     preserved_segments: list[dict[str, Any]] = []
                     for segment in segs:
@@ -487,11 +484,6 @@ def _parse_transcript_native(text: str) -> list[dict]:
                             }
                         )
                     return preserved_segments
-                try:
-                    wav_size = Path(wav_path).stat().st_size if wav_path and Path(wav_path).exists() else 0
-                    _log.warning("Whisper no generó segmentos: wav_size=%s bytes, wav_path=%s — inspeccionando FFmpeg logs", wav_size, wav_path)
-                except Exception:
-                    pass
                 raise ValueError("El video subido no contiene audio o no se detectó voz interpretable para generar subtítulos.")
         except ValueError as ve:
             _log.warning("Motor nativo: Whisper ValueError no audio/voz (%s) — intentando fallback a transcripción file", ve)

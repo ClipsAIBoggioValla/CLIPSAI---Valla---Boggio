@@ -244,40 +244,45 @@ def _parse_json_strict(raw: str) -> dict[str, Any]:
         return json.loads(fixed)
 
 
+def _validate_one_hook_clip(c):
+    """Valida un clip crudo y retorna HookClip o None."""
+    try:
+        title = str(c.get("title", "")).strip()[:80]
+        st = float(c.get("start_time", 0))
+        en = float(c.get("end_time", 0))
+        hook_raw = c.get("hook", {})
+        hk_text = str(hook_raw.get("text", "")).strip()
+        hk_st = float(hook_raw.get("start_time", 0))
+        hk_en = float(hook_raw.get("end_time", 0))
+        hk_dur = float(hook_raw.get("duration", hk_en - hk_st))
+        score = int(c.get("viral_score", c.get("score", 70)))
+        reasoning = str(c.get("reasoning", c.get("motivo", ""))).strip()
+        if not title or not hk_text:
+            return None
+        clip_dur = en - st
+        hook_dur = hk_en - hk_st
+        if not (15.0 <= clip_dur <= 60.0 and 3.0 <= hook_dur <= 6.0):
+            return None
+        if not (st <= hk_st < hk_en <= en):
+            return None
+        if not (0 <= score <= 100):
+            score = max(0, min(100, score))
+        return HookClip(title=title, start_time=st, end_time=en, hook=HookSegment(text=hk_text, start_time=hk_st, end_time=hk_en, duration=hk_dur), viral_score=score, reasoning=reasoning)
+    except Exception:
+        return None
+
+
 def _validate_clips(data: dict[str, Any]) -> list[HookClip]:
     clips_raw = data.get("clips", [])
     if not isinstance(clips_raw, list):
         raise ValueError("JSON 'clips' debe ser lista")
     validated: list[HookClip] = []
     for c in clips_raw:
-        try:
-            title = str(c.get("title", "")).strip()[:80]
-            st = float(c.get("start_time", 0))
-            en = float(c.get("end_time", 0))
-            hook_raw = c.get("hook", {})
-            hk_text = str(hook_raw.get("text", "")).strip()
-            hk_st = float(hook_raw.get("start_time", 0))
-            hk_en = float(hook_raw.get("end_time", 0))
-            hk_dur = float(hook_raw.get("duration", hk_en - hk_st))
-            score = int(c.get("viral_score", c.get("score", 70)))
-            reasoning = str(c.get("reasoning", c.get("motivo", ""))).strip()
-            if not title or not hk_text:
-                continue
-            clip_dur = en - st
-            hook_dur = hk_en - hk_st
-            if not (15.0 <= clip_dur <= 60.0):
-                continue
-            if not (3.0 <= hook_dur <= 6.0):
-                continue
-            if abs(hk_dur - hook_dur) > 0.5:
-                hk_dur = hook_dur
-            if not (st <= hk_st < hk_en <= en):
-                continue
-            if not (0 <= score <= 100):
-                score = max(0, min(100, score))
-            validated.append(HookClip(title=title, start_time=st, end_time=en, hook=HookSegment(text=hk_text, start_time=hk_st, end_time=hk_en, duration=hk_dur), viral_score=score, reasoning=reasoning))
-        except Exception:
+        if not isinstance(c, dict):
             continue
+        item = _validate_one_hook_clip(c)
+        if item is not None:
+            validated.append(item)
     validated.sort(key=lambda x: x["viral_score"], reverse=True)
     return validated[:3]
 
@@ -291,13 +296,12 @@ def detect_hooks(segments: list[dict[str, Any]], duration_hint: float | None = N
             raise ValueError("Transcripcion vacia")
         prompt = _build_hook_prompt(transcript_text, duration_hint)
         raw = _call_llm(prompt)
-        print(f"[hook] LLM raw {len(raw)} chars")
-        print(raw[:1200])
+        logger.debug("[hook] LLM raw %d chars", len(raw))
+        logger.debug("[hook] LLM raw preview: %s", raw[:1200])
         data = _parse_json_strict(raw)
         clips = _validate_clips(data)
         if not clips:
-            print(f"[hook] WARN validacion dejo 0 clips, data: {data} — fallback mock")
-            logger.warning("Hook validacion 0 clips, usando fallback mock")
+            logger.warning("Hook validacion 0 clips, data=%s — fallback mock", data)
             return _mock_hooks(segments)
         return clips
     except Exception:

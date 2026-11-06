@@ -41,7 +41,7 @@ class RunPodHandlerTests(unittest.TestCase):
 
         with (
             patch.dict(sys.modules, {"backend_fastapi.app.services.engine": engine}),
-            patch("backend.handler._download_input", side_effect=fake_download),
+            patch("backend.handler._download_file", side_effect=fake_download),
         ):
             result = process_video_job(
                 {"input": {"video_url": "https://media.example/video.mp4", "video_id": "video-123"}}

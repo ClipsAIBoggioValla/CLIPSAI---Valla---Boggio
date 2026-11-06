@@ -83,6 +83,25 @@ def _update_clip_status(
             pass
 
 
+def _clip_segments_to_range(segments, clip):
+    """Filtra y shiftea segmentos al rango del clip."""
+    clipped: list[dict] = []
+    for seg in segments:
+        s = float(seg["start"])
+        e = float(seg["end"])
+        if e <= s:
+            continue
+        if e < clip.start_time or s > clip.end_time:
+            continue
+        cs = max(s, float(clip.start_time))
+        ce = min(e, float(clip.end_time))
+        if ce > cs:
+            clipped.append({"start": cs - float(clip.start_time), "end": ce - float(clip.start_time), "text": str(seg["text"])})
+    if clipped:
+        return clipped
+    return [{"start": float(s["start"]), "end": float(s["end"]), "text": str(s["text"])} for s in segments]
+
+
 def run_subtitle_pipeline(clip_id: uuid.UUID | str) -> None:
     try:
         cid = uuid.UUID(str(clip_id))
@@ -134,19 +153,7 @@ def run_subtitle_pipeline(clip_id: uuid.UUID | str) -> None:
         if not segments:
             raise RuntimeError("Transcripcion vacia: no se generaron segmentos")
 
-        clipped: list[dict] = []
-        for seg in segments:
-            s = float(seg["start"])
-            e = float(seg["end"])
-            if e <= s:
-                continue
-            if e < clip.start_time or s > clip.end_time:
-                continue
-            cs = max(s, float(clip.start_time))
-            ce = min(e, float(clip.end_time))
-            if ce > cs:
-                clipped.append({"start": cs - float(clip.start_time), "end": ce - float(clip.start_time), "text": str(seg["text"])})
-        target_segments = clipped if clipped else [{"start": float(s["start"]), "end": float(s["end"]), "text": str(s["text"])} for s in segments]
+        target_segments = _clip_segments_to_range(segments, clip)
 
         write_ass_file(target_segments, ass_path, title=clip.title or str(clip.id))
 

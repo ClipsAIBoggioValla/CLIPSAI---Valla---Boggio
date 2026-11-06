@@ -16,33 +16,24 @@ logging.basicConfig(level=logging.INFO, format='%(message)s')
 log = logging.getLogger(__name__)
 
 
-class VideoEditor:
-    """Editor de videos virales — crop centrado con FFmpeg."""
+def verificar_ffmpeg() -> None:
+    """Verifica que FFmpeg esté disponible en el sistema."""
+    try:
+        subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True)
+        log.info("  FFmpeg: OK")
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        log.error("  FFmpeg no encontrado. Instalalo: apt install ffmpeg / brew install ffmpeg")
+        raise
 
-    def __init__(self, clips_dir: str = "clips", salida_dir: str = "clips_editados"):
-        self.clips_dir = Path(clips_dir)
-        self.salida_dir = Path(salida_dir)
-        self.salida_dir.mkdir(parents=True, exist_ok=True)
 
-        self.ancho_final = 1080
-        self.alto_final = 1920
-        self.fps = 30
+class VerticalFormatter:
+    """Aplica formato vertical 9:16 a un video usando FFmpeg."""
 
-        self._verificar_ffmpeg()
-
-    def _verificar_ffmpeg(self):
-        try:
-            subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True)
-            log.info("  FFmpeg: OK")
-        except (FileNotFoundError, subprocess.CalledProcessError):
-            log.error("  FFmpeg no encontrado. Instalalo: apt install ffmpeg / brew install ffmpeg")
-            raise
-
-    def cargar_clips(self) -> List[Path]:
-        log.info("[1/2] Cargando clips...")
-        clips = sorted(self.clips_dir.glob("*.mp4"))
-        log.info(f"      Clips encontrados: {len(clips)}")
-        return clips
+    def __init__(self, ancho_final: int = 1080, alto_final: int = 1920, fps: int = 30):
+        self.ancho_final = ancho_final
+        self.alto_final = alto_final
+        self.fps = fps
+        verificar_ffmpeg()
 
     def aplicar_formato_vertical(self, video_path: str, salida: str) -> bool:
         """Crop centrado 9:16 con FFmpeg. Sin OpenCV."""
@@ -107,6 +98,22 @@ class VideoEditor:
             log.error(f"      Error: {e}")
             return False
 
+
+class VideoEditor:
+    """Orquesta el procesamiento por lotes de clips a formato vertical."""
+
+    def __init__(self, clips_dir: str = "clips", salida_dir: str = "clips_editados"):
+        self.clips_dir = Path(clips_dir)
+        self.salida_dir = Path(salida_dir)
+        self.salida_dir.mkdir(parents=True, exist_ok=True)
+        self.formatter = VerticalFormatter()
+
+    def cargar_clips(self) -> List[Path]:
+        log.info("[1/2] Cargando clips...")
+        clips = sorted(self.clips_dir.glob("*.mp4"))
+        log.info(f"      Clips encontrados: {len(clips)}")
+        return clips
+
     def procesar_clip(self, clip_path: Path, index: int) -> Optional[str]:
         """Procesa un clip individual: crop vertical 9:16."""
         log.info(f"\n{'='*40}")
@@ -134,7 +141,7 @@ class VideoEditor:
             except Exception:
                 pass
 
-        if self.aplicar_formato_vertical(str(clip_path), str(salida_final)):
+        if self.formatter.aplicar_formato_vertical(str(clip_path), str(salida_final)):
             log.info(f"      ✓ {os.path.basename(salida_final)}")
             return str(salida_final)
         else:

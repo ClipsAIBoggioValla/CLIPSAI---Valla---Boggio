@@ -288,11 +288,10 @@ def _call_anthropic_with_model(prompt: str, sentence_ids: list[str], model: str)
                 tool_choice=tool_choice,
             )
         except Exception as sdk_e:
-            err_msg = str(sdk_e)
-            # Detectar timeout / API key / rate limit
-            if "timeout" in err_msg.lower() or "timed out" in err_msg.lower():
-                logger.error(f"Error en API de Claude: timeout {TIMEOUT}s — {err_msg}")
-                raise RuntimeError(f"Error en Claude: timeout {TIMEOUT}s — {err_msg}") from sdk_e
+            err_msg = str(sdk_e).lower()
+            if "timeout" in err_msg or "timed out" in err_msg:
+                logger.error(f"Error en API de Claude: timeout {TIMEOUT}s — {sdk_e}")
+                raise RuntimeError(f"Error en Claude: timeout {TIMEOUT}s — {sdk_e}") from sdk_e
             raise
         # Extraer texto
         txt = ""
@@ -319,15 +318,12 @@ def _call_anthropic_with_model(prompt: str, sentence_ids: list[str], model: str)
         # Captura explícita de APIConnectionError y APITimeoutError (spec: timeout 60.0, max_retries 2)
         err_type = type(e).__name__
         err_msg = str(e)
-        if err_type in ("APIConnectionError", "APITimeoutError") or "APIConnectionError" in err_type or "APITimeoutError" in err_type or "timeout" in err_msg.lower() or "timed out" in err_msg.lower():
+        lowered = err_msg.lower()
+        if "timeout" in lowered or "timed out" in lowered or err_type in ("APIConnectionError", "APITimeoutError"):
             logger.error(f"Error en API de Claude: {err_type} timeout {TIMEOUT}s — {err_msg}")
             raise RuntimeError(f"Error en Claude: {err_type} timeout {TIMEOUT}s — {err_msg}") from e
-        # Si SDK falla con 401/cuota, propagar como Error en la API de Claude
-        if "401" in err_msg or "authentication" in err_msg.lower() or "invalid" in err_msg.lower():
+        if "401" in err_msg or "authentication" in lowered or "invalid" in lowered or "quota" in lowered or "rate" in lowered or "429" in err_msg:
             raise RuntimeError(f"Error en API de Claude: {err_msg}") from e
-        if "quota" in err_msg.lower() or "rate" in err_msg.lower() or "429" in err_msg:
-            raise RuntimeError(f"Error en API de Claude: {err_msg}") from e
-        # Para otros errores, intentar fallback a requests
         logger.warning("Claude SDK fallo (%s), intentando requests", e)
 
     # Fallback requests directo
@@ -397,6 +393,71 @@ def _call_anthropic(prompt: str, sentence_ids: list[str]) -> str:
         return _call_anthropic_with_model(prompt, sentence_ids, CLAUDE_FALLBACK_MODEL)
 
 
+def _validate_one_clip(c):
+    """Valida un clip crudo de Claude y retorna dict normalizado o None."""
+    try:
+        if any(key in c for key in ("start", "end", "start_time", "end_time")):
+            return None
+        start_sentence_id = str(c.get("start_sentence_id", "")).strip()
+        end_sentence_id = str(c.get("end_sentence_id", "")).strip()
+        score = float(c.get("score", c.get("viral_score", 0)))
+        title = str(c.get("title", "")).strip()[:60]
+        raw_hook_candidates = c.get("hook_candidates", [])
+        raw_has_hook = c.get("has_hook")
+        if (
+            not re.fullmatch(r"S_\d+", start_sentence_id)
+            or not re.fullmatch(r"S_\d+", end_sentence_id)
+            or not title
+            or not isinstance(raw_hook_candidates, list)
+            or not isinstance(raw_has_hook, bool)
+        ):
+            return None
+        if not (1 <= score <= 10):
+            if 10 < score <= 100:
+                score = score / 10
+            else:
+                return None
+        hook_candidates: list[dict[str, Any]] = []
+        for candidate in raw_hook_candidates[:5]:
+            if not isinstance(candidate, dict):
+                continue
+            hook_start_id = str(candidate.get("start_sentence_id", "")).strip()
+            hook_end_id = str(candidate.get("end_sentence_id", "")).strip()
+            standalone = candidate.get("makes_sense_standalone")
+            try:
+                curiosity_score = int(candidate.get("curiosity_score", 0))
+            except (TypeError, ValueError):
+                continue
+            if (
+                re.fullmatch(r"S_\d+", hook_start_id)
+                and re.fullmatch(r"S_\d+", hook_end_id)
+                and 1 <= curiosity_score <= 10
+                and isinstance(standalone, bool)
+            ):
+                hook_candidates.append(
+                    {
+                        "start_sentence_id": hook_start_id,
+                        "end_sentence_id": hook_end_id,
+                        "curiosity_score": curiosity_score,
+                        "makes_sense_standalone": standalone,
+                    }
+                )
+        has_hook = raw_has_hook and any(
+            candidate["curiosity_score"] >= 8 and candidate["makes_sense_standalone"]
+            for candidate in hook_candidates
+        )
+        return {
+            "start_sentence_id": start_sentence_id,
+            "end_sentence_id": end_sentence_id,
+            "score": score,
+            "title": title,
+            "hook_candidates": hook_candidates,
+            "has_hook": has_hook,
+        }
+    except Exception:
+        return None
+
+
 def _parse_and_validate(raw: str) -> list[dict[str, Any]]:
     try:
         repaired_string = repair_json(raw, return_objects=False)
@@ -424,70 +485,11 @@ def _parse_and_validate(raw: str) -> list[dict[str, Any]]:
         )
     validated: list[dict[str, Any]] = []
     for c in clips_raw:
-        try:
-            if any(key in c for key in ("start", "end", "start_time", "end_time")):
-                continue
-            start_sentence_id = str(c.get("start_sentence_id", "")).strip()
-            end_sentence_id = str(c.get("end_sentence_id", "")).strip()
-            score = float(c.get("score", c.get("viral_score", 0)))
-            title = str(c.get("title", "")).strip()[:60]
-            raw_hook_candidates = c.get("hook_candidates", [])
-            raw_has_hook = c.get("has_hook")
-            if (
-                not re.fullmatch(r"S_\d+", start_sentence_id)
-                or not re.fullmatch(r"S_\d+", end_sentence_id)
-                or not title
-                or not isinstance(raw_hook_candidates, list)
-                or not isinstance(raw_has_hook, bool)
-            ):
-                continue
-            if not (1 <= score <= 10):
-                # Normalizar si vino 0-100
-                if 10 < score <= 100:
-                    score = score / 10
-                else:
-                    continue
-            hook_candidates: list[dict[str, Any]] = []
-            for candidate in raw_hook_candidates[:5]:
-                if not isinstance(candidate, dict):
-                    continue
-                hook_start_id = str(candidate.get("start_sentence_id", "")).strip()
-                hook_end_id = str(candidate.get("end_sentence_id", "")).strip()
-                standalone = candidate.get("makes_sense_standalone")
-                try:
-                    curiosity_score = int(candidate.get("curiosity_score", 0))
-                except (TypeError, ValueError):
-                    continue
-                if (
-                    re.fullmatch(r"S_\d+", hook_start_id)
-                    and re.fullmatch(r"S_\d+", hook_end_id)
-                    and 1 <= curiosity_score <= 10
-                    and isinstance(standalone, bool)
-                ):
-                    hook_candidates.append(
-                        {
-                            "start_sentence_id": hook_start_id,
-                            "end_sentence_id": hook_end_id,
-                            "curiosity_score": curiosity_score,
-                            "makes_sense_standalone": standalone,
-                        }
-                    )
-            has_hook = raw_has_hook and any(
-                candidate["curiosity_score"] >= 8 and candidate["makes_sense_standalone"]
-                for candidate in hook_candidates
-            )
-            validated.append(
-                {
-                    "start_sentence_id": start_sentence_id,
-                    "end_sentence_id": end_sentence_id,
-                    "score": score,
-                    "title": title,
-                    "hook_candidates": hook_candidates,
-                    "has_hook": has_hook,
-                }
-            )
-        except Exception:
+        if not isinstance(c, dict):
             continue
+        item = _validate_one_clip(c)
+        if item is not None:
+            validated.append(item)
     # Ordenar por score descendente, max 3
     validated.sort(key=lambda x: x["score"], reverse=True)
     return validated[:3]

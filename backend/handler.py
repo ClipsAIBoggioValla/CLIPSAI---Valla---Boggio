@@ -12,6 +12,10 @@ import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
+
+import logging
+
+logger = logging.getLogger(__name__)
 from urllib.parse import urlparse
 
 import requests
@@ -94,7 +98,7 @@ def process_video_job(job: dict[str, Any]) -> dict[str, Any]:
             "transcription_text": "0:00 - Primer segmento\n0:30 - Segundo..."
         }}
     """
-    print("[RunPod Handler] Iniciando procesamiento...")
+    logger.info("[RunPod Handler] Iniciando procesamiento...")
     
     if not isinstance(job, dict):
         raise ValueError("El job de RunPod debe ser un objeto JSON")
@@ -127,8 +131,8 @@ def process_video_job(job: dict[str, Any]) -> dict[str, Any]:
 
     video_id = str(input_data.get("video_id") or uuid.uuid4())
     
-    print(f"[RunPod Handler] video_id={video_id}")
-    print(f"[RunPod Handler] video_url={video_url[:80]}...")
+    logger.info(f"[RunPod Handler] video_id={video_id}")
+    logger.info(f"[RunPod Handler] video_url={video_url[:80]}...")
 
     with tempfile.TemporaryDirectory(prefix="clipsai_runpod_") as work_dir:
         work_path = Path(work_dir)
@@ -136,30 +140,30 @@ def process_video_job(job: dict[str, Any]) -> dict[str, Any]:
         transcript_path = work_path / f"transcription{transcript_extension}"
 
         # Descargar video
-        print(f"[RunPod Handler] Descargando video a {video_path}...")
+        logger.info(f"[RunPod Handler] Descargando video a {video_path}...")
         _download_file(video_url, video_path, MAX_VIDEO_BYTES)
-        print(f"[RunPod Handler] Video descargado: {video_path.stat().st_size} bytes")
+        logger.info(f"[RunPod Handler] Video descargado: {video_path.stat().st_size} bytes")
 
         # Descargar o escribir transcripcion
         if transcript_url:
-            print(f"[RunPod Handler] Descargando transcripcion a {transcript_path}...")
+            logger.info(f"[RunPod Handler] Descargando transcripcion a {transcript_path}...")
             _download_file(transcript_url, transcript_path, MAX_TRANSCRIPT_BYTES)
-            print(f"[RunPod Handler] Transcripcion descargada: {transcript_path.stat().st_size} bytes")
+            logger.info(f"[RunPod Handler] Transcripcion descargada: {transcript_path.stat().st_size} bytes")
         else:
-            print(f"[RunPod Handler] Escribiendo transcripcion desde texto...")
+            logger.info(f"[RunPod Handler] Escribiendo transcripcion desde texto...")
             transcript_path.write_text(transcript_text or "", encoding="utf-8")
 
         # Importar SOLO engine.py (sin FastAPI, sin DB)
-        print("[RunPod Handler] Importando engine.py...")
+        logger.info("[RunPod Handler] Importando engine.py...")
         from engine import procesar_video
 
         # Ejecutar el pipeline de procesamiento
-        print(f"[RunPod Handler] Ejecutando procesar_video({video_path}, {transcript_path})...")
+        logger.info(f"[RunPod Handler] Ejecutando procesar_video({video_path}, {transcript_path})...")
         result = procesar_video(str(video_path), str(transcript_path))
 
         if not result.exito:
             error_msg = f"{result.error_tipo}: {result.error}" if result.error_tipo else result.error
-            print(f"[RunPod Handler] ERROR: {error_msg}")
+            logger.info(f"[RunPod Handler] ERROR: {error_msg}")
             return {
                 "status": "FAILED",
                 "video_id": video_id,
@@ -169,7 +173,7 @@ def process_video_job(job: dict[str, Any]) -> dict[str, Any]:
             }
 
         clips = result.clips
-        print(f"[RunPod Handler] EXITO: {len(clips)} clips generados")
+        logger.info(f"[RunPod Handler] EXITO: {len(clips)} clips generados")
 
         return {
             "status": "COMPLETED",

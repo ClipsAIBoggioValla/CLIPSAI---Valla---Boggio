@@ -193,11 +193,11 @@ async def lifespan(app: FastAPI):
                         job.status = "failed"
                         job.error_message = "Proceso interrumpido por reinicio del servidor."
                     db.commit()
-                    print(f"[STARTUP] Se marcaron {len(interrupted_jobs)} trabajos huérfanos como 'failed'.")
+                    logger.info("[STARTUP] Se marcaron %d trabajos huérfanos como 'failed'.", len(interrupted_jobs))
                 else:
-                    print("[STARTUP] No hay trabajos huérfanos en 'processing'.")
+                    logger.info("[STARTUP] No hay trabajos huérfanos en 'processing'.")
             except Exception as e:
-                print(f"[STARTUP] Error al limpiar jobs huérfanos: {e}")
+                logger.warning("[STARTUP] Error al limpiar jobs huérfanos: %s", e)
                 try:
                     db.rollback()
                 except Exception:
@@ -205,7 +205,7 @@ async def lifespan(app: FastAPI):
             finally:
                 db.close()
         except Exception as e:
-            print(f"[STARTUP] Error al limpiar jobs huérfanos: {e}")
+            logger.warning("[STARTUP] Error al limpiar jobs huérfanos: %s", e)
     else:
         logger.warning("Database not available. Skipping migrations and running in API-only mode.")
 
