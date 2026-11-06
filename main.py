@@ -10,6 +10,7 @@ import json
 import time
 import subprocess
 import sys
+import shutil
 
 # Forzar la codificación de la consola a UTF-8 en Windows para evitar errores
 # al imprimir caracteres especiales (✓, ►, etc.) en PowerShell
@@ -78,12 +79,15 @@ def verificar_ffmpeg() -> bool:
 def verificar_dependencias() -> bool:
     """Verifica que las dependencias estén instaladas."""
     if not PYDUB_AVAILABLE:
+        print("Error: pydub no está instalado")
+        print("Ejecuta: pip install pydub")
         return False
     return True
 
 
 def extraer_audio(video_path: str, audio_path: str = "audio.mp3") -> str:
     """Extrae el audio de un video usando FFmpeg."""
+    print("[1/6] Extrayendo audio del video...")
     
     if os.path.exists(audio_path):
         os.remove(audio_path)
@@ -95,6 +99,7 @@ def extraer_audio(video_path: str, audio_path: str = "audio.mp3") -> str:
     
     try:
         subprocess.run(comando, capture_output=True, check=True)
+        print(f"      Audio guardado: {audio_path}")
         return audio_path
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"Error al extraer audio: {e.stderr.decode()}")
@@ -102,8 +107,10 @@ def extraer_audio(video_path: str, audio_path: str = "audio.mp3") -> str:
 
 def analizar_audio_video(audio_path: str = "audio.mp3", max_eventos: int = 30) -> List[Dict]:
     """Analiza el audio usando el módulo audio_analyzer."""
+    print("[2/6] Analizando audio...")
     
     if not AUDIO_ANALYZER_AVAILABLE:
+        print("      audio_analyzer no disponible")
         return []
     
     try:
@@ -114,6 +121,7 @@ def analizar_audio_video(audio_path: str = "audio.mp3", max_eventos: int = 30) -
                 momentos = json.load(f)
             if momentos and "momentos" in momentos:
                 eventos_cluster = momentos["momentos"]
+                print(f"      Momentos virales del clustering: {len(eventos_cluster)}")
                 
                 for mc in eventos_cluster[:5]:
                     eventos.append({
@@ -128,8 +136,10 @@ def analizar_audio_video(audio_path: str = "audio.mp3", max_eventos: int = 30) -
         eventos_top = eventos[:50]
         eventos_top = sorted(eventos_top, key=lambda x: x.get("timestamp", ""))
         
+        print(f"      Eventos detectados: {len(eventos)}, usando top {len(eventos_top)}")
         return eventos_top
     except Exception as e:
+        print(f"      Error en análisis: {e}")
         return []
 
 
@@ -145,6 +155,7 @@ def leer_transcripcion_para_ia(ruta: str, max_chars: int = 6000) -> str:
         contenido = f.read().strip()
     if len(contenido) > max_chars:
         contenido = contenido[:max_chars].rsplit('\n', 1)[0]
+        print(f"      Transcripción truncada para IA: {len(contenido)} caracteres")
     return contenido
 
 
@@ -161,6 +172,7 @@ def formatear_transcripcion(transcripcion_raw: str, salida_path: str = "transcri
     """
     import re
     
+    print("[3.5/6] Formateando transcripción completa...")
     
     lineas_raw = transcripcion_raw.strip().split('\n')
     segmentos = []
@@ -199,6 +211,7 @@ def formatear_transcripcion(transcripcion_raw: str, salida_path: str = "transcri
         segmentos.append((f"{h:02d}:{m:02d}:{s:02d}", texto_pendiente))
     
     if not segmentos:
+        print("      ✗ No se pudieron parsear segmentos")
         return transcripcion_raw
     
     with open(salida_path, "w", encoding="utf-8") as f:
@@ -207,9 +220,11 @@ def formatear_transcripcion(transcripcion_raw: str, salida_path: str = "transcri
     
     ts_primero = segmentos[0][0]
     ts_ultimo = segmentos[-1][0]
+    print(f"      ✓ Transcripción formateada: {salida_path} ({len(segmentos)} segmentos)")
+    print(f"      Rango: {ts_primero} hasta {ts_ultimo}")
     for i, (ts, txt) in enumerate(segmentos[:5]):
+        print(f"        {ts}: {txt[:50]}...")
     
-        pass
     return salida_path
 
 
@@ -228,6 +243,7 @@ def preparar_transcripcion_para_ia(ruta: str = "transcripcion_formatted.txt", ma
     Comprime la transcripción para la IA mientras preserva todos los timestamps.
     Mantiene estructura completa pero elimina redundancias.
     """
+    print("[3.8/6] Preparando transcripción para IA...")
     
     with open(ruta, "r", encoding="utf-8") as f:
         lineas = [l.strip() for l in f.readlines() if l.strip()]
@@ -244,9 +260,11 @@ def preparar_transcripcion_para_ia(ruta: str = "transcripcion_formatted.txt", ma
         return ""
     
     total_segmentos = len(segmentos)
+    print(f"      Total segmentos: {total_segmentos}")
     
     if total_segmentos <= max_segmentos:
         resultado = "\n".join([f"{ts} - {texto}" for ts, texto in segmentos])
+        print(f"      Sin comprimir (≤{max_segmentos} segmentos)")
         return resultado
     
     factor = total_segmentos / max_segmentos
@@ -267,6 +285,7 @@ def preparar_transcripcion_para_ia(ruta: str = "transcripcion_formatted.txt", ma
         segmentos_comprimidos.append((ts, texto))
     
     resultado = "\n".join([f"{ts} - {texto}" for ts, texto in segmentos_comprimidos])
+    print(f"      Comprimida: {len(segmentos_comprimidos)} segmentos (factor {factor:.1f}x)")
     
     return resultado
 
@@ -276,6 +295,7 @@ def enriquecer_datos_para_ia(datos_audio: List[Dict], transcripcion_path: str = 
     Correlaciona eventos de audio con segmentos de transcripción.
     Returns un diccionario con datos enriquecidos para la IA.
     """
+    print("[3.9/6] Enriqueciendo datos para IA...")
     
     with open(transcripcion_path, "r", encoding="utf-8") as f:
         lineas = [l.strip() for l in f.readlines() if l.strip() and " - " in l]
@@ -321,6 +341,7 @@ def enriquecer_datos_para_ia(datos_audio: List[Dict], transcripcion_path: str = 
                 "distancia_segundos": mejor_distancia,
             })
     
+    print(f"      Eventos enriquecidos: {len(eventos_enriquecidos)}")
     
     return {
         "eventos": eventos_enriquecidos,
@@ -337,27 +358,31 @@ def construir_prompt(transcripcion: str, datos_audio: List[Dict], datos_enriquec
     else:
         audio_json = json.dumps(datos_audio, indent=2, ensure_ascii=False)
     
-    return f"""Sos un experto en contenido viral para TikTok, Instagram Reels y YouTube Shorts especializado en contenido deportivo y periodístico en español rioplatense. Tu tarea es analizar una transcripción y datos de audio para identificar los momentos con mayor potencial viral. Conocés en profundidad qué engancha a la audiencia hispanohablante de fútbol/deportes en redes sociales. DEVOLVÉ ÚNICAMENTE UN ARRAY JSON VÁLIDO. Sin texto antes ni después. Sin markdown. Empezá con [ y terminá con ].
+    return f"""Sos un experto en crear contenido viral para redes sociales (TikTok, Reels, Shorts). Tu objetivo es encontrar los momentos más interesantes, emocionantes, polémicos, educativos o informativos de CUALQUIER tipo de video. No importa si es deporte, entrevista, vlog, tutorial, gaming, música, noticias o cualquier otro género. Buscá los segmentos que más enganchen a la audiencia.
+
+DEVOLVÉ ÚNICAMENTE UN ARRAY JSON VÁLIDO. Sin texto antes ni después. Sin markdown. Empezá con [ y terminá con ].
+
+REGLA OBLIGATORIA: Debés devolver SIEMPRE un array con entre 1 y 5 clips. Si no hay momentos perfectos, elegí los mejores segmentos disponibles como 'mejor esfuerzo'. NUNCA devuelvas un array vacío [].
 
 CRITERIOS DE VIRALIDAD (ordenados por peso):
 
 REVELACIÓN O EXCLUSIVA (peso 10/10)
-Información que el espectador no sabía y genera sorpresa. Datos internos, rumores confirmados, primicias. Frases como "tengo la información", "me dijeron", "la verdad es que". Ejemplo: revelar por qué realmente salió un jugador, una lesión real vs oficial.
+Información que el espectador no sabía y genera sorpresa. Datos internos, rumores confirmados, primicias. Frases como "tengo la información", "me dijeron", "la verdad es que".
 
 CONTROVERSIA O CONTRADICCIÓN (peso 9/10)
-Momentos donde se contradice la versión oficial. Críticas directas a jugadores, cuerpo técnico o dirigencia. Predicciones arriesgadas con fundamento. Frases como "no puede ser", "me parece mal", "error garrafal".
+Momentos donde se contradice la versión oficial. Críticas directas. Predicciones arriesgadas con fundamento. Frases como "no puede ser", "me parece mal", "error garrafal".
 
 DATO CONCRETO IMPACTANTE (peso 8/10)
-Números, fechas, montos específicos que sorprenden. Comparaciones que reencuadran la realidad. Ejemplo: "costó más que Julián Álvarez", "8 millones de euros".
+Números, fechas, montos específicos que sorprenden. Comparaciones que reencuadran la realidad.
 
 MOMENTO EMOCIONAL AUTÉNTICO (peso 7/10)
-Nostalgia, pasión, anécdota personal del conductor. Momento donde el conductor se quiebra o se emociona. Frases como "se me pone la piel de gallina", "lo atesoro".
+Nostalgia, pasión, anécdota personal. Momento donde alguien se quiebra o se emociona.
 
 ANÁLISIS TÉCNICO SIMPLE Y CLARO (peso 6/10)
-Explicación de por qué pasó algo en cancha de manera accesible. Máximo cuando usa metáforas o ejemplos concretos. Ejemplo: explicar por qué sacaron a un jugador con causa táctica clara.
+Explicación de por qué pasó algo de manera accesible. Máximo cuando usa metáforas o ejemplos concretos.
 
 PREDICCIÓN O ANTICIPACIÓN (peso 5/10)
-El conductor adelanta algo que va a pasar. Spoiler de una decisión técnica o dirigencial futura. Genera curiosidad sobre si acertó o no.
+Se adelanta algo que va a pasar. Spoiler de una decisión futura. Genera curiosidad sobre si acertó o no.
 
 SEÑALES DE AUDIO QUE AMPLIFICAN EL SCORE:
 - intensidad > 7.0 en el timestamp: +1 punto al score
@@ -435,8 +460,8 @@ CAMPOS OBLIGATORIOS:
 - audio_score: 1-10 basado en los datos de audio en ese rango de tiempo
 
 REGLAS FINALES:
-- Score mínimo para incluir: 7
-- Máximo 10 clips
+- Asigná un score del 1 al 10, pero incluí todos los clips que tengan al menos un 5
+- Devolvé entre 1 y 5 clips (NUNCA 0)
 - No repetir el mismo tema o personaje en más de 2 clips
 - El primer clip del array DEBE ser el de mayor score
 - Todos los timestamps deben existir en la transcripción proporcionada
@@ -454,6 +479,7 @@ def _post_con_retry(url: str, headers: Dict, body: Dict, timeout: int = TIMEOUT,
         except requests.exceptions.RequestException as e:
             if intento == intentos:
                 raise ConnectionError(f"Error de conexión: {e}")
+        print(f"      Intento {intento} falló, reintentando en {2 * intento}s...")
         time.sleep(2 * intento)
 
 
@@ -554,7 +580,10 @@ def obtener_clips_ia(transcripcion: str, datos_audio: List[Dict], datos_enriquec
         proveedor = "OpenAI"
     else:
         proveedor = "DeepSeek"
+    print(f"[4/6] Analizando con IA ({proveedor})...")
 
+    print(f"[DEBUG CLAUDE] Transcripción enviada ({len(transcripcion)} chars): {transcripcion[:300]}...")
+    
     prompt = construir_prompt(transcripcion, datos_audio, datos_enriquecidos)
 
     try:
@@ -581,15 +610,59 @@ def obtener_clips_ia(transcripcion: str, datos_audio: List[Dict], datos_enriquec
         else:
             raise
 
+    print(f"      Respuesta IA ({len(contenido)} chars)")
+    print(f"      === RESPUESTA COMPLETA ===")
+    print(contenido[:2000])
+    print(f"      === FIN RESPUESTA ===")
     
+    # Loggear respuesta cruda completa para debug
+    logger.info("Respuesta Claude raw (completa): %s", contenido)
+    print(f"[DEBUG CLAUDE] Respuesta cruda recibida ({len(contenido)} chars): {contenido[:500]}...")
+    
+    # 1. Si viene envuelto en markdown fences ```json ... ```, extraerlo primero
+    md_match = re.search(r'```(?:json)?\s*([\s\S]*?)```', contenido)
+    if md_match:
+        print(f"      Detectado JSON dentro de markdown fences")
+        contenido = md_match.group(1).strip()
+    
+    # 2. Buscar el array JSON más largo posible (puede haber texto antes/después)
     json_match = re.search(r'\[[\s\S]*\]', contenido)
     if not json_match:
-        raise ValueError("No se encontró JSON válido en la respuesta")
+        # 3. Fallback: buscar objetos individuales { ... }
+        print(f"      No se encontró array JSON. Buscando objetos individuales...")
+        print(f"      Preview crudo: {contenido[:500]}...")
+        try:
+            raw = contenido.strip()
+            if raw.startswith("{") and raw.endswith("}"):
+                data = json.loads(raw)
+                if "clips" in data and isinstance(data["clips"], list):
+                    clips = data["clips"]
+                    print(f"      Extraidos {len(clips)} clips desde objeto con clave 'clips'")
+                    return clips
+            # Último intento: parsear objetos sueltos
+            objetos = []
+            for m in re.finditer(r'\{[^{}]*\}', contenido):
+                try:
+                    obj = json.loads(m.group())
+                    if "inicio" in obj and "fin" in obj:
+                        objetos.append(obj)
+                except json.JSONDecodeError:
+                    continue
+            if objetos:
+                print(f"      Extraidos {len(objetos)} clips desde objetos sueltos")
+                return objetos
+        except Exception as ex:
+            logger.warning("Fallback parse failed: %s", ex)
+        raise ValueError("No se encontró JSON válido en la respuesta de la IA")
     
-    clips = parsear_json_tolerante(contenido)
+    json_str = json_match.group(0)
+    clips = parsear_json_tolerante(json_str)
     if not clips:
+        print(f"      JSON parse devolvió 0 clips. Respuesta raw:")
+        print(contenido[:2000])
         raise ValueError("No se pudo parsear la respuesta como JSON")
     
+    print(f"      IA detectó {len(clips)} momentos")
     return clips
 
 
@@ -631,6 +704,11 @@ def parsear_json_tolerante(texto: str) -> List[Dict]:
     """Intenta parsear JSON, intentando reparar errores comunes."""
     texto = texto.strip()
     
+    # Si viene envuelto en markdown fences, limpiar
+    md_match = re.search(r'```(?:json)?\s*([\s\S]*?)```', texto)
+    if md_match:
+        texto = md_match.group(1).strip()
+    
     first_bracket = texto.find('[')
     last_bracket = texto.rfind(']')
     
@@ -671,6 +749,7 @@ def parsear_json_tolerante(texto: str) -> List[Dict]:
 
 def validar_clips(clips: List[Dict]) -> List[Dict]:
     """Valida y filtra los clips."""
+    print("[5/6] Validando clips...")
     
     def convertir_ts(ts):
         partes = ts.split(':')
@@ -688,9 +767,11 @@ def validar_clips(clips: List[Dict]) -> List[Dict]:
     
     clips_validos = []
     
+    print(f"      DEBUG: {len(clips)} clips recibidos de IA")
     
     for i, clip in enumerate(clips):
         if "inicio" not in clip or "fin" not in clip:
+            print(f"      DEBUG clip {i+1}: sin inicio/fin")
             continue
         
         score = clip.get("score", 5)
@@ -702,14 +783,17 @@ def validar_clips(clips: List[Dict]) -> List[Dict]:
             inicio_seg = convertir_ts(inicio)
             fin_seg = convertir_ts(fin)
         except Exception as e:
+            print(f"      DEBUG clip {i+1}: error parseo ts: {e}")
             continue
         
         duracion = fin_seg - inicio_seg
         
         if duracion < 30 or duracion > 90:
+            print(f"      DEBUG clip {i+1}: duracion {duracion}s fuera de rango (15-120)")
             continue
         
         if score < 5:
+            print(f"      DEBUG clip {i+1}: score {score} < 5 (umbral mínimo)")
             continue
         
         criterio = clip.get("criterio_principal", "otro")
@@ -729,10 +813,12 @@ def validar_clips(clips: List[Dict]) -> List[Dict]:
             "motivo": clip.get("motivo", ""),
             "tipo_contenido": clip.get("tipo_contenido", "otro"),
         })
+        print(f"      Clip {i+1}: {formatear_ts(inicio_seg)} - {formatear_ts(fin_seg)} ({duracion}s) | {criterio} | Score: {score} | {titulo[:40]}")
     
     clips_validos.sort(key=lambda x: x["score"], reverse=True)
     clips_validos = clips_validos[:10]
     
+    print(f"      Clips válidos: {len(clips_validos)}")
     return clips_validos
 
 
@@ -745,39 +831,57 @@ def crear_carpeta_salida(nombre: str = "clips") -> str:
 
 def cortar_clip(video_entrada: str, inicio: str, fin: str, salida: str) -> bool:
     """Corta un clip usando FFmpeg."""
+    # Debug: mostrar qué FFmpeg estamos usando
+    ffmpeg_path = shutil.which("ffmpeg")
+    print(f"      [DEBUG] Usando FFmpeg en: {ffmpeg_path}")
+    
+    # Verificar que el archivo de entrada existe
+    if not os.path.exists(video_entrada):
+        print(f"      ERROR CRITICO: El archivo de video de entrada NO existe: {video_entrada}")
+        return False
+    
     inicio_seg = timestamp_a_segundos(inicio)
     fin_seg = timestamp_a_segundos(fin)
     duracion = int(fin_seg - inicio_seg)
     
     if duracion <= 0:
+        print(f"      Duración inválida: {duracion}s (inicio={inicio}, fin={fin})")
         return False
     
+    print(f"      Corte: {inicio} -> {fin} (duración: {duracion}s)")
     
     try:
         comando = [
-            "ffmpeg", "-y",
-            "-ss", str(inicio),
-            "-i", video_entrada,
-            "-t", str(duracion),
-            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
-            "-c:a", "aac", "-b:a", "192k",
-            "-avoid_negative_ts", "make_zero",
-            "-movflags", "+faststart",
-            "-progress", "pipe:1",
+            "/usr/local/bin/ffmpeg", "-y",
+            "-i", video_entrada,           # Entrada primero
+            "-ss", str(inicio),             # Slow seek (después de -i)
+            "-t", str(duracion),            # Duración
+            "-c:v", "libx264",              # Codec de video estándar
+            "-c:a", "aac",                  # Codec de audio estándar
+            "-movflags", "+faststart",      # Optimización para web
             salida
         ]
+        comando_str = " ".join(comando)
+        print(f"      Ejecutando: {comando_str}")
+        
         result = subprocess.run(comando, capture_output=True, timeout=120)
         if result.returncode != 0:
+            stderr_msg = result.stderr.decode("utf-8", errors="ignore")
+            print(f"      Ffmpeg FALLÓ. Return code: {result.returncode}")
+            print(f"      Ffmpeg stderr completo:\n{stderr_msg}")
             return False
         return True
     except subprocess.TimeoutExpired:
+        print(f"      Timeout al cortar clip")
         return False
     except subprocess.CalledProcessError as e:
+        print(f"      Error al cortar: {e.stderr.decode('utf-8', errors='ignore') if e.stderr else e}")
         return False
 
 
 def procesar_clips(video_entrada: str, clips: List[Dict], carpeta: str) -> List[str]:
     """Genera todos los clips."""
+    print("[6/6] Generando clips...")
     
     archivos = []
     info_clips = []
@@ -786,12 +890,14 @@ def procesar_clips(video_entrada: str, clips: List[Dict], carpeta: str) -> List[
         nombre = os.path.join(carpeta, f"clip_{i}.mp4")
         inicio = str(clip["inicio"])
         fin = str(clip["fin"])
+        print(f"      Clip {i}: inicio={inicio}, fin={fin}")
         
         if cortar_clip(video_entrada, inicio, fin, nombre):
             if os.path.exists(nombre):
                 tamano = os.path.getsize(nombre)
+                print(f"      ✓ Guardado: {nombre} ({tamano} bytes)")
             else:
-                pass
+                print(f"      ✗ Archivo no creado")
             archivos.append(nombre)
             info_clips.append({
                 "archivo": nombre,
@@ -805,8 +911,8 @@ def procesar_clips(video_entrada: str, clips: List[Dict], carpeta: str) -> List[
                 "motivo": clip.get("motivo", ""),
             })
         else:
+            print(f"      ✗ Falló")
     
-            pass
     with open(os.path.join(carpeta, "clips_info.json"), "w", encoding="utf-8") as f:
         json.dump(info_clips, f, indent=2, ensure_ascii=False)
     
@@ -815,19 +921,35 @@ def procesar_clips(video_entrada: str, clips: List[Dict], carpeta: str) -> List[
 
 def main():
     """Función principal."""
+    print("=" * 50)
+    print("  CLIP GENERATOR")
+    print("=" * 50)
     
     if len(sys.argv) < 2:
+        print("\nUso:")
+        print("  Con transcripción manual: python main.py video.mp4 transcripcion.txt")
+        print("  Modo automático (Whisper): python main.py video.mp4")
+        print("  Solo mejor clip: python main.py video.mp4 --single")
+        print("  Corte manual: python main.py video.mp4 00:01:00 00:01:30")
+        print("\nEjemplos:")
+        print("  python main.py video.mp4 transcripcion.txt")
+        print("  python main.py video.mp4  (usa Whisper automático)")
+        print("  python main.py video.mp4 --single")
+        print("=" * 50)
         sys.exit(1)
     
     video = sys.argv[1]
     
     if not os.path.exists(video):
+        print(f"\nError: Video '{video}' no encontrado\n")
         sys.exit(1)
     
     if not verificar_ffmpeg():
+        print("\nError: FFmpeg no instalado\n")
         sys.exit(1)
     
     carpeta = crear_carpeta_salida("clips")
+    print(f"\nCarpeta: {os.path.abspath(carpeta)}\n")
     
     modo_whisper = False
     transcripcion_path = None
@@ -840,6 +962,8 @@ def main():
         else:
             inicio = sys.argv[2]
             fin = sys.argv[3]
+            print(f"MODO MANUAL: {inicio} -> {fin}")
+            print("=" * 50)
             
             nombre = os.path.join(carpeta, "clip_single.mp4")
             if cortar_clip(video, inicio, fin, nombre):
@@ -848,10 +972,12 @@ def main():
                     info_clips = [{"archivo": nombre, "inicio": inicio, "fin": fin}]
                     with open(os.path.join(carpeta, "clips_info.json"), "w", encoding="utf-8") as f:
                         json.dump(info_clips, f, indent=2)
+                    print(f"\n✓ Clip guardado: {nombre} ({tamano} bytes)")
+                    print(f"  Editar con: python editor_viral.py {nombre} clips_editados")
                 else:
-                    pass
+                    print("\n✗ Error: archivo no creado")
             else:
-                pass
+                print("\n✗ Error al cortar clip")
             sys.exit(0)
     elif len(sys.argv) >= 3:
         transcripcion_path = sys.argv[2]
@@ -859,15 +985,18 @@ def main():
             modo_single = True
             transcripcion_path = None
         elif not os.path.exists(transcripcion_path):
+            print(f"\nError: Transcripción '{transcripcion_path}' no encontrada\n")
             sys.exit(1)
     else:
         modo_whisper = True
     
+    print("MODO AUTOMÁTICO")
     if modo_single:
-        pass
+        print("  (Solo el mejor clip)")
     if modo_whisper:
+        print("  (Transcripción con Whisper)")
+    print("=" * 50)
     
-        pass
     try:
         audio_path = extraer_audio(video)
         
@@ -875,22 +1004,27 @@ def main():
         if AUDIO_ANALYZER_AVAILABLE:
             datos_audio = analizar_audio_video(audio_path)
         else:
+            print("      Saltando análisis de audio (audio_analyzer no instalado)")
         
-            pass
         if transcripcion_path and os.path.exists(transcripcion_path):
             from whisper_transcriber import parsear_transcripcion_youtube
+            print("\n[3/6] Parseando transcripción...")
             parsear_transcripcion_youtube(
                 transcripcion_path,
                 "transcripcion_formatted.txt"
             )
             texto_para_ia = leer_transcripcion_para_ia("transcripcion_formatted.txt")
+            print("      Modo: transcripción manual (instantáneo)")
         else:
             from whisper_transcriber import transcribir_video
+            print("\n[3/6] Transcribiendo con faster-whisper...")
+            print("      Modelo: large-v3-turbo (4x más rápido)")
             transcribir_video(
                 video,
                 "transcripcion_formatted.txt"
             )
             texto_para_ia = leer_transcripcion_para_ia("transcripcion_formatted.txt")
+            print("      Modo: faster-whisper automático")
         
         if texto_para_ia:
             datos_enriquecidos = enriquecer_datos_para_ia(datos_audio, "transcripcion_formatted.txt")
@@ -902,22 +1036,32 @@ def main():
         clips_validos = validar_clips(clips_ia)
         
         if not clips_validos:
+            print("\nNo se encontraron clips válidos")
             sys.exit(0)
         
         if modo_single:
+            print(f"\nProcesando solo el mejor clip (score: {clips_validos[0]['score']})")
             mejor_clip = [clips_validos[0]]
             archivos = procesar_clips(video, mejor_clip, carpeta)
         else:
             archivos = procesar_clips(video, clips_validos, carpeta)
         
+        print("\n" + "=" * 50)
+        print(f"  CLIPS GENERADOS: {len(archivos)}")
+        print(f"  UBICACIÓN: {os.path.abspath(carpeta)}")
+        print("=" * 50)
         
     except ValueError as e:
+        print(f"\nError de datos: {e}\n")
         sys.exit(1)
     except ConnectionError as e:
+        print(f"\nError de conexión: {e}\n")
         sys.exit(1)
     except TimeoutError as e:
+        print(f"\nError de tiempo: {e}\n")
         sys.exit(1)
     except Exception as e:
+        print(f"\nError: {e}\n")
         sys.exit(1)
 
 

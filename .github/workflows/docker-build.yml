@@ -4,7 +4,7 @@ on:
   workflow_dispatch: # Permite ejecutarlo manualmente desde la pestaña Actions de GitHub
   push:
     branches:
-      - main # Se ejecuta automáticamente al hacer push a main (cambia si tu rama se llama diferente)
+      - dev   # Se ejecuta automáticamente al hacer push a dev (rama activa)
 
 jobs:
   build-and-push:
@@ -12,6 +12,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -26,10 +28,10 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./backend_fastapi/Dockerfile
+          file: ./worker.Dockerfile
           push: true
           tags: |
-            mfboggio/clipsai-worker:v20
+            mfboggio/clipsai-worker:v28
             mfboggio/clipsai-worker:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
