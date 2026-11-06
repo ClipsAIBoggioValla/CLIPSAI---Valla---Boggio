@@ -10,9 +10,10 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..database import Base
+from .mixins import TimestampMixin
 
 
-class Video(Base):
+class Video(Base, TimestampMixin):
     __tablename__ = "videos"
     __table_args__ = {"extend_existing": True}
 
@@ -55,17 +56,6 @@ class Video(Base):
 
     duration_seconds: Mapped[float | None] = mapped_column(nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.current_timestamp(),
-        nullable=False,
-    )
-
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.current_timestamp(),
-        nullable=False,
-    )
 
     usuario: Mapped[object] = relationship("Usuario", backref="videos", lazy="joined")
     jobs: Mapped[list[object]] = relationship("Job", back_populates="video", cascade="all, delete-orphan", lazy="selectin")

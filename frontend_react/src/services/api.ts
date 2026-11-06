@@ -1,4 +1,5 @@
 import { http, request, TOKEN_KEY } from '@/lib/apiClient'
+import { buildClipListQuery, normalizeJob, normalizeVideo, triggerBlobDownload, uploadFileToSignedUrl } from 'frontend_common/services/shared'
 import type {
   AuthToken,
   AuthUser,
@@ -14,35 +15,6 @@ import type {
 const RAW_BASE: string =
   ((import.meta as unknown as { env?: Record<string, string> })?.env?.VITE_API_URL ?? '').trim()
 const BASE_URL = (RAW_BASE || 'https://clipsai-backend.onrender.com').replace(/\/$/, '')
-
-function triggerBlobDownload(blob: Blob, contentDisposition: string | null, fallbackFilename: string) {
-  let filename = fallbackFilename
-  if (contentDisposition) {
-    const m = contentDisposition.match(/filename="?([^"]+)"?/)
-    if (m) filename = m[1]
-  }
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
-}
-
-function normalizeVideo(raw: VideoUploadResponse & { filename?: string; title?: string }): VideoUploadResponse {
-  const filename = raw.filename ?? raw.title ?? ''
-  const title = raw.title ?? raw.filename ?? filename
-  return { ...raw, filename, title }
-}
-
-function normalizeJob(raw: JobResponse & { id?: string; job_id?: string; status?: string; progress?: number }): JobResponse {
-  const id = raw.id ?? raw.job_id ?? ''
-  const status = (raw.status ?? 'PENDING').toString().toUpperCase() as JobResponse['status']
-  const progress = typeof raw.progress === 'number' ? raw.progress : 0
-  return { ...raw, id, job_id: raw.job_id ?? id, status, progress } as JobResponse
-}
 
 export const authService = {
   login(data: UserLogin): Promise<AuthToken> {
@@ -66,15 +38,7 @@ export const videoService = {
       throw new Error('El backend no devolvió upload_url y file_key')
     }
 
-    const response = await fetch(signed.upload_url, {
-      method: 'PUT',
-      headers: { 'Content-Type': videoFile.type },
-      body: videoFile,
-    })
-    if (!response.ok) {
-      const detail = await response.text().catch(() => '')
-      throw new Error(`Error al subir a Cloudflare R2 (HTTP ${response.status})${detail ? `: ${detail.slice(0, 300)}` : ''}`)
-    }
+    await uploadFileToSignedUrl(signed.upload_url, videoFile)
 
     return { file_key: signed.file_key }
   },
@@ -128,8 +92,6 @@ export const metricsService = {
 
 export const userService = {
   getMe(): Promise<import('@/types/api').UserProfile> {
-    const base = ((import.meta as unknown as { env?: Record<string, string> })?.env?.VITE_API_URL ?? '').trim() || 'https://clipsai-backend.onrender.com'
-    console.log('[users/me] GET', `${base.replace(/\/$/, '')}/users/me`)
     return http.get<import('@/types/api').UserProfile>('/users/me')
   },
   updateMe(data: { full_name?: string | null; email?: string | null; avatar_url?: string | null; theme_preference?: string | null }): Promise<import('@/types/api').UserProfile> {
@@ -142,16 +104,7 @@ export const userService = {
 
 export const clipService = {
   getClips(params?: import('@/types/api').ClipListParams): Promise<import('@/types/api').ClipListResponse> {
-    const cleaned: Record<string, string> = {}
-    if (params?.q?.trim()) cleaned.q = params.q.trim()
-    if (params?.min_score !== undefined) cleaned.min_score = String(params.min_score)
-    if (params?.sort_by) cleaned.sort_by = params.sort_by
-    if (params?.page) cleaned.page = String(params.page)
-    if (params?.limit) cleaned.limit = String(params.limit)
-    if (params?.video_id) cleaned.video_id = params.video_id
-    if (params?.job_id) cleaned.job_id = params.job_id
-    if (params?.status) cleaned.status = params.status
-    const qs = Object.keys(cleaned).length ? `?${new URLSearchParams(cleaned).toString()}` : ''
+    const qs = buildClipListQuery(params)
     return http.get<import('@/types/api').ClipListResponse>(`/clips${qs}`)
   },
   publishClip(clipId: string, data: import('@/types/api').PublishClipPayload): Promise<import('@/types/api').PublishClipResponse> {
@@ -162,12 +115,7 @@ export const clipService = {
   },
 
   list(params?: { video_id?: string; status?: string }): Promise<ClipResponse[]> {
-    const qs = params
-      ? '?' +
-        new URLSearchParams(
-          Object.entries(params).filter(([, v]) => v !== undefined) as [string, string][],
-        ).toString()
-      : ''
+    const qs = buildClipListQuery(params)
     return http.get<ClipResponse[]>(`/clips${qs}`)
   },
   get(clipId: string): Promise<ClipResponse> {
@@ -185,65 +133,51 @@ export const clipService = {
     const base = (raw || 'https://clipsai-backend.onrender.com').replace(/\/$/, '')
     return `${base}/clips/${clipId}/descarga`
   },
+  async downloadClip(clip: import('@/types/api').ClipListItem): Promise<void> {
+    const token = (() => { try { return localStorage.getItem(TOKEN_KEY) } catch { return null } })()
+    const bust = `t=${clip.updated_at ? new Date(clip.updated_at as unknown as string).getTime() : Date.now()}`
+    const url = `${BASE_URL}/clips/${clip.id}/descarga${token ? `?token=${encodeURIComponent(token)}&${bust}` : `?${bust}`}`
+    try {
+      const headers: Record<string, string> = { 'ngrok-skip-browser-warning': 'true' }
+      if (token) headers['Authorization'] = `Bearer ${token}`
+      const res = await fetch(url, { headers, credentials: 'include' })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const blob = await res.blob()
+      triggerBlobDownload(blob, res.headers.get('Content-Disposition'), `${clip.title || clip.id}.mp4`)
+    } catch {
+      const fallback = this.downloadUrl(clip.id)
+      window.open(fallback, '_blank')
+    }
+  },
+}
+
+async function fetchBlob(url: string): Promise<{ blob: Blob; contentDisposition: string | null }> {
+  const token = (() => { try { return localStorage.getItem(TOKEN_KEY) } catch { return null } })()
+  const res = await fetch(url, {
+    credentials: 'include',
+    headers: { 'ngrok-skip-browser-warning': 'true', ...(token ? { Authorization: `Bearer ${token}` } : {}) } as HeadersInit,
+  })
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`
+    try {
+      const j = await res.json()
+      if (typeof j.detail === 'string') detail = j.detail
+    } catch {
+      const t = await res.text().catch(() => '')
+      if (t) detail = t.slice(0, 500)
+    }
+    throw new Error(detail)
+  }
+  return { blob: await res.blob(), contentDisposition: res.headers.get('Content-Disposition') }
 }
 
 export const exportService = {
   async exportJob(jobId: string, format: 'csv' | 'json'): Promise<void> {
-    const token = (() => {
-      try {
-        return localStorage.getItem(TOKEN_KEY)
-      } catch {
-        return null
-      }
-    })()
-    const res = await fetch(`${BASE_URL}/jobs/${jobId}/export?format=${format}`, {
-      credentials: 'include',
-      headers: {
-        'ngrok-skip-browser-warning': 'true',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      } as HeadersInit,
-    })
-    if (!res.ok) {
-      let detail = `HTTP ${res.status}`
-      try {
-        const j = await res.json()
-        if (typeof j.detail === 'string') detail = j.detail
-      } catch {
-        const t = await res.text().catch(() => '')
-        if (t) detail = t.slice(0, 500)
-      }
-      throw new Error(detail)
-    }
-    const blob = await res.blob()
-    triggerBlobDownload(blob, res.headers.get('Content-Disposition'), `clips_export.${format}`)
+    const { blob, contentDisposition } = await fetchBlob(`${BASE_URL}/jobs/${jobId}/export?format=${format}`)
+    triggerBlobDownload(blob, contentDisposition, `clips_export.${format}`)
   },
   async exportClips(format: 'csv' | 'json'): Promise<void> {
-    const token = (() => {
-      try {
-        return localStorage.getItem(TOKEN_KEY)
-      } catch {
-        return null
-      }
-    })()
-    const res = await fetch(`${BASE_URL}/clips/export?format=${format}`, {
-      credentials: 'include',
-      headers: {
-        'ngrok-skip-browser-warning': 'true',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      } as HeadersInit,
-    })
-    if (!res.ok) {
-      let detail = `HTTP ${res.status}`
-      try {
-        const j = await res.json()
-        if (typeof j.detail === 'string') detail = j.detail
-      } catch {
-        const t = await res.text().catch(() => '')
-        if (t) detail = t.slice(0, 500)
-      }
-      throw new Error(detail)
-    }
-    const blob = await res.blob()
-    triggerBlobDownload(blob, res.headers.get('Content-Disposition'), `clips_export.${format}`)
+    const { blob, contentDisposition } = await fetchBlob(`${BASE_URL}/clips/export?format=${format}`)
+    triggerBlobDownload(blob, contentDisposition, `clips_export.${format}`)
   },
 }

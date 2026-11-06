@@ -14,12 +14,17 @@
     "dev:up": "docker compose up -d db backend_fastapi backend_express",
     "dev:down": "docker compose down",
     "dev:ps": "docker compose ps",
-    "install:all": "npm install && npm --prefix frontend_react install && npm --prefix frontend_vue install && npm --prefix backend_express install"
+    "install:all": "npm install && npm --prefix backend_express install"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
   },
   "engines": {
     "node": ">=18"
-  }
+  },
+  "workspaces": [
+    "frontend_common",
+    "frontend_react",
+    "frontend_vue"
+  ]
 }

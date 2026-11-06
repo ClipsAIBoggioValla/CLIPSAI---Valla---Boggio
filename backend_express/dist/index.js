@@ -4,5 +4,4 @@ dotenv.config();
 const port = Number(process.env.PORT ?? process.env.BACKEND_EXPRESS_PORT ?? 3001);
 const app = createApp();
 app.listen(port, () => {
-    console.log(`backend_express listening on http://localhost:${port}`);
 });

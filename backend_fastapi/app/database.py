@@ -45,8 +45,6 @@ def _fallback_db_url(url: str) -> str:
 
             socket.getaddrinfo("db", 5432)
             return url
-        except socket.gaierror:
-            return url.replace("@db:", "@127.0.0.1:").replace("@db/", "@127.0.0.1/")
         except Exception:
             return url.replace("@db:", "@127.0.0.1:").replace("@db/", "@127.0.0.1/")
     return url

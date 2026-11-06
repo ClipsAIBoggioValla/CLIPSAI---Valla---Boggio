@@ -31,7 +31,6 @@ export const useAuthStore = defineStore('auth', () => {
       }
     }, 1000)
     try {
-      console.log('[InitAuth] Iniciando verificación de sesión...')
       let stored: string | null = null
       try {
         stored =
@@ -43,7 +42,6 @@ export const useAuthStore = defineStore('auth', () => {
         stored = null
       }
       if (!stored || stored === 'null' || stored === 'undefined' || stored.trim() === '') {
-        console.log('[InitAuth] No hay token en localStorage, saltando verificación.')
         try {
           localStorage.removeItem(TOKEN_KEY)
           localStorage.removeItem('token')
@@ -80,7 +78,6 @@ export const useAuthStore = defineStore('auth', () => {
       persist(null)
       user.value = null
     } finally {
-      console.log('[InitAuth] Finalizando estado de carga.')
       window.clearTimeout(rescue)
       isLoading.value = false
     }

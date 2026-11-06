@@ -1,18 +1,6 @@
 import { apiClient } from '@/api/client'
+import { buildClipListQuery, normalizeJob, normalizeVideo, triggerBlobDownload, uploadFileToSignedUrl } from 'frontend_common/services/shared'
 import type { AuthToken, AuthUser, JobResponse, StatsSummary, UserLogin, UserRegister, VideoUploadResponse } from '@/types/api'
-
-function normalizeVideo(raw: VideoUploadResponse & { filename?: string; title?: string }): VideoUploadResponse {
-  const filename = raw.filename ?? raw.title ?? ''
-  const title = raw.title ?? raw.filename ?? filename
-  return { ...raw, filename, title }
-}
-
-function normalizeJob(raw: JobResponse & { id?: string; job_id?: string; status?: string; progress?: number }): JobResponse {
-  const id = raw.id ?? raw.job_id ?? ''
-  const status = (raw.status ?? 'PENDING').toString().toUpperCase() as JobResponse['status']
-  const progress = typeof raw.progress === 'number' ? raw.progress : 0
-  return { ...raw, id, job_id: raw.job_id ?? id, status, progress } as JobResponse
-}
 
 export const authService = {
   async login(data: UserLogin): Promise<AuthToken> {
@@ -39,15 +27,7 @@ export const videoService = {
       throw new Error('El backend no devolvió upload_url y file_key')
     }
 
-    const response = await fetch(signed.upload_url, {
-      method: 'PUT',
-      headers: { 'Content-Type': videoFile.type },
-      body: videoFile,
-    })
-    if (!response.ok) {
-      const detail = await response.text().catch(() => '')
-      throw new Error(`Error al subir a Cloudflare R2 (HTTP ${response.status})${detail ? `: ${detail.slice(0, 300)}` : ''}`)
-    }
+    await uploadFileToSignedUrl(signed.upload_url, videoFile)
 
     return { file_key: signed.file_key }
   },
@@ -94,7 +74,6 @@ export const metricsService = {
 export const userService = {
   async getMe(): Promise<import('@/types/api').UserProfile> {
     const base = ((import.meta.env.VITE_API_URL ?? '').trim() || 'http://localhost:8000').replace(/\/$/, '')
-    console.log('[users/me] GET', `${base}/users/me`)
     const { data: res } = await apiClient.get<import('@/types/api').UserProfile>('/users/me')
     return res
   },
@@ -110,16 +89,7 @@ export const userService = {
 
 export const clipService = {
   async getClips(params?: import('@/types/api').ClipListParams): Promise<import('@/types/api').ClipListResponse> {
-    const cleaned: Record<string, string> = {}
-    if (params?.q?.trim()) cleaned.q = params.q.trim()
-    if (params?.min_score !== undefined) cleaned.min_score = String(params.min_score)
-    if (params?.sort_by) cleaned.sort_by = params.sort_by
-    if (params?.page) cleaned.page = String(params.page)
-    if (params?.limit) cleaned.limit = String(params.limit)
-    if (params?.video_id) cleaned.video_id = params.video_id
-    if (params?.job_id) cleaned.job_id = params.job_id
-    if (params?.status) cleaned.status = params.status
-    const qs = Object.keys(cleaned).length ? `?${new URLSearchParams(cleaned).toString()}` : ''
+    const qs = buildClipListQuery(params)
     const { data } = await apiClient.get<import('@/types/api').ClipListResponse>(`/clips${qs}`)
     return data
   },
@@ -132,11 +102,26 @@ export const clipService = {
     return res
   },
   async list(params?: { video_id?: string; status?: string }): Promise<import('@/types/api').ClipResponse[]> {
-    const qs = params
-      ? `?${new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined) as [string, string][]).toString()}`
-      : ''
+    const qs = buildClipListQuery(params)
     const { data } = await apiClient.get<import('@/types/api').ClipResponse[]>(`/clips${qs}`)
     return data
+  },
+  downloadUrl(clipId: string): string {
+    const raw: string = (import.meta.env.VITE_API_URL ?? '').trim()
+    const base = (raw || 'http://localhost:8000').replace(/\/$/, '')
+    return `${base}/clips/${clipId}/descarga`
+  },
+  async downloadClip(clip: import('@/types/api').ClipListItem): Promise<void> {
+    try {
+      const token = (() => { try { return localStorage.getItem('clipsai_token') } catch { return null } })()
+      const bust = `t=${clip.updated_at ? new Date(clip.updated_at as unknown as string).getTime() : Date.now()}`
+      const res = await apiClient.get<Blob>(`/clips/${clip.id}/descarga${token ? `?token=${encodeURIComponent(token)}&${bust}` : `?${bust}`}`, { responseType: 'blob' })
+      const blob = res.data as unknown as Blob
+      const cd = (res.headers as Record<string, string>)['content-disposition'] ?? null
+      triggerBlobDownload(blob, cd, `${clip.title || clip.id}.mp4`)
+    } catch {
+      window.open(`${(import.meta.env.VITE_API_URL ?? 'http://localhost:8000').trim().replace(/\/$/, '')}/clips/${clip.id}/descarga`, '_blank')
+    }
   },
 }
 
@@ -149,22 +134,6 @@ export const jobService = {
     const { data: raw } = await apiClient.get<JobResponse & { id?: string; job_id?: string }>(`/jobs/${jobId}`)
     return normalizeJob(raw as JobResponse & { id?: string; job_id?: string })
   },
-}
-
-function triggerBlobDownload(blob: Blob, contentDisposition: string | null, fallbackFilename: string) {
-  let filename = fallbackFilename
-  if (contentDisposition) {
-    const m = contentDisposition.match(/filename="?([^"]+)"?/)
-    if (m) filename = m[1]
-  }
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 export const exportService = {

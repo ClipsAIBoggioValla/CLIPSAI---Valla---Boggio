@@ -8,13 +8,11 @@ from backend.services.video_editor.captions import write_ass
 
 
 SAMPLE_FALLBACK = Path("tests/fixtures/sample.mp4")
-SAMPLE_FALLBACK_ALT = Path("backend/tests/fixtures/sample.mp4")
 
 
 def _resolve_sample() -> Path:
     candidates = [
         SAMPLE_FALLBACK,
-        SAMPLE_FALLBACK_ALT,
         Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "sample.mp4",
         Path(__file__).resolve().parents[3] / "backend" / "tests" / "fixtures" / "sample.mp4",
     ]

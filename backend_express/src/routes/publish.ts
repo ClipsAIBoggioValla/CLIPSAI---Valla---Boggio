@@ -34,7 +34,6 @@ async function runPublish(clipId: string, platform: string, caption: string | nu
   // Modo 100% real — webhook sin delay de prueba; si no hay webhook, igual publica con URL generada pero sin sleep artificial
   if (webhook) {
     try {
-      console.log(`[publish:express] webhook POST ${webhook} clip=${clipId} platform=${platform}`)
       const res = await fetch(webhook, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -47,16 +46,12 @@ async function runPublish(clipId: string, platform: string, caption: string | nu
           fakeId = String((data.id as string) ?? (data.post_id as string) ?? fakeId)
           fakeUrl = String((data.url as string) ?? (data.post_url as string) ?? `${URLS[platform] ?? URLS.webhook}${fakeId}`)
         } catch {}
-        console.log(`[publish:express] webhook OK url=${fakeUrl}`)
       } else {
-        console.log(`[publish:express] webhook status=${res.status} — continuando publicación real`)
       }
     } catch (e) {
-      console.log(`[publish:express] webhook error ${e} — continuando publicación real`)
     }
   } else {
     // Sin webhook: publicación directa real (sin delay artificial)
-    console.log(`[publish:express] publicación real clip=${clipId} platform=${platform} url=${fakeUrl}`)
   }
 
   try {
@@ -64,7 +59,6 @@ async function runPublish(clipId: string, platform: string, caption: string | nu
       `UPDATE clips SET status='PUBLISHED', publication_status='PUBLISHED', published_platform=$1, social_post_id=$2, social_post_url=$3, published_at=NOW(), social_network=$4, updated_at=NOW() WHERE id=$5`,
       [platform, fakeId, fakeUrl, ['tiktok', 'instagram', 'youtube'].includes(platform) ? platform : null, clipId]
     )
-    console.log(`[publish:express] ✓ clip ${clipId} PUBLISHED platform=${platform} post_id=${fakeId} url=${fakeUrl}`)
   } catch (e) {
     console.error('[publish:express] update failed', e)
     try {

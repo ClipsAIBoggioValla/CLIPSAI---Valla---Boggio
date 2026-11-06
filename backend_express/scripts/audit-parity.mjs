@@ -122,27 +122,28 @@ const onlyFastapi = [...fastSet].filter((r) => !express.has(r)).sort()
 const onlyExpress = [...express].filter((r) => !fastSet.has(r) && !DOCS_SUPERSET.has(r)).sort()
 const undocumented = [...express].filter((r) => !documented.has(r) && !isDocsRoute(r)).sort()
 
-console.log(`FastAPI rutas: ${fastSet.size} | Express rutas: ${express.size} | Documentadas: ${documented.size}`)
+
+console.info(`FastAPI rutas: ${fastSet.size} | Express rutas: ${express.size} | Documentadas: ${documented.size}`)
 
 let ok = true
 if (onlyFastapi.length) {
   ok = false
-  console.log(`\nSOLO EN FASTAPI (faltan en Express) — ${onlyFastapi.length}:`)
-  onlyFastapi.forEach((r) => console.log(`  - ${r}`))
+  console.info(`\nSOLO EN FASTAPI (faltan en Express) — ${onlyFastapi.length}:`)
+  onlyFastapi.forEach((r) => console.info(`  - ${r}`))
 }
 if (onlyExpress.length) {
   ok = false
-  console.log(`\nSOLO EN EXPRESS (rutas extra) — ${onlyExpress.length}:`)
-  onlyExpress.forEach((r) => console.log(`  + ${r}`))
+  console.info(`\nSOLO EN EXPRESS (rutas extra) — ${onlyExpress.length}:`)
+  onlyExpress.forEach((r) => console.info(`  + ${r}`))
 }
 if (undocumented.length) {
   ok = false
-  console.log(`\nEXPRESS SIN DOCUMENTAR EN SWAGGER — ${undocumented.length}:`)
-  undocumented.forEach((r) => console.log(`  ? ${r}`))
+  console.info(`\nEXPRESS SIN DOCUMENTAR EN SWAGGER — ${undocumented.length}:`)
+  undocumented.forEach((r) => console.info(`  ? ${r}`))
 }
 
 if (ok) {
-  console.log('\nPARIDAD 1:1 OK — FastAPI y Express exponen exactamente las mismas rutas de API')
+  console.info('\nPARIDAD 1:1 OK — FastAPI y Express exponen exactamente las mismas rutas de API')
 } else {
   console.error('\nPARIDAD FALLIDA')
   process.exit(1)

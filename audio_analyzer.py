@@ -25,10 +25,8 @@ def cargar_audio(ruta: str) -> Tuple[np.ndarray, int]:
     if not os.path.exists(ruta):
         raise FileNotFoundError(f"Archivo no encontrado: {ruta}")
     
-    print(f"  Cargando audio: {ruta}")
     y, sr = librosa.load(ruta, sr=None)
     duracion = len(y) / sr
-    print(f"  Duración: {duracion:.1f}s | Sample rate: {sr}Hz")
     return y, sr
 
 
@@ -50,7 +48,6 @@ def detectar_eventos(rms: np.ndarray, tiempos: np.ndarray) -> List[EventoAudio]:
     umbral_silencio = media_rms * 0.3
     umbral_cambio = std_rms
     
-    print(f"  RMS media: {media_rms:.4f} | std: {std_rms:.4f}")
     
     i = 0
     while i < len(rms):
@@ -138,8 +135,8 @@ def detectar_cambios_escena(y: np.ndarray, sr: int) -> List[EventoAudio]:
                 intensidad=5.0
             ))
     except Exception as e:
-        print(f"  AVISO: Error detectando cambios de escena: {e}")
-    
+        pass
+
     return eventos
 
 
@@ -223,7 +220,6 @@ def guardar_json(eventos: List[Dict], ruta: str = "audio.json") -> None:
     """Guarda los eventos en un archivo JSON."""
     with open(ruta, "w", encoding="utf-8") as f:
         json.dump(eventos, f, indent=2, ensure_ascii=False)
-    print(f"  Guardado: {ruta}")
 
 
 def detectar_momentos_virales_clustering(
@@ -278,11 +274,9 @@ def detectar_momentos_virales_clustering(
         
         mejores_por_cluster.sort(key=lambda x: timestamp_a_segundos(x.get('timestamp', '00:00:00')))
         
-        print(f"  Clustering: {n_clusters_real} clusters generados")
         return mejores_por_cluster
         
     except Exception as e:
-        print(f"  Clustering falló: {e}")
         return sorted(eventos, key=lambda x: x.get('intensidad', 0), reverse=True)
 
 
@@ -297,64 +291,44 @@ def analizar_audio(audio_path: str = "audio.mp3", salida_path: str = "audio.json
     Returns:
         Lista de diccionarios con los eventos detectados
     """
-    print("=" * 40)
-    print("  ANALIZADOR DE AUDIO")
-    print("=" * 40)
-    print("Analizando audio...\n")
     
     try:
         y, sr = cargar_audio(audio_path)
         rms, tiempos = calcular_rms(y, sr)
         
-        print("\nDetectando eventos...")
         eventos = detectar_eventos(rms, tiempos)
-        print(f"  Eventos detectados (gritos/silencios/cambios): {len(eventos)}")
         
         momentos_intensos = detectar_momentos_intensos(rms, tiempos)
-        print(f"  Momentos intensos detectados: {len(momentos_intensos)}")
         
         cambios_escena = detectar_cambios_escena(y, sr)
-        print(f"  Cambios de escena detectados: {len(cambios_escena)}")
         
         eventos.extend(momentos_intensos)
         eventos.extend(cambios_escena)
         
-        print("\nLimpiando eventos...")
         eventos = limpiar_eventos(eventos, separacion_min=2)
-        print(f"  Eventos después de limpieza: {len(eventos)}")
         
-        print("\nNormalizando intensidad...")
         eventos = normalizar_intensidad(eventos)
         
         eventos = filtrar_eventos(eventos, intensidad_min=3.0)
-        print(f"  Eventos después de filtrado: {len(eventos)}")
         
         if not eventos:
-            print("\nNo se detectaron eventos relevantes")
             return []
         
         eventos_dict = eventos_a_dict(eventos)
         guardar_json(eventos_dict, salida_path)
         
-        print("\nAgrupando momentos con clustering...")
         try:
             momentos_virales = detectar_momentos_virales_clustering(eventos_dict, n_clusters=10)
             guardar_json(momentos_virales, "momentos_virales.json")
-            print(f"  Momentos virales seleccionados: {len(momentos_virales)}")
         except Exception as e:
-            print(f"  Clustering falló: {e}")
+            pass
         
-        print(f"\n✓ Análisis completado")
-        print(f"  Total eventos: {len(eventos_dict)}")
-        print("=" * 40)
         
         return eventos_dict
         
     except FileNotFoundError as e:
-        print(f"\nError: {e}")
         return []
     except Exception as e:
-        print(f"\nError inesperado: {e}")
         return []
 
 

@@ -45,17 +45,13 @@ def _apply_update(current_user: Usuario, payload: dict, db: DbSession) -> UserRe
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="El email ya está registrado")
         current_user.email = new_email
 
-    if "full_name" in payload:
-        current_user.full_name = payload["full_name"]
-    if "nombre" in payload and payload["nombre"] is not None:
-        current_user.full_name = payload["nombre"]
+    if "full_name" in payload or ("nombre" in payload and payload["nombre"] is not None):
+        current_user.full_name = payload.get("full_name", payload.get("nombre"))
 
-    if "avatar_url" in payload:
-        if hasattr(current_user, "avatar_url"):
-            setattr(current_user, "avatar_url", payload["avatar_url"])
-    if "theme_preference" in payload:
-        if hasattr(current_user, "theme_preference") and payload["theme_preference"] is not None:
-            setattr(current_user, "theme_preference", payload["theme_preference"])
+    if "avatar_url" in payload and hasattr(current_user, "avatar_url"):
+        setattr(current_user, "avatar_url", payload["avatar_url"])
+    if "theme_preference" in payload and hasattr(current_user, "theme_preference") and payload["theme_preference"] is not None:
+        setattr(current_user, "theme_preference", payload["theme_preference"])
 
     db.add(current_user)
     db.commit()

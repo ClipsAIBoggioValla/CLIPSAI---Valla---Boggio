@@ -10,14 +10,26 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "esModuleInterop": true,
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2020",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "skipLibCheck": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": [
+        "src/*"
+      ],
+      "frontend_common/*": [
+        "../frontend_common/*"
+      ]
     }
   },
-  "include": ["src/**/*", "env.d.ts"]
+  "include": [
+    "src/**/*",
+    "env.d.ts"
+  ]
 }
