@@ -3,7 +3,7 @@
 
 > Documento **generado automáticamente** por la cátedra de Programación III (RepoSense + análisis de calidad + constancia). **No editar a mano**: se regenera en cada evaluación.
 > Rama evaluada: `main`. Análisis **heurístico** (regex + métricas): es una criba para orientar la revisión, **no una nota**.
-> Generado: 2026-11-05.
+> Generado: 2026-11-06.
 
 ## 1. Veredicto
 
@@ -16,7 +16,7 @@
 | Código (LOC) | 25,488 |
 | Archivos de código | 243 |
 | Tests (archivos) | 6 |
-| Cobertura de líneas | 21.3% (mínimo 80%) |
+| Cobertura de líneas | 18.0% (mínimo 80%) |
 | Capas detectadas | presentacion, logica, datos, vistas, servicios, estado |
 
 > **Aprobado** exige las compuertas críticas (**SEC**, **SQL**, **capas**, **índice ≥ 50** y **cobertura ≥ 80 %** cuando aplica) y tolera hasta **3 criterios en rojo** (12/15). No es una nota: sirve para ordenar y priorizar la revisión.
@@ -145,7 +145,7 @@ Cada aspecto indica **qué mide**, **por qué importa** y **tu resultado**. Cuan
 
 - **Qué mide:** Porcentaje de líneas de código ejecutadas por la suite de tests (cobertura real, no cantidad de archivos de test).
 - **Por qué importa:** Un test que existe pero no ejecuta el código no protege de nada: la cobertura muestra qué partes quedan sin verificar.
-- **Tu resultado:** **21.3%** de líneas cubiertas · fuente: ejecución: pytest (. 25.6%, backend 3.0%) _(mínimo 80% de líneas)_
+- **Tu resultado:** **18.0%** de líneas cubiertas · fuente: ejecución: pytest (. 22.0%, backend 3.0%) _(mínimo 80% de líneas)_
 - **Para investigar la causa:**
     - ¿Qué módulos o ramas del sistema nunca se ejecutan en los tests?
     - ¿Los tests prueban el camino principal y los errores, o solo el caso feliz?
@@ -173,7 +173,7 @@ Criterios que hoy están en rojo y, para cada uno, una explicación breve de **c
 | Depuración olvidada (DBG) | **24** mensaje(s) de depuración olvidado(s) | máximo 0 | 24 caso(s) a eliminar | Borrá `console.log`/`print`/`debugger` del código de producción. Si necesitás registro, usá el logger del proyecto con el nivel adecuado. Meta: 0 casos. |
 | Baja cohesión (Coh) | **1** unidad(es) con baja cohesión | máximo 0 | 1 clase(s) a separar | Separá la clase en unidades con una sola responsabilidad: si los métodos cambian por motivos distintos, son clases distintas. Meta: 0 clases con baja cohesión. |
 | Complejidad alta (Compl) | **273** bloque(s) de complejidad alta | máximo 5 por 1000 LOC (tenés 25488 LOC) | 273 hallazgo(s); el máximo para 25,488 LOC es 127.4 | Extraé condiciones y ramas a funciones con nombre propio, usá retornos tempranos y evitá anidar `if`/`switch`. Meta: ≤5 bloques por 1000 LOC. |
-| Cobertura de tests (Cob) | **21.3%** de líneas cubiertas · fuente: ejecución: pytest (. 25.6%, backend 3.0%) | mínimo 80% de líneas | faltan 58.7 pts | Agregá o ampliá tests que ejecuten los módulos sin cubrir (camino principal y errores) y publicá el artefacto (`coverage/lcov.info`, `coverage-summary.json`, `coverage.xml` o `coverage.json`) o corré la suite con coverage. Meta: ≥80% de líneas. |
+| Cobertura de tests (Cob) | **18.0%** de líneas cubiertas · fuente: ejecución: pytest (. 22.0%, backend 3.0%) | mínimo 80% de líneas | faltan 62.0 pts | Agregá o ampliá tests que ejecuten los módulos sin cubrir (camino principal y errores) y publicá el artefacto (`coverage/lcov.info`, `coverage-summary.json`, `coverage.xml` o `coverage.json`) o corré la suite con coverage. Meta: ≥80% de líneas. |
 
 > Empezá por las señales de seguridad (**SEC**, **SQL**) y por la **duplicación**: son las que más pesan en el índice y las más rápidas de verificar a ojo. Después de corregir, volvé a correr la medición: el semáforo se recalcula sobre `main`.
 
