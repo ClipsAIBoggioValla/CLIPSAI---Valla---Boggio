@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from pathlib import Path
 from typing import Literal
+
+logger = logging.getLogger(__name__)
 
 
 OUTPUT_WIDTH = 1080
@@ -31,11 +34,36 @@ def reframe_video(
         raise RuntimeError(f"No se puede aplicar crop 9:16: video de entrada no encontrado: {source}")
     output.parent.mkdir(parents=True, exist_ok=True)
 
+    # Verificar dimensiones del video de entrada
+    try:
+        probe_cmd = [
+            "ffprobe", "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height",
+            "-of", "csv=p=0:s=x",
+            str(source),
+        ]
+        probe = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=30)
+        if probe.returncode == 0 and probe.stdout.strip():
+            dims = probe.stdout.strip()
+            logger.info("[editor] reframe_video input dimensions: %s (%s)", source.name, dims)
+            if dims == f"{OUTPUT_WIDTH}x{OUTPUT_HEIGHT}":
+                logger.info("[editor] reframe_video: video ya es %dx%d, copiando tal cual", OUTPUT_WIDTH, OUTPUT_HEIGHT)
+                import shutil
+                shutil.copy2(str(source), str(output))
+                return str(output)
+    except Exception as probe_err:
+        logger.warning("[editor] no se pudo verificar dimensiones del input: %s", probe_err)
+
+    # Crop-primero (evita frames intermedios gigantes de 3413px que causan OOM en Render)
+    # Para input 1280x720 (16:9):
+    #   1. crop calcula 405x720 (centrado, manteniendo aspect ratio 9:16)
+    #   2. scale escala a 1080x1920
     crop_filter = (
-        "crop=w='min(iw,ih*9/16)':h='min(ih,iw*16/9)':"
-        "x='(iw-ow)/2':y='(ih-oh)/2',"
-        f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos,setsar=1"
+        f"crop='if(gt(iw/ih,9/16),ih*9/16,iw)':'if(gt(iw/ih,9/16),ih,iw*16/9)',"
+        f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},setsar=1"
     )
+    logger.info("[editor] reframe_video applying filter: %s", crop_filter)
     command = [
         "ffmpeg",
         "-y",
@@ -48,7 +76,7 @@ def reframe_video(
         "-preset",
         "ultrafast",
         "-crf",
-        "18",
+        "20",
         "-c:a",
         "aac",
         "-b:a",
@@ -70,7 +98,15 @@ def reframe_video(
     if result.returncode != 0:
         output.unlink(missing_ok=True)
         stderr = (result.stderr or "sin stderr")[-2500:]
-        raise RuntimeError(f"FFmpeg falló al aplicar crop 9:16 (code={result.returncode}): {stderr}")
+        logger.error("[editor] reframe FAILED rc=%s: %s", result.returncode, stderr)
+        if result.returncode == -9:
+            raise RuntimeError(
+                f"reframe vertical falló (memoria/ffmpeg): ffmpeg fue terminado por OOM (rc=-9). "
+                f"El video de entrada puede ser demasiado grande para los recursos disponibles."
+            )
+        raise RuntimeError(
+            f"reframe vertical falló (ffmpeg rc={result.returncode}): {stderr}"
+        )
     if not output.is_file() or output.stat().st_size == 0:
         output.unlink(missing_ok=True)
         raise RuntimeError(f"FFmpeg terminó el crop 9:16 sin generar un video válido: {output}")

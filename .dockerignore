@@ -36,3 +36,7 @@ scripts
 # Variables de entorno
 .env
 .env.*
+
+# Red defensiva: garantizar que sitecustomize siempre entre al build
+# (seguro porque backend_fastapi/ no está excluido por ningún patrón de este archivo)
+!backend_fastapi/docker-sitecustomize.py
