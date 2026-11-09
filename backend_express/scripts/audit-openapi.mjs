@@ -10,12 +10,14 @@
  *   exit 0 = paridad total · exit 1 = hay rutas sin documentar o fantasma
  */
 import path from 'path'
-import { fileURLToPath } from 'url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { collectDocumentedRoutes, collectMountedRoutes } from './_audit-shared.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
-const { swaggerSpec } = await import(path.join(root, 'dist/docs/swagger.js'))
+// El loader de ESM solo acepta URLs con esquema (file:, data:, node:): en Windows una
+// ruta absoluta tipo `C:\...` revienta con ERR_UNSUPPORTED_ESM_URL_SCHEME.
+const { swaggerSpec } = await import(pathToFileURL(path.join(root, 'dist/docs/swagger.js')).href)
 
 const documented = collectDocumentedRoutes(swaggerSpec)
 const actual = collectMountedRoutes(root)
