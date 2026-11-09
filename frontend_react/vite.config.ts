@@ -8,6 +8,9 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      // Resuelve el paquete del monorepo sin depender del symlink de npm workspaces
+      // (necesario para builds de Vercel que corren `npm install` dentro de la subcarpeta).
+      'frontend_common': path.resolve(__dirname, '../frontend_common'),
     },
   },
   server: {
