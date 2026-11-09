@@ -291,13 +291,13 @@ def detect_hooks(segments: list[dict[str, Any]], duration_hint: float | None = N
             raise ValueError("Transcripcion vacia")
         prompt = _build_hook_prompt(transcript_text, duration_hint)
         raw = _call_llm(prompt)
-        print(f"[hook] LLM raw {len(raw)} chars")
-        print(raw[:1200])
+        logger.debug("Respuesta cruda del LLM de hooks: %s chars", len(raw))
         data = _parse_json_strict(raw)
         clips = _validate_clips(data)
         if not clips:
-            print(f"[hook] WARN validacion dejo 0 clips, data: {data} — fallback mock")
-            logger.warning("Hook validacion 0 clips, usando fallback mock")
+            logger.warning(
+                "Validacion de hooks dejo 0 clips, usando fallback mock. data=%s", str(data)[:500]
+            )
             return _mock_hooks(segments)
         return clips
     except Exception:
