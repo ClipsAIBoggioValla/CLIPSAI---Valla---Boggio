@@ -1,8 +1,10 @@
 # CLIPSAI — Documentación Integral del Sistema (2026)
 
-> **Documento maestro.** Unifica objetivo y alcance (antes `PROYECTO.md`), estructura y guía de uso (antes `README.md`) y estado/arquitectura/deuda (versión previa de este archivo). Fuentes vivas complementarias: [`ISSUES.md`](./ISSUES.md) (backlog) y [`ENGINE_USO.md`](./ENGINE_USO.md) (firma del motor).
+> **Documento maestro.** Unifica objetivo y alcance (antes `PROYECTO.md`), estructura y guía de uso (antes `README.md`) y estado/arquitectura/deuda (versión previa de este archivo). Fuentes vivas complementarias: [`ISSUES.md`](./ISSUES.md) (backlog), [`ENGINE_USO.md`](./ENGINE_USO.md) (firma del motor) y [`docs/EVALUACION.md`](./docs/EVALUACION.md) (evaluación automática de calidad de la cátedra).
 >
-> **Propósito:** describir de arriba a abajo qué es el sistema, qué hace hoy, con qué lo hace, cómo se estructura el código y qué falta — para decidir nuevas issues y onboarding.
+> **Propósito:** describir de arriba a abajo qué es el sistema, qué hace hoy, con qué lo hace, cómo se estructura el código y qué falta — para decidir nuevas issues y onboarding. Está pensado como insumo para tomar decisiones sobre los próximos pasos (ver §17.6).
+>
+> **Última actualización: 8 de noviembre de 2026** — incorpora: procesamiento serverless en RunPod GPU + Cloudflare R2 (§18), despliegue en Render, CI de Docker Hub, paquete compartido `frontend_common/`, SSE de publicación en UI, subida directa a R2 y estado de calidad según la evaluación de la cátedra (§17).
 
 ---
 
@@ -24,8 +26,9 @@
 14. [Docker Compose y orquestación](#14-docker-compose-y-orquestación)
 15. [Seguridad](#15-seguridad)
 16. [Scripts, utilidades y testing](#16-scripts-utilidades-y-testing)
-17. [Estado de Issues y roadmap](#17-estado-de-issues-y-roadmap)
-18. [Plantilla para nuevas Issues](#18-plantilla-para-nuevas-issues)
+17. [Estado de Issues, calidad y roadmap](#17-estado-de-issues-calidad-y-roadmap)
+18. [Procesamiento serverless (RunPod + R2), despliegue y CI](#18-procesamiento-serverless-runpod--r2-despliegue-y-ci)
+19. [Plantilla para nuevas Issues](#19-plantilla-para-nuevas-issues)
 
 ---
 
@@ -48,6 +51,8 @@ Video (.mp4/.mov/.avi) + Transcripción (.txt/.srt)
 → /stats, /metrics, /export (csv/json), /docs
 ```
 
+**Flujo alternativo (subida directa + GPU serverless — ver §18):** el front presigna la subida directa a Cloudflare R2 (`POST /api/videos/upload-url` → PUT presignado, sin pasar por el backend), dispara `POST /api/videos/process` y el backend delega el procesamiento (Whisper + IA + FFmpeg + render 9:16) a un **worker serverless en RunPod GPU** que devuelve los clips ya renderizados en R2 (`https://videos.clipsai.xyz/...`). El backend solo registra el resultado en la DB.
+
 ### 1.3 Límites del sistema
 
 **✅ Dentro del alcance:**
@@ -60,6 +65,8 @@ Video (.mp4/.mov/.avi) + Transcripción (.txt/.srt)
 - Interfaz web (subida, seguimiento, biblioteca, dashboard, integraciones)
 - Persistencia en PostgreSQL dockerizada
 - Dual stack: 2 backends (FastAPI y Express) con paridad de endpoints; 2 frontends (React y Vue) con paridad de vistas; misma DB y mismo JWT
+- Procesamiento **opcional** delegado a GPU serverless (RunPod) con almacenamiento en Cloudflare R2 y subida directa desde el navegador (§18)
+- Despliegue en la nube (Render + Vercel) además de la pila local con Docker Compose
 
 **❌ Fuera de alcance:**
 - Procesamiento de streams en vivo / tiempo real
@@ -121,16 +128,29 @@ Video (.mp4/.mov/.avi) + Transcripción (.txt/.srt)
               │ + FFmpeg (ASS + hook)        │
               └──────────────────────────────┘
 
- Express :3001 ──► misma DB + mismo JWT (HS256) ──► spawnSync python engine.py --json
+  ── Alternativa serverless (ver §18; activa si hay RUNPOD_API_KEY + RUNPOD_ENDPOINT_ID) ──
+
+  Front ──PUT presign──► Cloudflare R2 (uploads/ y clips/)  ◄──PUT clips──┐
+     │  POST /api/videos/upload-url + POST /api/videos/process           │
+     ▼                                                                   │
+  FastAPI/Express ──runsync──► RunPod Serverless GPU (worker.Dockerfile) ┘
+     │                           worker: backend/handler.py → engine.py
+     │                           → video_processor (9:16 + ASS + hook)
+     │                           → R2 public domain videos.clipsai.xyz
+     └── registra clips con url_r2 en la DB (result_metadata._source="runpod_r2")
+
+ Express :3001 ──► misma DB + mismo JWT (HS256) ──► spawnSync python engine.py --json (local)
+ Render (blueprint backend_fastapi/render.yaml) ──► disco /var/data 10GB ──► clips/uploads
  ngrok ──────────► https://api.clipsai.xyz → backend_fastapi:8000  (callbacks OAuth, inspect :4040)
 ```
 
 - **Red:** `clipsai-net` bridge.
-- **Volumen:** `clipsai_postgres_data` persiste `down`/`up`; `./storage` montado en FastAPI (`/app/storage` y `/storage`) para clips y uploads.
+- **Volumen:** `clipsai_postgres_data` persiste `down`/`up`; `./storage` montado en FastAPI (`/app/storage` y `/storage`) para clips y uploads. En Render: disco persistente `/var/data` (10 GB) con limpieza automática (`storage_cleanup.py`, ver §18.4).
 - **Healthchecks:** `db pg_isready`, `fastapi curl /health`, `express node fetch /health`.
 - **CORS:** orígenes `localhost/127.0.0.1` 3000/3001/5173 + `https://api.clipsai.xyz` + regex `*.ngrok-free.dev|*.clipsai.xyz`, con middleware OPTIONS manual en FastAPI.
 - **Async:** `BackgroundTasks` (FastAPI) / `setImmediate` (Express). Migrable a Celery/Redis si `REDIS_URL`.
-- **Túnel HTTPS:** servicio `ngrok` en compose con dominio permanente `api.clipsai.xyz` (Issue 23) — requerido para callbacks OAuth.
+- **Túnel HTTPS:** servicio `ngrok` en compose (legacy para dev local) con dominio permanente `api.clipsai.xyz` — requerido para callbacks OAuth. En producción el dominio lo sirve un **Cloudflare Tunnel permanente** (ver comentario en `docker-compose.yml`).
+- **Procesamiento distribuido:** el motor puede correr **local** (en el backend, modo por defecto) o **delegarse a RunPod GPU** (§18). El worker no corre en compose: se publica como imagen en Docker Hub vía CI.
 
 ---
 
@@ -145,7 +165,12 @@ Video (.mp4/.mov/.avi) + Transcripción (.txt/.srt)
 | Frontend #1 | React 18.3 + TS 5.5 + react-router 6 + Context + Tailwind 3.4 + Vite 5.3 + recharts | `fetch` apiClient, `useJobPolling` 2s |
 | Frontend #2 | Vue 3.4 + TS 5.5 + vue-router 4 + Pinia 2 + Axios + Tailwind 3.4 + Vite 5.3 | interceptors 401→/login, composable polling |
 | Motor IA | Python + librosa + faster-whisper large-v3-turbo + scikit-learn KMeans + Anthropic/OpenAI/OpenRouter/DeepSeek + FFmpeg | pipeline `extraer_audio→analizar→formatear→enriquecer→LLM→validar→cortar` |
+| Worker serverless | RunPod Serverless (GPU CUDA 12.1, PyTorch image) + `worker.Dockerfile` | `backend/handler.py` → `engine.procesar_video` → `video_processor` 9:16 → R2 (§18) |
+| Almacenamiento | Cloudflare R2 (API S3) + dominio público `videos.clipsai.xyz` | presign SigV4 manual (`s3.ts`) o boto3 (FastAPI); subida directa del front |
+| Despliegue cloud | Render (blueprint `backend_fastapi/render.yaml`) + Vercel (fronts) | disco `/var/data` 10 GB, `autoDeploy` desde GitHub |
+| CI | GitHub Actions `docker-build.yml` | build de `worker.Dockerfile` → Docker Hub `mfboggio/clipsai-worker:v28/:latest` en push a `dev` |
 | Contratos | Paquete `backend/core` (Pydantic + ABCs) | handoff tipado track A ↔ track B |
+| Front compartido | npm workspaces + `frontend_common/` | types/services/landing/estilos single-source; shims de 1 línea en ambos fronts |
 | Estilos | Tailwind + `spark.css` Cyber-Tech Dark | `#0B0F17` bg, `#080C14` sidebar, `#121824` card, `#B4F105` lime glow |
 | Otros | `requests`, `python-dotenv`, `anthropic`, `swagger-ui-express` | OAuth YouTube/Instagram/TikTok |
 
@@ -158,14 +183,17 @@ Video (.mp4/.mov/.avi) + Transcripción (.txt/.srt)
 ```
 .
 ├── SISTEMA.md                   # ← ESTE documento maestro
-├── ISSUES.md                    # backlog vivo (Issues 1–35, estado GitHub)
+├── ISSUES.md                    # backlog vivo (Issues 1–42, estado GitHub)
 ├── ENGINE_USO.md                # guía firma procesar_video + errores + CLI
+├── docs/EVALUACION.md           # evaluación automática de calidad (cátedra, 6 Nov 2026)
 │
 ├── .env                         # variables reales (gitignored) — ver .env.example
-├── .env.example                 # plantilla (⚠️ contiene key filtrada, ver §15)
+├── .env.example                 # plantilla (key con placeholder; la key real quedó en git history, ver §15)
 ├── docker-compose.yml           # 6 servicios: db, 2 backends, 2 frontends, ngrok
+├── worker.Dockerfile            # imagen del worker RunPod GPU (§18) — CI → Docker Hub
 ├── start-dev.ps1                # orquestación híbrida/docker (-Docker, -Down, -Logs)
-├── package.json / package-lock.json
+├── package.json / package-lock.json   # npm workspaces: frontend_common/react/vue
+├── .github/workflows/docker-build.yml # build+push mfboggio/clipsai-worker en push a dev
 │
 ├── init-scripts/
 │   ├── 01-init-schema.sql       # DDL: usuarios, videos, jobs, clips + triggers + índices
@@ -174,6 +202,9 @@ Video (.mp4/.mov/.avi) + Transcripción (.txt/.srt)
 │
 ├── backend/                     # Paquete desacoplado (contratos + tracks paralelos)
 │   ├── README.md                # guía de tracks A/B
+│   ├── handler.py               # handler RunPod serverless (§18) — procesa jobs entrantes
+│   ├── RUNPOD.md                # guía de despliegue del worker + env vars de timeout
+│   ├── Dockerfile               # via alternativa del worker (base mfboggio/clipsai-worker)
 │   ├── core/
 │   │   ├── schemas.py           # WordToken, TranscriptData, ViralClipCandidate, RenderConfig,
 │   │   │                        # ScheduledPost, AudioFeatures, AutopilotJob(+Status)
@@ -189,19 +220,23 @@ Video (.mp4/.mov/.avi) + Transcripción (.txt/.srt)
 │
 ├── backend_fastapi/             # Backend #1 (referencia)
 │   ├── Dockerfile               # python:3.11-slim + ffmpeg + curl, non-root appuser, uvicorn :8000
+│   ├── render.yaml              # blueprint Render (Issue 47): disco /var/data + env RunPod/R2
+│   ├── runpod_worker.py         # entrypoint del worker: runpod.serverless.start(handler)
+│   ├── docker-sitecustomize.py  # reenvía backend_fastapi.* → app.* (paridad determinista)
 │   ├── requirements.txt
 │   └── app/
-│       ├── main.py              # app + lifespan (ALTER TABLE) + CORS + routers + /health
+│       ├── main.py              # app + lifespan (ALTER TABLE + storage_cleanup) + CORS + routers + /health
 │       ├── config.py            # Settings (DATABASE_URL auto host, JWT, OAuth, LLM keys)
 │       ├── database.py deps.py
 │       ├── models/              # usuario, video, job, clip, social_account
 │       ├── schemas/             # usuario, video, job, clip, stats, metrics, token
 │       ├── security/            # hashing.py (bcrypt nativo), jwt.py (HS256)
 │       ├── routers/             # auth, videos, jobs, clips, export, metrics, stats,
-│       │                        # users, publish, subtitles, social_auth
+│       │                        # users, publish, subtitles, social_auth, sample
 │       ├── services/            # engine, ass_generator, ffmpeg_service, hook_service,
 │       │                        # whisper_service, publish_service, tiktok|youtube|instagram_service,
-│       │                        # claude_service, llm_service
+│       │                        # claude_service, llm_service, runpod_service, s3/boto3,
+│       │                        # editor (9:16), storage_cleanup, social_common, transcript_utils
 │       ├── tasks/subtitle_pipeline.py
 │       └── api/v1/endpoints/subtitles.py
 │
@@ -222,14 +257,16 @@ Video (.mp4/.mov/.avi) + Transcripción (.txt/.srt)
 │       ├── context/AuthContext.tsx
 │       ├── lib/apiClient.ts     # fetch + Bearer + parseError
 │       ├── services/api.ts      # auth/video/job/clip/stats/metrics/export/publishClip
-│       ├── hooks/useJobPolling.ts (2s) + useUploadAndProcess.ts (sin uso)
+│       ├── hooks/useJobPolling.ts (2s) + usePublishSSE.ts + useIntegrations.ts
 │       ├── components/          # Layout, Sidebar, Navbar, Avatar, ProfileMenu, Footer,
-│       │                        # ProtectedRoute, ExportDropdown
+│       │                        # ProtectedRoute, ExportDropdown + subcarpetas auth/,
+│       │                        # clip-library/, dashboard/, job-status/, upload/,
+│       │                        # integrations/, landing/, legal/, settings/, navbar/
 │       ├── pages/               # AuthPage, UploadPage, JobStatusPage, DashboardPage,
-│       │                        # ClipLibraryPage, LibraryPage (duplicado), SettingsPage,
-│       │                        # IntegrationsPage, settings/IntegrationsSettings
-│       ├── styles/spark.css     # tokens Cyber-Tech Dark
-│       └── types/api.ts
+│       │                        # ClipLibraryPage, SettingsPage, IntegrationsPage,
+│       │                        # LandingPage, legal/{Privacy,Terms,DataDeletion}Page
+│       ├── styles/spark.css + landing.css + legal.css  # shims → frontend_common/styles
+│       └── types/api.ts         # shim → frontend_common/types/api
 │
 ├── frontend_vue/                # Frontend #2 (paridad 1:1)
 │   ├── vite.config.ts (port 5173) / package.json
@@ -237,30 +274,42 @@ Video (.mp4/.mov/.avi) + Transcripción (.txt/.srt)
 │       ├── main.ts App.vue router/index.ts (guards + VITE_ALLOW_ANONYMOUS)
 │       ├── stores/auth.ts       # Pinia
 │       ├── api/client.ts (axios + interceptors) + api/services.ts
-│       ├── composables/useJobPolling.ts
+│       ├── composables/          # useJobPolling, usePublishStream, useIntegrations, useClipLibrary
 │       ├── components/          # Layout, Sidebar, Navbar, Avatar, ExportDropdown, Footer
+│       │                        # + subcarpetas auth/, clip-library/, dashboard/, job-status/,
+│       │                        # upload/, integrations/, landing/, legal/
 │       ├── views/               # Auth, Upload, JobStatus, Dashboard, ClipLibrary,
-│       │                        # Library (duplicado), Settings, Integrations, NotFound
-│       ├── assets/spark.css     # idéntico a React
-│       └── types/api.ts
+│       │                        # Settings, Integrations, Landing, legal/*, NotFound
+│       ├── assets/spark.css     # shims → frontend_common/styles
+│       └── types/api.ts         # shim → frontend_common/types/api
 │
-├── main.py                      # Pipeline monolítico (~1004L): LLM, prompt viral, validar, cortar
+├── main.py                      # Pipeline monolítico (~1004L): LLM, prompt viral (1–5 clips), validar, cortar
 ├── audio_analyzer.py            # 372L: librosa RMS + eventos + KMeans → audio.json / momentos_virales.json
-├── whisper_transcriber.py       # 261L: faster-whisper large-v3-turbo + parseo YouTube
-├── editor_viral.py              # 292L: VideoEditor vertical 1080x1920 + face crop + loudnorm
-├── engine.py                    # 378L: wrapper estable procesar_video → ProcesamientoResultado
+├── whisper_transcriber.py       # faster-whisper large-v3-turbo + parseo YouTube + GPU vía RUNPOD_GPU
+├── video_processor.py           # 316L: clips verticales 9:16 + ASS palabra-por-palabra + hook (worker)
+├── editor_viral.py              # 204L: reframe 9:16 crop-primero 1080x1920 + loudnorm (CLI)
+├── engine.py                    # wrapper estable procesar_video → ProcesamientoResultado
 ├── engine_subprocess.py         # 183L: wrapper subprocess timeout 600s
 ├── ejemplo_engine.py            # ejemplo de invocación
 ├── limpiar.py                   # borra artefactos temporales
 ├── ENGINE_USO.md                # documentación del wrapper
 │
+├── frontend_common/             # paquete npm compartido por ambos fronts (workspaces)
+│   ├── index.ts                 # re-exporta types, services/shared, helpers, landingData, landingSeo
+│   ├── types/api.ts             # tipos API (+ RunPodProcessedClip, RunPodProcessResponse)
+│   ├── services/shared.ts       # uploadFileToSignedUrl, triggerBlobDownload, normalizeVideo/Job, buildClipListQuery
+│   ├── components/              # clip-library/helpers, landing/landingData, landing/landingSeo
+│   ├── styles/                  # spark.css, landing.css, legal.css (single source of truth)
+│   └── public/                  # favicon, og-clipsai.png, robots.txt, sitemap.xml
+│
 ├── storage/                     # clips renderizados + uploads + sample_test.mp4
 ├── gaming_procesado/            # salida de ejemplo (audio.json, momentos_virales.json, clips/)
-├── scripts/                     # verify-auth.sh, verify-db.sh, verify-issue4/5.sh,
-│                                # test_hooks.py, test_subtitles.py
+├── scripts/                     # _verify-common.sh (helpers), verify-auth/db/issue4/issue5.sh,
+│                                # test_hooks.py, test_subtitles.py, make_og_image.py
 ├── tests/                       # fixtures
+├── docs/EVALUACION.md           # evaluación automática de calidad (cátedra, 6 Nov 2026)
 ├── docs/design-reference.md     # tokens spark-admin
-├── .github/CODEOWNERS
+├── .github/CODEOWNERS + workflows/docker-build.yml   # CI del worker → Docker Hub
 └── (fixtures raíz: transcripcion_test.txt, test_audio.wav, whisper_words.json)
 ```
 
@@ -277,6 +326,13 @@ Video (.mp4/.mov/.avi) + Transcripción (.txt/.srt)
 | Publicación real | `backend_fastapi/app/services/publish_service.py` + `tiktok|youtube|instagram_service.py` |
 | OAuth connectors | `backend_fastapi/app/routers/social_auth.py` |
 | Contratos compartidos | `backend/core/schemas.py` + `interfaces.py` |
+| Procesamiento serverless (RunPod) | `worker.Dockerfile` + `backend/handler.py` + `backend_fastapi/app/services/runpod_service.py` + `backend_express/src/services/runpod.ts` (§18) |
+| Subida directa a R2 / presign | `backend_express/src/services/s3.ts` (SigV4 manual) · FastAPI `app/routers/videos.py` (boto3) |
+| Render 9:16 en el worker | `video_processor.py` (`process_clip_vertical`) + `backend_fastapi/app/services/editor.py` |
+| Limpieza de storage | `backend_fastapi/app/services/storage_cleanup.py` |
+| Frontend compartido | `frontend_common/` (npm workspaces) |
+| CI del worker | `.github/workflows/docker-build.yml` |
+| Evaluación de calidad | `docs/EVALUACION.md` |
 | Backlog | `ISSUES.md` |
 
 ---
@@ -356,9 +412,27 @@ Idempotente, sin Alembic:
 
 ### 6.3 Utilidades de la raíz
 
-- `whisper_transcriber.py`: `parsear_transcripcion_youtube` + `transcribir_video`.
-- `editor_viral.py`: `VideoEditor` — 1080x1920 fps30, crop por haarcascade, loudnorm `I=-16 TP=-1.5 LRA=11`.
+- `whisper_transcriber.py`: `parsear_transcripcion_youtube` + `transcribir_video`; fuerza GPU si `RUNPOD_GPU` ∈ {1,true,yes} con fallback a CPU.
+- `editor_viral.py`: reframe 9:16 **crop-primero** con ffprobe + filtro `crop,scale` a 1080×1920 (sin OpenCV), `libx264 -crf 18`, 30 fps; CLI individual o por carpeta (`clips/` → `clips_editados/`).
+- `video_processor.py`: usado por el worker RunPod — `generate_ass_from_segments()` + `process_clip_vertical()` por clip (9:16 + ASS + hook). El hook se emite como **primer evento ASS con estilo "Hook"** (el ffmpeg estático no tiene libfreetype, por lo que no se puede usar `drawtext`).
 - `limpiar.py`: borra audio.mp3/.wav, audio.json, momentos_virales, clips/, __pycache__.
+
+### 6.4 Cambios recientes del motor (oct–nov 2026)
+
+- **Prompt con recuento obligatorio:** `construir_prompt()` en `main.py` exige "**array con entre 1 y 5 clips… NUNCA `[]`**"; si el LLM devuelve vacío hay fallback determinístico. Los 6 criterios de viralidad mantienen pesos (revelación 10 → predicción 5) y duración obligatoria 30–90 s (óptimo 45–70).
+- **Validación:** `validar_clips()` filtra duración fuera de 30–90 y `score < 5`, ordena desc y trunca a 10 (el log de error aún dice "15-120" — texto desactualizado).
+- **Reframe robusto:** `backend_fastapi/app/services/editor.py` pasó a *crop-primero* para evitar frames intermedios de ~3413 px que provocaban OOM en Render; captura `returncode` de ffmpeg.
+- **Normalización de segmentos:** `ass_generator` y `jobs.py` normalizan `start/end` de la transcripción con fallbacks; `ENABLE_ASS_HOOK` se inicializa defensivo (evita `UnboundLocalError` en `_run_job`).
+
+### 6.5 Modos de ejecución: local vs RunPod (resumen)
+
+| | Local (default) | RunPod serverless (§18) |
+|---|---|---|
+| Trigger | `POST /videos/{id}/jobs` → `BackgroundTasks _run_job` | `POST /api/videos/process` o delegación desde `run_clip_engine()` / `transcribe_video()` si `RUNPOD_API_KEY`+`RUNPOD_ENDPOINT_ID` tienen valor |
+| Dónde corre | ffmpeg + Whisper + LLM en el backend | worker GPU (`worker.Dockerfile`, CUDA 12.1, Whisper en GPU) |
+| Salida | `storage/clips/{job_id}/*.mp4` local | R2 `clips/{video_id}/{idx}_vertical.mp4` → `https://videos.clipsai.xyz/...` |
+| Backend | renderiza ASS+hook en FastAPI | solo registra el resultado (`result_metadata._source="runpod_r2"`, `tags._render="runpod_r2"`) |
+| Express | `spawnSync(python engine.py)` con timeout 20 s — **no** delega a RunPod | — |
 
 ---
 
@@ -474,6 +548,11 @@ backend/
 
 **Divergencias:** ninguna en la superficie de API. El montaje en `/api` de `usersRouter` replica los dos prefijos de `include_router` (`''` y `'/api'`), por lo que existen `/users/me` y `/api/users/me` (y sus alias `/me`). Único superset deliberado: `/api-docs` y `/api-docs.json` (criterio de aceptación de Issue 14). Mismo `TOKEN` funciona en `:8000` y `:3001` (misma DB + mismo `JWT_SECRET`).
 
+**Divergencias de comportamiento (no de superficie) — pendientes de alinear:**
+- **Jobs:** FastAPI delega en RunPod cuando está configurado (o renderiza local con ASS+hook); Express hace `spawnSync('python', [engine.py, ...])` **local** con timeout de 20 s y sin render ASS+hook ni fallback. Un job largo puede fallar en Express y pasar en FastAPI.
+- **Publicación:** Express implementa `runPublish()` (2 s → `PUBLISHED` o webhook real) mientras FastAPI hace el upload OAuth real; verificar equivalencia por plataforma.
+- **Subida a R2:** ambos exponen `/api/videos/upload-url` + `/api/videos/process`, pero solo FastAPI conecta el flujo completo con `jobs`.
+
 **Verificación (comandos):**
 ```bash
 cd backend_express
@@ -533,9 +612,21 @@ Express 401.
 
 ### 10.3 Deuda conocida en UI
 
-- Duplicados: `LibraryPage == ClipLibraryPage` (React) y `LibraryView == ClipLibraryView` (Vue) — 4 ficheros (Issue 35).
-- `axios` muerto en React (usa fetch); `useUploadAndProcess` sin usar.
-- React sin `/library` route propia (solo `/clips`); Vue sí.
+- ~~Duplicados `LibraryPage`/`LibraryView`~~ — eliminados en Issue 35.
+- ~~`axios` muerto en React~~ — desinstalado (Issue 35); en Vue sí está en uso.
+- `frontend_common` **no está declarado como dependencia en React** (depende del hoisting de npm workspaces) y no hay alias en `vite.config.ts`: la resolución depende de `node_modules`. En Docker los fronts montan solo `./frontend_*` e instalan sin workspaces → **riesgo de fallo de resolución de `frontend_common` dentro de los contenedores** (ver §18.6).
+- Pendiente declarado en Issue 42: consolidar fixtures (`backend/tests/fixtures/` ↔ `tests/fixtures/`) y helpers internos de `clips.ts`.
+
+### 10.4 `frontend_common/` — paquete compartido (npm workspaces)
+
+- Raíz `package.json` declara `"workspaces": ["frontend_common","frontend_react","frontend_vue"]`; Vue lo lista como dependencia (`"frontend_common": "*"`) y ambos resuelven vía `tsconfig` `paths: {"frontend_common/*": ["../frontend_common/*"]}`.
+- Contenido: `types/api.ts` (tipos de la API, incl. `RunPodProcessedClip`/`RunPodProcessResponse`), `services/shared.ts` (`uploadFileToSignedUrl`, `triggerBlobDownload`, `normalizeVideo`, `normalizeJob`, `buildClipListQuery`), helpers de clip-library, `landingData`/`landingSeo`, los 3 CSS (`spark`, `landing`, `legal`) y `public/` (favicon, OG image, robots, sitemap) — **single source of truth**: los archivos en cada frontend son shims de 1 línea (`export * from 'frontend_common/...'` / `@import url('frontend_common/styles/...')`).
+- `publicDir: '../frontend_common/public'` en ambos `vite.config.ts`.
+
+### 10.5 Subida directa a R2 y tiempo real
+
+- **Subida directa (Issue de calidad 2026):** `DirectUploadPanel` (React) / equivalente Vue — `POST /api/videos/upload-url` → PUT presignado a R2 → `POST /api/videos/process`. Sin `multipart` al backend; el archivo nunca pasa por el server web.
+- **SSE de publicación:** `frontend_react/src/hooks/usePublishSSE.ts` (usado en `ClipLibraryPage`) y `frontend_vue/src/composables/usePublishStream.ts` consumen `GET /clips/{id}/publish-stream` → el badge cambia `PUBLISHING → PUBLISHED` con URL del post sin recargar (base de la Issue 31).
 
 ---
 
@@ -613,6 +704,21 @@ python ejemplo_engine.py video.mp4 transcripcion.txt
 python limpiar.py
 ```
 
+### 12.5 Flujo serverless (RunPod + R2)
+
+```bash
+# 1) Presign de subida directa (el archivo no pasa por el backend)
+curl -X POST http://localhost:8000/api/videos/upload-url -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -d '{"file_name":"river.mp4","file_type":"video/mp4"}'
+# 2) PUT del archivo a la upload_url devuelta (R2)
+# 3) Disparar procesamiento (RunPod runsync; requiere RUNPOD_* + AWS_* en .env)
+curl -X POST http://localhost:8000/api/videos/process -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"file_key":"uploads/<uuid>.mp4","transcription_text":"00:00 - Hola...","video_id":"<uuid>"}'
+# 4) Los clips quedan en https://videos.clipsai.xyz/clips/<video_id>/N_vertical.mp4
+#    y el job en la DB con result_metadata._source = "runpod_r2"
+```
+
 ---
 
 ## 13. Variables de entorno
@@ -635,8 +741,8 @@ JWT_EXPIRE_MINUTES=1440
 APP_ENV=development
 
 # Motor IA (prioridad: Anthropic → OpenRouter → OpenAI → DeepSeek)
-ANTHROPIC_API_KEY=...          # ⚠️ ver §15 — key filtrada en repo
-ANTHROPIC_MODEL=claude-sonnet-4-20250514   # main.py default: claude-sonnet-5
+ANTHROPIC_API_KEY=...          # placeholder — la key real quedó en git history, ver §15
+ANTHROPIC_MODEL=claude-sonnet-4-20250514   # .env.example: claude-sonnet-5; main.py default: claude-sonnet-5
 ANTHROPIC_VERSION=2023-06-01
 OPENAI_API_KEY=
 OPENROUTER_API_KEY=
@@ -645,6 +751,27 @@ OPENROUTER_ENDPOINT=https://openrouter.ai/api/v1/chat/completions
 DEEPSEEK_API_KEY=
 API_ENDPOINT=https://api.deepseek.com/v1/chat/completions
 MODEL=deepseek-chat
+
+# RunPod Serverless + Cloudflare R2 (§18) — solo se delega si RUNPOD_API_KEY y RUNPOD_ENDPOINT_ID tienen valor
+RUNPOD_API_KEY=
+RUNPOD_ENDPOINT_ID=
+RUNPOD_API_BASE_URL=https://api.runpod.ai     # opcional (default)
+RUNPOD_REQUEST_TIMEOUT_SECONDS=95             # por request al endpoint
+RUNPOD_TIMEOUT_SECONDS=1800                   # timeout total del job
+RUNPOD_POLL_INTERVAL_SECONDS=2
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+AWS_ENDPOINT_URL=                             # endpoint S3 de Cloudflare R2
+AWS_REGION=auto
+BUCKET_NAME=clipsai-videos
+R2_PUBLIC_URL=https://videos.clipsai.xyz      # dominio público del bucket (default en el worker)
+RUNPOD_GPU=1                                  # fuerza Whisper a CUDA en el worker
+
+# Storage / despliegue
+STORAGE_DIR=/var/data                         # o STORAGE_PATH; default /var/data (disco Render)
+STORAGE_CLIPS_DIR=/var/data/clips
+UPLOAD_DIR=/var/data/uploads
+SAMPLE_VIDEO_PATH=                            # video de muestra (Issue 34)
 
 # Publicación / webhook genérico (si vacío, simula)
 PUBLISH_WEBHOOK_URL=https://api.clipsai.xyz/webhooks/publish
@@ -702,7 +829,12 @@ Frontends: `frontend_react/.env` y `frontend_vue/.env` → `VITE_API_URL`. Opcio
 
 Red `clipsai-net` bridge; volumen nombrado `clipsai_postgres_data`. `down` conserva datos; `down -v` los borra.
 
-`start-dev.ps1`: `-Docker` (todo compose), default (híbrido: `docker compose up -d db backend_fastapi backend_express` + frontends locales con `concurrently` + ngrok), `-Down`, `-Logs`.
+**Notas:**
+- El **worker RunPod no corre en compose**: su imagen se construye en CI (`.github/workflows/docker-build.yml`, contexto raíz + `worker.Dockerfile`) y se publica en Docker Hub (`mfboggio/clipsai-worker:v28`/`:latest`); RunPod la levanta serverless bajo demanda.
+- `backend_fastapi` se builda con **contexto raíz** (el Dockerfile necesita `backend/` para `api/routes/{retrim,stream}.py` y el `docker-sitecustomize.py`).
+- El worker comparte `./storage` con los backends en dev, pero en producción la comunicación es vía R2 (no vía volumen).
+- **Despliegue en la nube (Issue 47):** `backend_fastapi/render.yaml` es un blueprint de Render (web service + Postgres managed + disco 10 GB en `/var/data`); las secrets se cargan con `sync: false` desde el dashboard. Fronts en Vercel.
+- `start-dev.ps1`: `-Docker` (todo compose), default (híbrido: `docker compose up -d db backend_fastapi backend_express` + frontends locales con `concurrently` + ngrok), `-Down`, `-Logs`. Scripts npm raíz equivalentes: `dev`, `dev:full`, `dev:docker`, `dev:ngrok`, `install:all`.
 
 ---
 
@@ -716,11 +848,12 @@ Red `clipsai-net` bridge; volumen nombrado `clipsai_postgres_data`. `down` conse
 - Usuario no-root en Dockerfile FastAPI; límite 500MB en uploads; extensiones permitidas whitelist.
 
 **Deuda abierta (Issue 13 / 21):**
-- ⚠️ **`ANTHROPIC_API_KEY` real en `.env.example:32` y en `git history`** — requiere rotación + `git filter-repo`/`BFG` + limpieza `git grep sk-ant`.
+- ⚠️ **`ANTHROPIC_API_KEY` real en `git history`** — el `.env.example` actual ya usa placeholders, pero la key sigue en el historial: requiere rotación + `git filter-repo`/`BFG` + limpieza `git grep sk-ant`.
 - `JWT_SECRET` con default `dev_secret...` en `config.py` (mitigado por `min_length=16`, pero debe obligarse en prod).
 - Sin `express-rate-limit` / `slowapi`.
 - Sin TLS en `pg.Pool` (solo local/bridge).
 - `.env` trackeado históricamente (verificar `git ls-files .env`).
+- **SSRF en el flujo serverless:** `backend/handler.py` descarga `video_url`/`transcription_url` arbitrarios — verificar que use `backend/core/security/ssrf_guard.py` (ver §18.6.6).
 
 ---
 
@@ -728,14 +861,18 @@ Red `clipsai-net` bridge; volumen nombrado `clipsai_postgres_data`. `down` conse
 
 | Script | Uso |
 |--------|-----|
+| `scripts/_verify-common.sh` | helpers compartidos (`log/pass/fatal`, `http_request`, `register_or_login`…) que sourcean los `verify-*.sh` |
 | `scripts/verify-auth.sh` | curl registro/login/me |
 | `scripts/verify-db.sh` | `psql \dt` + `\d` de las tablas |
 | `scripts/verify-issue4.sh` | POST /videos + polling jobs |
 | `scripts/verify-issue5.sh` | CRUD clips |
 | `scripts/test_hooks.py`, `scripts/test_subtitles.py` | pruebas de hook y subtítulos |
+| `scripts/make_og_image.py` | genera `public/og-clipsai.png` (1200×630) para ambos frontends |
+| `backend_express/scripts/audit-openapi.mjs` | rutas montadas = rutas documentadas (`npm run audit:openapi`) |
+| `backend_express/scripts/audit-parity.mjs` | FastAPI ↔ Express ruta por ruta contra `fastapi-routes.json` (`npm run audit:parity`) |
 | `limpiar.py` | limpia artefactos del motor |
 | `start-dev.ps1` | orquestación del stack |
-| `scripts/make_og_image.py` | genera `public/og-clipsai.png` (1200×630) para ambos frontends |
+| `.github/workflows/docker-build.yml` | CI: build+push de `worker.Dockerfile` a Docker Hub en push a `dev` |
 
 **Validación:**
 - Typecheck frontends: `npm run typecheck` (React `tsc --noEmit`, Vue `vue-tsc --noEmit`).
@@ -745,21 +882,23 @@ Red `clipsai-net` bridge; volumen nombrado `clipsai_postgres_data`. `down` conse
 - Infra: `docker compose logs -f`, `docker compose ps`, `curl :8000/health`, `curl :8000/docs`.
 - Pipeline Issue 29: `test_issue_29_pipeline.py` (ffprobe 9:16, ASS PlayRes, fallback).
 - Landing Issue 32: `npm run build` + `npx lighthouse http://localhost:3000/ --only-categories=seo` (SEO 100/100) + `curl /robots.txt` + `curl /sitemap.xml`.
+- Duplicación: `npx jscpd --min-lines 5 --min-tokens 50` (ver Issue 42 en `ISSUES.md`).
+- **No hay CI que ejecute tests/typecheck/lint** (el único workflow es el build del worker); la evaluación de calidad se corre manual/externamente vía `docs/EVALUACION.md`.
 - Cobertura de tests automatizados aún limitada (Issue 22 propuesta: `pytest` + `vitest`).
 
 ---
 
-## 17. Estado de Issues y roadmap
+## 17. Estado de Issues, calidad y roadmap
 
-Fuente detallada: [`ISSUES.md`](./ISSUES.md) (sincronizada con GitHub, Sep 2026).
+Fuentes: [`ISSUES.md`](./ISSUES.md) (backlog detallado) y [`docs/EVALUACION.md`](./docs/EVALUACION.md) (evaluación automática de la cátedra, generada 6 Nov 2026 sobre `main`).
 
-### 17.1 Resumen ejecutivo
+### 17.1 Resumen ejecutivo de issues
 
 | Estado | Cantidad | Lista |
 |--------|----------|-------|
-| ✅ Completado | 24 | 1, 2, 3, 4, 5, 6, 7, 14, 17, 18, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 32, 33, 34, 35 (+ PR #34 Spark) |
-| ⚠️ Parcial | 1 | 13 (seguridad/compose) |
-| ⏳ Pendiente | 1 | 31 (GitHub #51) |
+| ✅ Completado | 25 | 1, 2, 3, 4, 5, 6, 7, 14, 17, 18, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 32, 33, 34, 35 (+ 35 bis) (+ PR #34 Spark) |
+| ⚠️ Parcial | 2 | 13 (seguridad/compose), 42 (dedup: jscpd en 6.53%, pendientes declarados) |
+| ⏳ Pendiente / a cerrar | 2 | 31 (SSE publish — **implementado en código**, falta cierre en GitHub #51), 47 (despliegue Render — blueprint creado) |
 | ↩️ Cerradas vía otras | 3 | 8, 9, 10/11/12 → Issues 27/28/29 |
 
 ### 17.2 Estado por área
@@ -767,30 +906,138 @@ Fuente detallada: [`ISSUES.md`](./ISSUES.md) (sincronizada con GitHub, Sep 2026)
 | Área | Estado | Detalle |
 |------|--------|---------|
 | Infra DB + Docker | ✅ | Postgres 15 + volumen + healthcheck + DDL idempotente + 6 servicios compose |
-| Motor IA | ✅ | `main.py` + wrapper `engine.py` + `engine_subprocess.py` |
-| FastAPI | ✅ | 76 rutas montadas, auth, videos/jobs/clips, publish, subtitles, social, export, metrics, docs |
-| Express | ✅ 100% | paridad 1:1 verificada (`npm run audit:parity`): subida, jobs, clips, publish, subtítulos, social OAuth, presign R2, RunPod + Swagger |
-| React / Vue | ✅ ~95% | auth, upload, jobs, dashboard, biblioteca, settings, integraciones, landing pública |
-| Subtítulos + Hook | ✅ | Issue 29 — `ENABLE_ASS_HOOK=True` en `jobs` |
-| OAuth + Publish real | ✅ | Issues 22–28 — YouTube/Instagram/TikTok |
+| Motor IA | ✅ | `main.py` + wrapper `engine.py` + `engine_subprocess.py` + prompt 1–5 clips |
+| FastAPI | ✅ | ~78 operaciones, auth, videos/jobs/clips, publish, subtitles, social, export, metrics, docs, sample, retrim/stream |
+| Express | ✅ 100% superficie | paridad 1:1 verificada (`npm run audit:parity`); **divergencias de comportamiento** en jobs/publicación (ver §9) |
+| React / Vue | ✅ ~95% | auth, upload (dropzone + subida directa R2), jobs, dashboard, biblioteca con SSE, settings, integraciones, landing, legales |
+| Subtítulos + Hook | ✅ | Issue 29 — `ENABLE_ASS_HOOK=True` en `jobs`; en worker vía `video_processor.py` |
+| OAuth + Publish real | ✅ | Issues 22–28 — YouTube/Instagram/TikTok + SSE de estado en UI |
 | Docs OpenAPI | ✅ | FastAPI `/docs` + Express `/docs`, `/openapi.json`, `/redoc` |
-| Seguridad | ⚠️ | key filtrada, rate-limit ausente |
-| Pendientes activas | ⏳ | SSE publish UI (31), deuda UI (35) |
+| **Serverless RunPod + R2** | ✅ funcional / **no publicado** | pipeline completo en local/dev; ver §17.4 (59 commits adelante de `origin/main`) |
+| Despliegue cloud | ⚠️ | blueprint Render creado (Issue 47); ngrok legacy + Cloudflare Tunnel para callbacks |
+| Seguridad | ⚠️ | key filtrada histórica (Issue 13), rate-limit ausente, `JWT_SECRET` con default dev |
+| Calidad (cátedra) | ❌ | índice **5/100** — ver §17.3 |
+| CI | ⚠️ | solo build del worker; sin workflow de tests/typecheck |
 
-### 17.3 Issues pendientes (abiertas en GitHub)
+### 17.3 Evaluación de calidad (docs/EVALUACION.md — 6 Nov 2026, perfil exigente)
 
-| # | Título | Criterio clave |
-|---|--------|----------------|
-| 31 | SSE estado de publicación en UI | UI `PUBLISHING→PUBLISHED` sin reload (endpoint SSE ya existe) |
-| 35 | Deuda técnica UI | eliminar `LibraryPage`/`LibraryView` duplicados, `axios` muerto, `any` en tags, `passlib` |
+| Métrica | Valor | Meta | Estado |
+|---|---|---|---|
+| Índice de calidad | **5/100** | ≥ 50 | ❌ |
+| Criterios cumplidos | **11/16** | — | ❌ (NO aprobado) |
+| Duplicación | 10,3 % | ≤ 15 % | ✅ (jscpd: 6,53 % / 121 clones) |
+| Secretos hardcodeados (SEC) / SQL concatenado / `any` / HTTP en componentes | 0 / 0 / 0 / 0 | 0 | ✅ |
+| **DBG** (console.log/print olvidados) | **24** en 4 archivos | 0 | ❌ — `app/services/hook_service.py`, `backend/handler.py`, `backend_express/src/routes/jobs.ts`, `backend_fastapi/app/main.py` |
+| **Complejidad alta** | **273 bloques** en 99 archivos | ≤ 127 (5/1000 LOC) | ❌ |
+| **Cobertura de tests** | **18,0 %** (pytest 22 %, backend 3 %) | ≥ 80 % | ❌ |
+| Cohesión baja | 1 (`editor_viral.py`) | 0 | ❌ |
+| Funciones largas / acoplamiento | 203 / 10 | 10/1000 · 2/1000 | ✅ |
+| Endpoints backend | **117** | ≥ 5 | ✅ |
+| Vistas frontend | **96** | ≥ 6 | ✅ |
+| Código / archivos / tests | 25.488 LOC / 243 archivos / 6 tests | — | — |
+| Pushes directos a `main` sin PR | **6** | 0 | ⚠️ |
 
-### 17.4 Ideas de backlog
+**Autoría (RepoSense):** mateo 64 commits · 66 % LOC · IC 79 (Aprueba) — SantiValla 39 commits · 34 % LOC · IC 50 (Aprueba, con pausa de 19 d y recencia 57 %).
 
-Paginación cursor vs offset (10k clips), índice GIN `tags`, rate-limit, S3/MinIO presigned, i18n, roles admin/editor, editor timeline, analytics de retención, WebSockets en vez de polling 2s.
+**Brechas que más pesan para subir el índice:** DBG (24), complejidad (273), cobertura (18 %) y cierre de la Issue 13 (key filtrada en git history). SEC/SQL/duplicación ya están en verde.
+
+### 17.4 Estado de ramas y sincronización
+
+- Rama de trabajo actual: `fix/sync-main-with-dev` — **árbol idéntico al `main` local** (ambos resolvieron los mismos conflictos de merge).
+- **`origin/main` está 59 commits atrás** respecto del árbol local: la rama remota **no contiene** el pipeline RunPod+R2 (`worker.Dockerfile`, `backend/handler.py`, `video_processor.py`, `storage_cleanup.py`, cambios de `jobs.py`/`engine.py`/`main.py`). Diff: 21 archivos, +1.699 / −377.
+- Sí están publicados en `origin/main` (PR #100): `frontend_common/`, `docs/EVALUACION.md`, `scripts/_verify-common.sh`, audits de Express y el workflow `docker-build.yml`.
+- ⚠️ **Riesgo:** la imagen del worker publicada en Docker Hub (v28) se construye desde `dev`, pero el backend en Render usa `origin/main` → pueden estar ejecutando código distinto. **Prioridad: sincronizar y hacer PR de la rama actual.**
+
+### 17.5 Issues pendientes y deuda abierta
+
+| # | Título | Estado / criterio |
+|---|--------|-------------------|
+| 31 | SSE estado de publicación en UI | implementado (`usePublishSSE` / `usePublishStream` → `/clips/{id}/publish-stream`); **falta cerrar en GitHub #51** |
+| 13 | Seguridad | rotar `ANTHROPIC_API_KEY` filtrada + `git filter-repo`/BFG; obligar `JWT_SECRET` en prod; rate-limit |
+| 42 | Deduplicación profunda | jscpd 6,53 % ✅; pendientes: unificar `app/services` ↔ `backend_fastapi/app/services` (~700 L), fixtures duplicados, helpers `clips.ts` |
+| 47 | Despliegue Render | blueprint creado; falta validar end-to-end (OAuth callbacks con dominio público, disco, RunPod secrets) |
+| — | Paridad de comportamiento Express | jobs: `spawnSync` local 20 s sin ASS+hook ni RunPod (§9) |
+| — | CI de calidad | no hay workflow que ejecute tests/typecheck/audit en PR |
+
+### 17.6 Próximos pasos recomendados (insumo para decisión)
+
+Prioridad sugerida, en función de impacto × esfuerzo:
+
+1. **Sincronizar el código con `origin/main` (ALTA, bajo esfuerzo).** Sin esto, nada de lo demás es verificable en producción ni por la cátedra. Incluye PR de `fix/sync-main-with-dev` y verificar que Render/Docker Hub construyan del mismo commit.
+2. **Subir la calidad medible (ALTA, esfuerzo medio) — ataca el índice 5/100:**
+   - Eliminar los 24 `print`/`console.log` (rápido: mueve el índice a zona segura de DBG).
+   - Sumar tests de camino principal y errores (cobertura 18 % → objetivo incremental 40–50 % primero; el 80 % es ambicioso para el cierre).
+   - Refactor puntual de complejidad en los archivos con más señales (`jobs.py`, `handler.py`, `main.py`, `clips.ts`).
+   - Cerrar Issue 13 (rotación de key + limpieza de historial).
+3. **Cerrar el ciclo RunPod+R2 (ALTA, esfuerzo medio):** documentar y probar E2E el flujo directo (upload presign → process → clips en R2), alinear Express (hoy no delega a RunPod y tiene timeout de 20 s) o explícitamente degradarlo a "solo FastAPI", y agregar `R2_PUBLIC_URL` a `.env.example`.
+4. **CI en PRs (MEDIA):** workflow con `typecheck` + `audit:parity` + `pytest` + build de fronts; además evitar pushes directos a `main` (6 detectados).
+5. **Funcionalidad nueva (MEDIA, según objetivos del producto):** multi-idioma i18n, roles admin/editor, paginación cursor para 10k+ clips, índice GIN sobre `tags`, analytics de retención por clip, editor timeline (fuera de alcance actual — requiere decisión de scope).
 
 ---
 
-## 18. Plantilla para nuevas Issues
+## 18. Procesamiento serverless (RunPod + R2), despliegue y CI
+
+### 18.1 Worker en RunPod Serverless (GPU)
+
+| Archivo | Rol |
+|---|---|
+| `worker.Dockerfile` (raíz) | imagen del worker: base `pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime`, fuentes DejaVu + fontconfig (verificadas con `fc-list` — sin ellas los subtítulos salen invisibles), ffmpeg **estático** johnvansickle con check `libx264`, `backend_fastapi/requirements.txt`, cuDNN/CUDA registrados con `ldconfig`, copia `engine.py`, `main.py`, `whisper_transcriber.py`, `audio_analyzer.py`, `video_processor.py`, `backend/`, `runpod_worker.py` → `CMD ["python","-u","runpod_worker.py"]` |
+| `backend_fastapi/runpod_worker.py` | `runpod.serverless.start({"handler": handler})` |
+| `backend/handler.py` (~323 L) | handler real: descarga video (≤500 MB) y transcripción (≤10 MB) → `engine.procesar_video` → `video_processor.process_clip_vertical()` por clip (9:16 + ASS + hook) → sube a R2 → responde JSON |
+| `backend/RUNPOD.md` | guía de despliegue + env vars de timeout |
+| `backend/Dockerfile` | vía alternativa (base `mfboggio/clipsai-worker:v3`) |
+
+**Contrato del job:** input `{"input": {video_url, transcription_url | transcription_text, video_id}}` → output `{status:"COMPLETED", video_id, engine:"clipsai_native", clips:[{index, url_r2, titulo, hook_texto, score, inicio, fin, duracion, criterio_principal, primer_segundo, motivo}], clip_count, transcription_segments}`.
+
+**Env del worker:** `AWS_ACCESS_KEY_ID/SECRET_ACCESS_KEY/ENDPOINT_URL/REGION`, `BUCKET_NAME` (default `clipsai-videos`), `R2_PUBLIC_URL` (default `https://videos.clipsai.xyz`), `RUNPOD_GPU` (fuerza CUDA en Whisper), `HUGGINGFACE_HUB_CACHE`, `PROJECT_ROOT`.
+
+**Protocolo:** `POST {RUNPOD_API_BASE_URL}/{endpointId}/runsync` + polling `GET .../status/{jobId}` — timeout total 1800 s, request 95 s, poll 2 s; errores → 502 (o 504 por timeout). Imagen publicada por CI: `mfboggio/clipsai-worker:v28` / `:latest`.
+
+### 18.2 Puntos de integración en los backends
+
+| Backend | Cliente | Endpoints / hooks |
+|---|---|---|
+| Express | `src/services/runpod.ts` (port 1:1 del Python) | `POST /api/videos/upload-url`, `POST /api/videos/process` (`routes/apiVideos.ts`) |
+| FastAPI | `app/services/runpod_service.py` | `POST /api/videos/upload-url` (`videos.py:64`), `POST /api/videos/process` (`videos.py:91`) |
+| FastAPI (delegación indirecta) | `services/engine.py:345-368` → `run_clip_engine()`; `services/whisper_service.py:283` → `transcribe_video()` | llamados desde `routers/jobs.py:_run_job` y `tasks/subtitle_pipeline.py` |
+
+**Comportamiento:** si `RUNPOD_API_KEY` y `RUNPOD_ENDPOINT_ID` tienen valor → delega; si no → procesamiento local. Cuando el worker devuelve clips con `url_r2`, FastAPI marca el job `COMPLETED` al 100 % **sin render local** (`result_metadata._source="runpod_r2"`, `tags._render="runpod_r2"`, `tags.has_ass=true` — commit `9a0e409`).
+
+⚠️ **Express no delega en jobs**: `routes/jobs.ts` hace `spawnSync('python', [engine.py, ...])` local con timeout 20 s. Ver divergencias §9.
+
+### 18.3 Cloudflare R2 y subida directa
+
+- **`backend_express/src/services/s3.ts`**: presign **SigV4 manual sin aws-sdk** (canonical request, `UNSIGNED-PAYLOAD`, path-style `<endpoint>/<bucket>/<key>` que R2 acepta). FastAPI usa `boto3`.
+- **Flujo:** 1) `POST /api/videos/upload-url {file_name, file_type}` → `{upload_url (PUT presign 900 s), file_key: uploads/{uuid}{ext}`; 2) el front sube con `uploadFileToSignedUrl()` (PUT directo, **el archivo no pasa por el backend**); 3) `POST /api/videos/process` con exactamente uno de `file_key` (GET presign 3600 s) o `video_url`, más `transcription_url` o `transcription_text` + `video_id` → dispara RunPod.
+- **Consumidores:** `frontend_common/services/shared.ts`, `DirectUploadPanel.tsx`, `services/api.ts` (React) y `api/services.ts` (Vue).
+- **Dominio público:** las URLs `*.r2.cloudflarestorage.com` son privadas (403); se usa `R2_PUBLIC_URL` o el default `https://videos.clipsai.xyz` (commit `42a5574`).
+- ⚠️ `R2_PUBLIC_URL` **no está en `.env.example`** (el worker usa el default).
+
+### 18.4 Storage, Render y limpieza
+
+- `backend_fastapi/app/services/storage_cleanup.py` (164 L): `cleanup_storage()` en el `lifespan`, `ensure_disk_space(min_free_mb=500)` antes de cada upload y en el `finally` de cada job. Env: `STORAGE_DIR`/`STORAGE_PATH` (default `/var/data`).
+- **`backend_fastapi/render.yaml`** (Issue 47): web service en Render (plan starter, `autoDeploy`, health `/health`), disco persistente 10 GB montado en `/var/data`, Postgres managed, y todas las secrets RunPod/R2/LLM/OAuth con `sync: false` (se cargan en el dashboard).
+- Fronts desplegados en Vercel (`FRONTEND_URL=https://api.clipsai.xyz` en `.env.example` apunta al backend público).
+
+### 18.5 CI (GitHub Actions)
+
+- **Único workflow:** `.github/workflows/docker-build.yml` — trigger `workflow_dispatch` + push a `dev`; buildx + push a Docker Hub (`DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN`) de `worker.Dockerfile` con tags `mfboggio/clipsai-worker:v28` y `:latest`, cache GHA.
+- Historial de tags: v21 (21 oct) → v28 (5 nov).
+- `main.yml` fue **eliminado** (`aef4e75`) porque pisaba `:latest`.
+- **No hay CI de tests/typecheck/lint/audits** — gap relevante (ver §17.5).
+
+### 18.6 Gaps y riesgos conocidos del flujo serverless
+
+1. **Sincronización de código:** el pipeline RunPod+R2 está 59 commits adelante de `origin/main` (§17.4); Render despliega `origin/main` y el worker se builda desde `dev`.
+2. **`frontend_common` en Docker:** los contenedores de fronts montan solo `./frontend_*` e instalan sin npm workspaces → los shims `export * from 'frontend_common/...'` pueden no resolver (falta `npm install` en raíz o alias en Vite/Docker).
+3. **Express fuera del flujo serverless** (spawnSync local, timeout 20 s, sin ASS+hook).
+4. **`R2_PUBLIC_URL` sin documentar** en `.env.example`.
+5. **Costos/escalabilidad:** RunPod cobra por GPU activa; no hay mecanismo de cola ni reintentos visibles en la UI si el job serverless falla (el front ve el job de la DB).
+6. **Seguridad del flujo:** los `video_url`/`transcription_url` que recibe el handler deben validarse contra SSRF (existe `backend/core/security/ssrf_guard.py` — verificar que esté cableado en `handler.py`).
+
+---
+
+## 19. Plantilla para nuevas Issues
 
 ```md
 ## Issue N — Título
@@ -810,4 +1057,4 @@ Convenciones: ramas `tipo/nombre-issue` desde `main`, Conventional Commits (`fea
 
 > **Licencia:** uso interno / académico — sin licencia pública. No subir secretos a Git. Ver `.gitignore` y `git check-ignore -v`.
 >
-> **Documentos relacionados:** [`ISSUES.md`](./ISSUES.md) · [`ENGINE_USO.md`](./ENGINE_USO.md) · `backend/README.md` · `docs/design-reference.md` · `init-scripts/README.md`
+> **Documentos relacionados:** [`ISSUES.md`](./ISSUES.md) · [`ENGINE_USO.md`](./ENGINE_USO.md) · [`docs/EVALUACION.md`](./docs/EVALUACION.md) · `backend/README.md` · `backend/RUNPOD.md` · `docs/design-reference.md` · `init-scripts/README.md`
