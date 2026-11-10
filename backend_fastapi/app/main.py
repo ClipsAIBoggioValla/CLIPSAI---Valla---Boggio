@@ -263,7 +263,7 @@ app.include_router(auth.router)
 from fastapi import APIRouter as _CompatAPIRouter, Depends as _DependsCompat
 
 from .deps import get_db as _get_db_compat
-from .schemas import Token as _TokenCompat, UsuarioCreate as _UsuarioCreateCompat, UsuarioLogin as _UsuarioLoginCompat
+from .schemas import Token as _TokenCompat, UsuarioCreate as _UsuarioCreateCompat, UsuarioLogin as _UsuarioLoginCompat, UsuarioRead as _UsuarioReadCompat
 
 _compat_auth = _CompatAPIRouter(tags=["auth-compat"])
 
@@ -273,7 +273,7 @@ def _login_alias(payload: _UsuarioLoginCompat, db=_DependsCompat(_get_db_compat)
 
     return _auth_login(payload, db)
 
-@_compat_auth.post("/registro", response_model=_TokenCompat, include_in_schema=False)
+@_compat_auth.post("/registro", response_model=_UsuarioReadCompat, status_code=201, include_in_schema=False)
 def _registro_alias(payload: _UsuarioCreateCompat, db=_DependsCompat(_get_db_compat)):  # type: ignore
     from .routers.auth import registro as _auth_registro
 

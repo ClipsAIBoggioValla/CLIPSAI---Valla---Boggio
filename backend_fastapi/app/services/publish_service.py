@@ -1,11 +1,3 @@
-def _first_env(*names: str) -> str:
-    for name in names:
-        value = os.getenv(name)
-        if value:
-            return value.strip()
-    return ""
-
-
 from __future__ import annotations
 
 import asyncio
@@ -25,6 +17,15 @@ from ..config import get_settings
 from ..database import SessionLocal
 from ..models import Clip
 from ..models.social_account import SocialAccount
+
+
+def _first_env(*names: str) -> str:
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value.strip()
+    return ""
+
 
 logger = logging.getLogger(__name__)
 

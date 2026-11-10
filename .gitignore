@@ -12,6 +12,12 @@ __pycache__/
 *.pyc
 *.pyo
 
+# pytest / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
 storage/uploads/*
 storage/clips/*
 !storage/uploads/.gitkeep
