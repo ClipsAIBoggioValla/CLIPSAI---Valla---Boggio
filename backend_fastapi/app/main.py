@@ -193,11 +193,11 @@ async def lifespan(app: FastAPI):
                         job.status = "failed"
                         job.error_message = "Proceso interrumpido por reinicio del servidor."
                     db.commit()
-                    print(f"[STARTUP] Se marcaron {len(interrupted_jobs)} trabajos huérfanos como 'failed'.")
+                    logger.info("Se marcaron %s trabajos huérfanos como 'failed'.", len(interrupted_jobs))
                 else:
-                    print("[STARTUP] No hay trabajos huérfanos en 'processing'.")
+                    logger.info("No hay trabajos huérfanos en 'processing'.")
             except Exception as e:
-                print(f"[STARTUP] Error al limpiar jobs huérfanos: {e}")
+                logger.error("Error al limpiar jobs huérfanos: %s", e)
                 try:
                     db.rollback()
                 except Exception:
@@ -205,7 +205,7 @@ async def lifespan(app: FastAPI):
             finally:
                 db.close()
         except Exception as e:
-            print(f"[STARTUP] Error al limpiar jobs huérfanos: {e}")
+            logger.error("Error al limpiar jobs huérfanos: %s", e)
     else:
         logger.warning("Database not available. Skipping migrations and running in API-only mode.")
 
@@ -263,7 +263,7 @@ app.include_router(auth.router)
 from fastapi import APIRouter as _CompatAPIRouter, Depends as _DependsCompat
 
 from .deps import get_db as _get_db_compat
-from .schemas import Token as _TokenCompat, UsuarioCreate as _UsuarioCreateCompat, UsuarioLogin as _UsuarioLoginCompat
+from .schemas import Token as _TokenCompat, UsuarioCreate as _UsuarioCreateCompat, UsuarioLogin as _UsuarioLoginCompat, UsuarioRead as _UsuarioReadCompat
 
 _compat_auth = _CompatAPIRouter(tags=["auth-compat"])
 
@@ -273,7 +273,7 @@ def _login_alias(payload: _UsuarioLoginCompat, db=_DependsCompat(_get_db_compat)
 
     return _auth_login(payload, db)
 
-@_compat_auth.post("/registro", response_model=_TokenCompat, include_in_schema=False)
+@_compat_auth.post("/registro", response_model=_UsuarioReadCompat, status_code=201, include_in_schema=False)
 def _registro_alias(payload: _UsuarioCreateCompat, db=_DependsCompat(_get_db_compat)):  # type: ignore
     from .routers.auth import registro as _auth_registro
 
