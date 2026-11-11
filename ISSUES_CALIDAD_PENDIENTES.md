@@ -47,7 +47,11 @@ ruido tipo `warning: LF will be replaced by CRLF` y diffs sin contenido real.
 
 ---
 
-## Issue 3 — Segunda fase de cobertura (pipeline real: FFmpeg/Whisper/RunPod)
+## Issue 3 — Segunda fase de cobertura (pipeline real: FFmpeg/Whisper/RunPod) — ✅ CERRADA (Fase 3)
+
+> **Estado 11-nov-2026:** cerrada por la Fase 3 en `feat/quality-perfection-phase3`.
+> Suite final: **626 tests**, cobertura global **80,3 %** (era 69 % tras la Fase 2 y 18 % en el
+> informe original de la cátedra). Ver evidencia al final de esta sección.
 
 **Problema:** Después de subir la cobertura del backend de 15% a 64% (commit `f1413d4`
 de esta rama), quedan sin cubrir los módulos que **ejecutan el pipeline real**. Mockearlos
@@ -66,6 +70,31 @@ a fondo (subprocess/HTTP) requiere tests más verbosos, pero son los últimos su
 **Qué hacer:** suite adicional con mocks profundos de subprocess/HTTP por rama. Estimación:
 se pueden cubrir ~1.000 de esos ~1.600 stmts con ~40 tests, llevando la cobertura global del
 backend al **75-80%** exigido por la cátedra (`docs/EVALUACION.md`).
+
+**Evidencia de cierre (11-nov-2026, rama `feat/quality-perfection-phase3`):**
+
+```
+python -m pytest -q --cov=app --cov=backend --cov=backend_fastapi.app
+# 626 passed · TOTAL 8295 stmts · 1636 miss · 80% (80,27 % exacto)
+```
+
+| Módulo | Antes (Fase 2) | Después (Fase 3) | Tests nuevos |
+|---|---|---|---|
+| `app/routers/jobs.py` | 59 % (382 miss) | **87 %** (111 miss) | `test_phase3_jobs.py` (42) + `test_phase3_remate.py` |
+| `app/services/publish_service.py` | 58 % (314) | **92 %** (58) | `test_phase3_publish.py` (87) |
+| `app/main.py` (lifespan) | 47 % (104) | **86 %** (27) | `test_phase3_runpod_main.py` + `test_phase3_remate.py` |
+| `app/services/runpod_service.py` | 57 % (89) | **98 %** (4) | `test_phase3_runpod_main.py` (47) |
+| `app/cli.py` | 0 % (130) | **99 %** | `test_phase3_retrim_stream_cli.py` (34) |
+| `backend/api/routes/retrim.py` + `stream.py` | 27/35 % | **90/97 %** | idem |
+| `app/database.py`, `deps.py`, `_clip_common.py` | 65/91/78 % | 95/100/100 % | `test_phase3_small_gaps.py` (14) |
+
+Extras de calidad en el mismo PR:
+- **Código muerto eliminado** en `app/routers/jobs.py`: la primera definición de
+  `run_job_safely` (sombrada por la segunda, ~40 líneas inalcanzables) y el `raise`
+  inalcanzable tras el `try/finally` de `_render_clip_with_ass_and_hook`.
+- Las ramas restantes sin cubrir son, en su mayoría, `except Exception: pass` de
+  logging/flush y el bloque de import-time de `main.py` (resolución de raíz), no
+  comportamiento de negocio.
 
 ---
 
