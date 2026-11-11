@@ -434,15 +434,6 @@ def run_clip_engine(
 
     _log = logging.getLogger(__name__)
 
-def _parse_transcript_native(text: str) -> list[dict]:
-    """Parser de transcripción nativo.
-
-    Delega en ``parse_transcript_text_to_segments`` de
-    ``backend_fastapi/app/services/transcript_utils`` para compartir lógica.
-    """
-    from ..services.transcript_utils import parse_transcript_text_to_segments as _shared
-
-    return _shared(text)
     def _native_segments() -> list[dict]:
         wav_path: str | None = None
         try:
@@ -664,3 +655,14 @@ def _parse_transcript_native(text: str) -> list[dict]:
         msg = f"Error en API de Claude: {e}"
         _log.error(msg)
         raise RuntimeError(msg) from e
+
+
+def _parse_transcript_native(text: str) -> list[dict]:
+    """Parser de transcripción nativo.
+
+    Delega en ``parse_transcript_text_to_segments`` de
+    ``backend_fastapi/app/services/transcript_utils`` para compartir lógica.
+    """
+    from ..services.transcript_utils import parse_transcript_text_to_segments as _shared
+
+    return _shared(text)

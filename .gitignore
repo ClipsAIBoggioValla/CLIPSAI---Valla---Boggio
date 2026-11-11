@@ -5,6 +5,7 @@ frontend_react/.env
 
 # Build artifacts
 dist/
+backend_express/dist/
 *.tsbuildinfo
 frontend_react/tsconfig.tsbuildinfo
 
