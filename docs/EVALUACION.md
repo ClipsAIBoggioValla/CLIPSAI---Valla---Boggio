@@ -3,7 +3,7 @@
 
 > Documento **generado automáticamente** por la cátedra de Programación III (RepoSense + análisis de calidad + constancia). **No editar a mano**: se regenera en cada evaluación.
 > Rama evaluada: `main`. Análisis **heurístico** (regex + métricas): es una criba para orientar la revisión, **no una nota**.
-> Generado: 2026-11-06.
+> Generado: 2026-11-11.
 
 ## 1. Veredicto
 
@@ -13,10 +13,10 @@
 | Índice de calidad de servicios | **5/100** (mínimo 50) |
 | Criterios cumplidos | **11/16** |
 | Aprobado (semáforo) | **NO** |
-| Código (LOC) | 25,488 |
-| Archivos de código | 243 |
-| Tests (archivos) | 6 |
-| Cobertura de líneas | 18.0% (mínimo 80%) |
+| Código (LOC) | 26,708 |
+| Archivos de código | 246 |
+| Tests (archivos) | 15 |
+| Cobertura de líneas | 52.8% (mínimo 80%) |
 | Capas detectadas | presentacion, logica, datos, vistas, servicios, estado |
 | Pushes directos a `main` (sin PR) | 6 |
 
@@ -28,12 +28,12 @@
 
 | Autor | Commits | Código (LOC) | Tests (LOC) | Docs (LOC) | Días activos | % del código |
 |---|---:|---:|---:|---:|---:|---:|
-| mateo | 64 | 20,067 | 422 | 1,489 | 33 | 66% |
-| SantiValla | 39 | 10,144 | 45 | 600 | 13 | 34% |
+| mateo | 126 | 21,822 | 4,289 | 1,845 | 45 | 69% |
+| SantiValla | 39 | 9,894 | 45 | 592 | 13 | 31% |
 
 > _El LOC de autoría lo calcula RepoSense sobre el historial y puede diferir del LOC de código del análisis de calidad (que mira solo el estado de `main`)._
 
-> **Reparto del trabajo:** mateo concentra el 66% de las líneas de código. Un reparto muy desigual suele indicar que la integración no fue realmente en equipo; vale la pena reconstruir cómo se coordinó.
+> **Reparto del trabajo:** mateo concentra el 69% de las líneas de código. Un reparto muy desigual suele indicar que la integración no fue realmente en equipo; vale la pena reconstruir cómo se coordinó.
 
 ## 3. Constancia (IC) — todas las ramas
 
@@ -41,8 +41,8 @@
 
 | Alumno | Sesiones | Cumplimiento | Pausa | Recencia | IC | Nivel | Para subir de nivel |
 |---|--:|--:|--:|--:|--:|--|--|
-| mateo | 33 | 100% | 12 d | 100% | **79** | Aprueba | Pausa 12 d (máx. 5 d) |
-| SantiValla | 15 | 65% | 19 d | 57% | **50** | Aprueba | Cumplimiento 65% (mín. 100%); Pausa 19 d (máx. 5 d); Recencia 57% (mín. 75%) |
+| mateo | 36 | 100% | 12 d | 93% | **78** | Aprueba | Pausa 12 d (máx. 5 d) |
+| SantiValla | 16 | 65% | 19 d | 64% | **51** | Aprueba | Cumplimiento 65% (mín. 100%); Pausa 19 d (máx. 5 d); Recencia 64% (mín. 75%) |
 
 > Para aprobar el IC: **2 sesiones por semana** sostenidas, sin pausas mayores a **10 días** y con actividad en las **últimas 2 semanas**. Se excluyen merges, bots y al docente. Zona horaria UTC-3.
 
@@ -64,7 +64,7 @@ Cada aspecto indica **qué mide**, **por qué importa** y **tu resultado**. Cuan
 
 - **Qué mide:** Porcentaje de bloques de código repetidos (similitud) en el repositorio.
 - **Por qué importa:** Cada copia se mantiene por separado: un arreglo hay que repetirlo y los defectos se multiplican.
-- **Tu resultado:** **10.3%** de duplicación _(máximo 15%)_
+- **Tu resultado:** **10.0%** de duplicación _(máximo 15%)_
 
 ### 3. Secretos hardcodeados (SEC) — OK
 
@@ -94,7 +94,7 @@ Cada aspecto indica **qué mide**, **por qué importa** y **tu resultado**. Cuan
 
 - **Qué mide:** Mensajes de depuración olvidados (`console.log`, `print`, `debugger`).
 - **Por qué importa:** Generan ruido en los registros, pueden filtrar datos y dan sensación de código sin terminar.
-- **Tu resultado:** **24** mensaje(s) de depuración olvidado(s) _(máximo 0)_
+- **Tu resultado:** **14** mensaje(s) de depuración olvidado(s) _(máximo 0)_
 - **Para investigar la causa:**
     - ¿Fue depuración que quedó al cerrar una tarea, o se usó como registro permanente?
     - ¿Hubo una revisión final antes de cerrar la issue o la entrega?
@@ -126,7 +126,7 @@ Cada aspecto indica **qué mide**, **por qué importa** y **tu resultado**. Cuan
 
 - **Qué mide:** Complejidad ciclomática: cantidad de caminos posibles dentro de una función (condicionales, bucles, casos).
 - **Por qué importa:** Muchos caminos = difícil de seguir y de probar; suelen esconderse casos sin cubrir.
-- **Tu resultado:** **273** bloque(s) de complejidad alta _(máximo 5 por 1000 LOC (tenés 25488 LOC))_
+- **Tu resultado:** **282** bloque(s) de complejidad alta _(máximo 5 por 1000 LOC (tenés 26708 LOC))_
 - **Para investigar la causa:**
     - ¿Se agregaron condiciones a medida que aparecían casos nuevos?
     - ¿Se probaron todos los caminos o solo el caso principal?
@@ -136,19 +136,19 @@ Cada aspecto indica **qué mide**, **por qué importa** y **tu resultado**. Cuan
 
 - **Qué mide:** Tamaño de las funciones/métodos y cantidad de parámetros.
 - **Por qué importa:** Una función que hace varias cosas cuesta leerla, nombrarla y reutilizarla.
-- **Tu resultado:** **203** función/método(s) largos o con muchos parámetros _(máximo 10 por 1000 LOC)_
+- **Tu resultado:** **215** función/método(s) largos o con muchos parámetros _(máximo 10 por 1000 LOC)_
 
 ### 13. Acoplamiento alto (Acop) — OK
 
 - **Qué mide:** Cuánto depende una unidad de las partes internas de otra.
 - **Por qué importa:** Piezas muy enlazadas hacen que un cambio se propague y que sea difícil reemplazar partes.
-- **Tu resultado:** **10** unidad(es) con acoplamiento alto _(máximo 2 por 1000 LOC)_
+- **Tu resultado:** **11** unidad(es) con acoplamiento alto _(máximo 2 por 1000 LOC)_
 
 ### 14. Cobertura de tests (Cob) — A REVISAR
 
 - **Qué mide:** Porcentaje de líneas de código ejecutadas por la suite de tests (cobertura real, no cantidad de archivos de test).
 - **Por qué importa:** Un test que existe pero no ejecuta el código no protege de nada: la cobertura muestra qué partes quedan sin verificar.
-- **Tu resultado:** **18.0%** de líneas cubiertas · fuente: ejecución: pytest (. 22.0%, backend 3.0%) _(mínimo 80% de líneas)_
+- **Tu resultado:** **52.8%** de líneas cubiertas · fuente: ejecución: pytest (aviso: requirements.txt: sin instalar 2 línea(s) (no disponibles o en conflicto: torch>=2.1.0 --index-url https://dow…) (. 50.8%, backend_fastapi 55.7%) _(mínimo 80% de líneas)_
 - **Para investigar la causa:**
     - ¿Qué módulos o ramas del sistema nunca se ejecutan en los tests?
     - ¿Los tests prueban el camino principal y los errores, o solo el caso feliz?
@@ -173,22 +173,22 @@ Criterios que hoy están en rojo y, para cada uno, una explicación breve de **c
 | Criterio | Resultado actual | Meta | Brecha | Cómo alcanzarlo |
 |---|---|---|---|---|
 | Índice de calidad de servicios (indice) | índice **5/100** | mínimo 50 | faltan 45 pts | El índice sólo penaliza lo que **excede** los umbrales de cada criterio: si tenés todo en verde, el índice es 100. Si está en rojo, mirá la columna **Brecha** y los criterios en rojo; corregí primero duplicación, SEC, SQL y capas. Meta del perfil exigente: ≥50. |
-| Depuración olvidada (DBG) | **24** mensaje(s) de depuración olvidado(s) | máximo 0 | 24 caso(s) a eliminar | Borrá `console.log`/`print`/`debugger` del código de producción. Si necesitás registro, usá el logger del proyecto con el nivel adecuado. Meta: 0 casos. |
+| Depuración olvidada (DBG) | **14** mensaje(s) de depuración olvidado(s) | máximo 0 | 14 caso(s) a eliminar | Borrá `console.log`/`print`/`debugger` del código de producción. Si necesitás registro, usá el logger del proyecto con el nivel adecuado. Meta: 0 casos. |
 | Baja cohesión (Coh) | **1** unidad(es) con baja cohesión | máximo 0 | 1 clase(s) a separar | Separá la clase en unidades con una sola responsabilidad: si los métodos cambian por motivos distintos, son clases distintas. Meta: 0 clases con baja cohesión. |
-| Complejidad alta (Compl) | **273** bloque(s) de complejidad alta | máximo 5 por 1000 LOC (tenés 25488 LOC) | 273 hallazgo(s); el máximo para 25,488 LOC es 127.4 | Extraé condiciones y ramas a funciones con nombre propio, usá retornos tempranos y evitá anidar `if`/`switch`. Meta: ≤5 bloques por 1000 LOC. |
-| Cobertura de tests (Cob) | **18.0%** de líneas cubiertas · fuente: ejecución: pytest (. 22.0%, backend 3.0%) | mínimo 80% de líneas | faltan 62.0 pts | Agregá o ampliá tests que ejecuten los módulos sin cubrir (camino principal y errores) y publicá el artefacto (`coverage/lcov.info`, `coverage-summary.json`, `coverage.xml` o `coverage.json`) o corré la suite con coverage. Meta: ≥80% de líneas. |
+| Complejidad alta (Compl) | **282** bloque(s) de complejidad alta | máximo 5 por 1000 LOC (tenés 26708 LOC) | 282 hallazgo(s); el máximo para 26,708 LOC es 133.5 | Extraé condiciones y ramas a funciones con nombre propio, usá retornos tempranos y evitá anidar `if`/`switch`. Meta: ≤5 bloques por 1000 LOC. |
+| Cobertura de tests (Cob) | **52.8%** de líneas cubiertas · fuente: ejecución: pytest (aviso: requirements.txt: sin instalar 2 línea(s) (no disponibles o en conflicto: torch>=2.1.0 --index-url https://dow…) (. 50.8%, backend_fastapi 55.7%) | mínimo 80% de líneas | faltan 27.2 pts | Agregá o ampliá tests que ejecuten los módulos sin cubrir (camino principal y errores) y publicá el artefacto (`coverage/lcov.info`, `coverage-summary.json`, `coverage.xml` o `coverage.json`) o corré la suite con coverage. Meta: ≥80% de líneas. |
 
 > Empezá por las señales de seguridad (**SEC**, **SQL**) y por la **duplicación**: son las que más pesan en el índice y las más rápidas de verificar a ojo. Después de corregir, volvé a correr la medición: el semáforo se recalcula sobre `main`.
 
 ## 6. Actividad en clase (miércoles y viernes)
 
-> Se consideran las **23 clases** del período (miércoles y viernes; Nov 4 y 6 quedan afuera porque el calendario las marca sin clase). `Commits` = commits de trabajo (no-merge); `Merges` = merges de PR (también son push). Los días sin actividad dicen **sin actividad**.
+> Se consideran las **23 clases** del período (miércoles y viernes, según `config/constancia.json`; feriados y semanas sin clase descontados). `Commits` = commits de trabajo (no-merge); `Merges` = merges de PR (también son push). Los días sin actividad dicen **sin actividad**.
 
 ### mateo
 
 **15/23 clases con actividad** · 72 commits · 21 merges
 
-| Fecha | Marca | Repositorios | Commits / merges |
+| Fecha | Actividad | Repositorios | Commits / merges |
 |---|:--:|---|--:|
 | 2026-08-14 | No | sin actividad | 0 / 0 |
 | 2026-08-19 | **Sí** | CLIPSAI---Valla---Boggio | 7 / 0 |
@@ -218,7 +218,7 @@ Criterios que hoy están en rojo y, para cada uno, una explicación breve de **c
 
 **16/23 clases con actividad** · 43 commits · 10 merges
 
-| Fecha | Marca | Repositorios | Commits / merges |
+| Fecha | Actividad | Repositorios | Commits / merges |
 |---|:--:|---|--:|
 | 2026-08-14 | No | sin actividad | 0 / 0 |
 | 2026-08-19 | No | sin actividad | 0 / 0 |
@@ -248,16 +248,14 @@ Criterios que hoy están en rojo y, para cada uno, una explicación breve de **c
 
 Archivos donde el análisis encontró cada señal en rojo (sin número de línea, a propósito):
 
-**Depuración olvidada (DBG)** — 4 archivo(s):
-- `app/services/hook_service.py`
-- `backend/handler.py`
+**Depuración olvidada (DBG)** — 2 archivo(s):
 - `backend_express/src/routes/jobs.ts`
-- `backend_fastapi/app/main.py`
+- `video_processor.py`
 
 **Baja cohesión (Coh)** — 1 archivo(s):
 - `editor_viral.py`
 
-**Complejidad alta (Compl)** — 99 archivo(s):
+**Complejidad alta (Compl)** — 101 archivo(s):
 - `app/services/hook_service.py`
 - `audio_analyzer.py`
 - `backend/api/routes/retrim.py`
@@ -307,6 +305,7 @@ Archivos donde el análisis encontró cada señal en rojo (sin número de línea
 - `backend_fastapi/app/services/publish_service.py`
 - `backend_fastapi/app/services/runpod_service.py`
 - `backend_fastapi/app/services/social_common.py`
+- `backend_fastapi/app/services/storage_cleanup.py`
 - `backend_fastapi/app/services/tiktok_service.py`
 - `backend_fastapi/app/services/transcript_utils.py`
 - `backend_fastapi/app/services/whisper_service.py`
@@ -356,6 +355,7 @@ Archivos donde el análisis encontró cada señal en rojo (sin número de línea
 - `limpiar.py`
 - `main.py`
 - `scripts/make_og_image.py`
+- `video_processor.py`
 - `whisper_transcriber.py`
 
 ---
