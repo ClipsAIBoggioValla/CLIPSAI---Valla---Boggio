@@ -8,6 +8,7 @@ y los sube a R2, devolviendo URLs en vez de paths locales.
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 import tempfile
@@ -24,6 +25,17 @@ import requests
 _project_root = os.environ.get("PROJECT_ROOT", "/app")
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
+
+
+# Logger del worker: RunPod captura stdout del contenedor, asi que se escribe a stdout
+# en lugar de usar print disperso por el codigo (convencion del proyecto: logging.getLogger).
+logger = logging.getLogger("clipsai.handler")
+if not logger.handlers:
+    _stream_handler = logging.StreamHandler(sys.stdout)
+    _stream_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [clipsai.handler] %(message)s"))
+    logger.addHandler(_stream_handler)
+logger.setLevel(os.environ.get("CLIPSAI_LOG_LEVEL", "INFO").upper())
+logger.propagate = False
 
 
 MAX_VIDEO_BYTES = 500 * 1024 * 1024
@@ -70,7 +82,7 @@ def _upload_to_r2(file_path: str, bucket: str, key: str) -> str:
     )
     
     try:
-        print(f"[R2 Upload] Subiendo {file_path} -> {bucket}/{key}")
+        logger.info("Subiendo a R2 %s -> %s/%s", file_path, bucket, key)
         s3.upload_file(file_path, bucket, key)
         
         # Construir URL PÚBLICA vía custom domain del bucket.
@@ -82,7 +94,7 @@ def _upload_to_r2(file_path: str, bucket: str, key: str) -> str:
             public_base_url = "https://videos.clipsai.xyz"
         url = f"{public_base_url}/{key.lstrip('/')}"
         
-        print(f"[R2 Upload] ✓ Subido: {url}")
+        logger.info("Subido a R2: %s", url)
         return url
         
     except Exception as exc:
@@ -152,7 +164,7 @@ def process_video_job(job: dict[str, Any]) -> dict[str, Any]:
             "transcription_text": "0:00 - Primer segmento\n0:30 - Segundo..."
         }}
     """
-    print("[RunPod Handler] Iniciando procesamiento...")
+    logger.info("Iniciando procesamiento...")
     
     if not isinstance(job, dict):
         raise ValueError("El job de RunPod debe ser un objeto JSON")
@@ -185,8 +197,7 @@ def process_video_job(job: dict[str, Any]) -> dict[str, Any]:
 
     video_id = str(input_data.get("video_id") or uuid.uuid4())
     
-    print(f"[RunPod Handler] video_id={video_id}")
-    print(f"[RunPod Handler] video_url={video_url[:80]}...")
+    logger.info("video_id=%s | video_url=%s...", video_id, video_url[:80])
 
     with tempfile.TemporaryDirectory(prefix="clipsai_runpod_") as work_dir:
         work_path = Path(work_dir)
@@ -194,30 +205,30 @@ def process_video_job(job: dict[str, Any]) -> dict[str, Any]:
         transcript_path = work_path / f"transcription{transcript_extension}"
 
         # Descargar video
-        print(f"[RunPod Handler] Descargando video a {video_path}...")
+        logger.info("Descargando video a %s...", video_path)
         _download_file(video_url, video_path, MAX_VIDEO_BYTES)
-        print(f"[RunPod Handler] Video descargado: {video_path.stat().st_size} bytes")
+        logger.info("Video descargado: %s bytes", video_path.stat().st_size)
 
         # Descargar o escribir transcripcion
         if transcript_url:
-            print(f"[RunPod Handler] Descargando transcripcion a {transcript_path}...")
+            logger.info("Descargando transcripcion a %s...", transcript_path)
             _download_file(transcript_url, transcript_path, MAX_TRANSCRIPT_BYTES)
-            print(f"[RunPod Handler] Transcripcion descargada: {transcript_path.stat().st_size} bytes")
+            logger.info("Transcripcion descargada: %s bytes", transcript_path.stat().st_size)
         else:
-            print(f"[RunPod Handler] Escribiendo transcripcion desde texto...")
+            logger.info("Escribiendo transcripcion desde texto...")
             transcript_path.write_text(transcript_text or "", encoding="utf-8")
 
         # Importar SOLO engine.py (sin FastAPI, sin DB)
-        print("[RunPod Handler] Importando engine.py...")
+        logger.info("Importando engine.py...")
         from engine import procesar_video
 
         # Ejecutar el pipeline de procesamiento
-        print(f"[RunPod Handler] Ejecutando procesar_video({video_path}, {transcript_path})...")
+        logger.info("Ejecutando procesar_video(%s, %s)...", video_path, transcript_path)
         result = procesar_video(str(video_path), str(transcript_path))
 
         if not result.exito:
             error_msg = f"{result.error_tipo}: {result.error}" if result.error_tipo else result.error
-            print(f"[RunPod Handler] ERROR: {error_msg}")
+            logger.error("procesar_video fallo: %s", error_msg)
             return {
                 "status": "FAILED",
                 "video_id": video_id,
@@ -229,17 +240,21 @@ def process_video_job(job: dict[str, Any]) -> dict[str, Any]:
 
         clips = result.clips
         transcription_segments = getattr(result, 'transcription_segments', None) or []
-        print(f"[RunPod Handler] EXITO: {len(clips)} clips horizontales generados, {len(transcription_segments)} segmentos de transcripción")
+        logger.info(
+            "Engine OK: %s clips horizontales generados, %s segmentos de transcripción",
+            len(clips),
+            len(transcription_segments),
+        )
 
         # Procesar clips horizontales a verticales 9:16 con subs+hook y subir a R2
-        print("[RunPod Handler] Procesando clips verticales 9:16 + subs + hook...")
+        logger.info("Procesando clips verticales 9:16 + subs + hook...")
         from video_processor import process_clip_vertical
         
         bucket = os.getenv("BUCKET_NAME", "clipsai-videos").strip()
         clips_verticales = []
         
         for idx, clip in enumerate(clips):
-            print(f"[RunPod Handler] Procesando clip {idx+1}/{len(clips)}...")
+            logger.info("Procesando clip %s/%s...", idx + 1, len(clips))
             
             # Convertir timestamps de string a segundos
             def ts_to_seconds(ts_str: str) -> float:
@@ -267,7 +282,7 @@ def process_video_job(job: dict[str, Any]) -> dict[str, Any]:
             )
             
             if not success or not os.path.exists(vertical_path):
-                print(f"[RunPod Handler] ⚠ Clip {idx+1} falló procesamiento vertical, saltando")
+                logger.warning("Clip %s fallo el procesamiento vertical, saltando", idx + 1)
                 continue
             
             # Subir a R2
@@ -289,13 +304,13 @@ def process_video_job(job: dict[str, Any]) -> dict[str, Any]:
                     "motivo": clip.motivo,
                 })
                 
-                print(f"[RunPod Handler] ✓ Clip {idx+1} subido a R2: {r2_url}")
+                logger.info("Clip %s subido a R2: %s", idx + 1, r2_url)
                 
             except Exception as exc:
-                print(f"[RunPod Handler] ⚠ Error subiendo clip {idx+1} a R2: {exc}")
+                logger.warning("Error subiendo clip %s a R2: %s", idx + 1, exc)
                 continue
         
-        print(f"[RunPod Handler] {len(clips_verticales)} clips verticales procesados y subidos a R2")
+        logger.info("%s clips verticales procesados y subidos a R2", len(clips_verticales))
 
         response = {
             "status": "COMPLETED",

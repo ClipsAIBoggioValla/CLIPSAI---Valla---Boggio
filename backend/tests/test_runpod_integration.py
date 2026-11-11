@@ -7,6 +7,7 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, patch
 
 from backend.handler import process_video_job
@@ -24,37 +25,123 @@ from backend_fastapi.app.services.runpod_service import (
 
 
 class RunPodHandlerTests(unittest.TestCase):
-    def test_handler_downloads_video_and_returns_json_metadata(self) -> None:
-        engine = types.ModuleType("backend_fastapi.app.services.engine")
-        engine.run_clip_engine = Mock(
-            return_value={
-                "engine": "native_claude",
-                "clips": [
-                    {"inicio": "00:00:10", "fin": "00:00:35", "score": 8, "titulo": "Momento clave"}
-                ],
-                "transcription_segments": [{"start": 0, "end": 1, "text": "transcript"}],
-            }
+    """Contrato actual de `backend/handler.py`.
+
+    El handler ya no delega en `services.engine.run_clip_engine(..., allow_runpod=False)`
+    ni expone `transcription_segments_count`: hoy descarga video + transcripcion, corre
+    `engine.procesar_video`, renderiza cada clip a 9:16 con `video_processor` y sube el
+    resultado a R2 devolviendo `url_r2`. La respuesta lleva `transcription_segments`
+    (lista) y `clip_count`; se valida por claves esperadas, no por igualdad estricta del
+    dict, para que agregar campos nuevos no rompa la suite.
+    """
+
+    @staticmethod
+    def _clip_mock(archivo: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            inicio="00:00:10",
+            fin="00:00:45",
+            archivo=archivo,
+            titulo_sugerido="Momento clave",
+            hook_texto="Nadie lo vio venir",
+            score=9.0,
+            criterio_principal="revelacion",
+            primer_segundo="arranque",
+            motivo="giro inesperado",
         )
 
-        def fake_download(_url, destination, _max_bytes):
-            destination.write_bytes(b"video")
+    def test_handler_procesa_video_y_devuelve_clips_en_r2(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            horizontal = Path(directory) / "clip_0.mp4"
+            horizontal.write_bytes(b"horizontal")
 
-        with (
-            patch.dict(sys.modules, {"backend_fastapi.app.services.engine": engine}),
-            patch("backend.handler._download_input", side_effect=fake_download),
-        ):
-            result = process_video_job(
-                {"input": {"video_url": "https://media.example/video.mp4", "video_id": "video-123"}}
+            resultado_engine = SimpleNamespace(
+                exito=True,
+                clips=[self._clip_mock(str(horizontal))],
+                carpeta_salida=directory,
+                transcription_segments=[{"start": 0, "end": 1, "text": "transcript"}],
+                error=None,
+                error_tipo=None,
+                error_detalle=None,
             )
+            engine = types.ModuleType("engine")
+            engine.procesar_video = Mock(return_value=resultado_engine)
+            video_processor = types.ModuleType("video_processor")
 
-        self.assertEqual(result["status"], "COMPLETED")
-        self.assertEqual(result["video_id"], "video-123")
-        self.assertEqual(result["clip_count"], 1)
-        self.assertEqual(result["clips"][0]["titulo"], "Momento clave")
-        self.assertEqual(result["transcription_segments_count"], 1)
-        self.assertEqual(result["transcription_segments"], [{"start": 0.0, "end": 1.0, "text": "transcript"}])
-        engine.run_clip_engine.assert_called_once()
-        self.assertFalse(engine.run_clip_engine.call_args.kwargs["allow_runpod"])
+            def fake_vertical(**kwargs):
+                Path(kwargs["output_video"]).write_bytes(b"vertical")
+                return True
+
+            video_processor.process_clip_vertical = Mock(side_effect=fake_vertical)
+
+            def fake_download(_url, destination, _max_bytes):
+                destination.write_bytes(b"video")
+
+            url_r2 = "https://videos.clipsai.xyz/clips/video-123/0_vertical.mp4"
+            with (
+                patch.dict(sys.modules, {"engine": engine, "video_processor": video_processor}),
+                patch("backend.handler._download_file", side_effect=fake_download),
+                patch("backend.handler._upload_to_r2", return_value=url_r2) as upload,
+            ):
+                result = process_video_job(
+                    {
+                        "input": {
+                            "video_url": "https://media.example/video.mp4",
+                            "transcription_text": "00:00:00 - Hola",
+                            "video_id": "video-123",
+                        }
+                    }
+                )
+
+            esperado = {"status", "video_id", "engine", "clips", "clip_count", "transcription_segments"}
+            self.assertTrue(
+                esperado <= set(result), f"faltan claves del contrato: {esperado - set(result)}"
+            )
+            self.assertEqual(result["status"], "COMPLETED")
+            self.assertEqual(result["video_id"], "video-123")
+            self.assertEqual(result["engine"], "clipsai_native")
+            self.assertEqual(result["clip_count"], 1)
+            self.assertEqual(len(result["clips"]), 1)
+            self.assertEqual(result["clips"][0]["url_r2"], url_r2)
+            self.assertEqual(result["clips"][0]["titulo"], "Momento clave")
+            self.assertEqual(result["clips"][0]["hook_texto"], "Nadie lo vio venir")
+            self.assertEqual(result["clips"][0]["score"], 9.0)
+            self.assertEqual(result["clips"][0]["duracion"], 35)
+            self.assertEqual(result["transcription_segments"], [{"start": 0, "end": 1, "text": "transcript"}])
+
+            engine.procesar_video.assert_called_once()
+            video_processor.process_clip_vertical.assert_called_once()
+            upload.assert_called_once()
+
+    def test_handler_marca_failed_cuando_el_engine_no_produce_clips(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            resultado_engine = SimpleNamespace(
+                exito=False,
+                clips=[],
+                carpeta_salida=directory,
+                error="sin audio util",
+                error_tipo="SinClipsValidos",
+                error_detalle="0 momentos",
+            )
+            engine = types.ModuleType("engine")
+            engine.procesar_video = Mock(return_value=resultado_engine)
+
+            def fake_download(_url, destination, _max_bytes):
+                destination.write_bytes(b"video")
+
+            with (
+                patch.dict(sys.modules, {"engine": engine}),
+                patch("backend.handler._download_file", side_effect=fake_download),
+                patch("backend.handler._upload_to_r2") as upload,
+            ):
+                result = process_video_job(
+                    {"input": {"video_url": "https://media.example/video.mp4", "video_id": "video-456"}}
+                )
+
+            self.assertEqual(result["status"], "FAILED")
+            self.assertEqual(result["video_id"], "video-456")
+            self.assertEqual(result["error_tipo"], "SinClipsValidos")
+            self.assertEqual(result["clips"] if "clips" in result else [], [])
+            upload.assert_not_called()
 
     def test_handler_requires_video_url(self) -> None:
         with self.assertRaisesRegex(ValueError, "video_url"):
@@ -82,7 +169,12 @@ class RunPodClientTests(unittest.TestCase):
             "https://media.example/video.mp4", transcription_text="00:00:00 - Hola"
         )
 
-        self.assertEqual(result, {"status": "COMPLETED", "clip_count": 1})
+        # El cliente normaliza la salida del worker y siempre garantiza la clave
+        # `transcription_segments`; se valida el subconjunto esperado en lugar del
+        # dict completo, para que anadir campos nuevos en el worker no rompa el contrato.
+        esperado = {"status": "COMPLETED", "clip_count": 1}
+        self.assertTrue(esperado.items() <= result.items(), f"salida inesperada: {result}")
+        self.assertIn("transcription_segments", result)
         args, kwargs = post.call_args
         self.assertTrue(args[0].endswith("/endpoint-123/runsync"))
         self.assertEqual(kwargs["headers"]["Authorization"], "Bearer test-key")
