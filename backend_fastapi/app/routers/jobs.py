@@ -493,8 +493,6 @@ def _render_clip_with_ass_and_hook(
                 ass_path_obj.unlink(missing_ok=True)
             except Exception:
                 pass
-    # Fallback si todo falla
-    raise RuntimeError("Render falló en todas las ramas")
 
 
 def _extractmeaningful_title(text: str, max_words: int = 8) -> str:
@@ -1173,51 +1171,6 @@ def _run_job(job_id: uuid.UUID) -> None:
             logger.info("[jobs] Cleanup post-job para job=%s: liberó %.2f MB", job_id, freed / (1024 * 1024))
         except Exception as cleanup_err:
             logger.warning("[jobs] Cleanup post-job falló (non-fatal) para job=%s: %s", job_id, cleanup_err)
-
-
-# Wrapper Global para BackgroundTasks — spec exacta (async)
-async def run_job_safely(job_id: str) -> None:
-    """Wrapper async con try...except global para BackgroundTasks (spec)."""
-    try:
-        logger.info(f"[JOB {job_id}] Inicio de procesamiento de job.")
-        try:
-            sys.stdout.flush()
-        except Exception:
-            pass
-        # Delegar a pipeline síncrono existente (convierte str a UUID si necesario)
-        try:
-            jid = uuid.UUID(str(job_id)) if isinstance(job_id, str) else job_id  # type: ignore
-        except Exception:
-            jid = job_id  # type: ignore
-        _run_job(jid)  # type: ignore
-    except Exception as e:
-        error_trace = traceback.format_exc()
-        logger.error(f"[JOB {job_id}] ERROR CRÍTICO EN PIPELINE:\n{error_trace}")
-        try:
-            sys.stdout.flush()
-        except Exception:
-            pass
-        # Guardar en BD de inmediato — sync version de update_job_status_in_db
-        try:
-            db2 = SessionLocal()
-            try:
-                fj = db2.get(Job, jid if 'jid' in locals() else job_id)  # type: ignore
-                if fj is not None:
-                    fj.status = JobStatus.FAILED.value
-                    fj.error_message = f"{str(e)} | Details: {error_trace[-300:]}"
-                    try:
-                        fj.result_metadata = {"error": f"{str(e)} | Details: {error_trace[-300:]}", "traceback": error_trace[:3000], "engine": "real", "failed": True}
-                    except Exception:
-                        pass
-                    db2.commit()
-                    try:
-                        sys.stdout.flush()
-                    except Exception:
-                        pass
-            finally:
-                db2.close()
-        except Exception as _db_e:
-            logger.error(f"[JOB {job_id}] No se pudo guardar error en BD desde wrapper: {_db_e}")
 
 
 # Wrapper Global para BackgroundTasks — spec exacta con asyncio.to_thread para desbloquear event loop
