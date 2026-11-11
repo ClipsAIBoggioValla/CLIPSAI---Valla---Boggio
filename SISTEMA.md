@@ -4,7 +4,7 @@
 >
 > **Propósito:** describir de arriba a abajo qué es el sistema, qué hace hoy, con qué lo hace, cómo se estructura el código y qué falta — para decidir nuevas issues y onboarding. Está pensado como insumo para tomar decisiones sobre los próximos pasos (ver §17.6).
 >
-> **Última actualización: 8 de noviembre de 2026** — incorpora: procesamiento serverless en RunPod GPU + Cloudflare R2 (§18), despliegue en Render, CI de Docker Hub, paquete compartido `frontend_common/`, SSE de publicación en UI, subida directa a R2 y estado de calidad según la evaluación de la cátedra (§17).
+> **Última actualización: 11 de noviembre de 2026** — Fase 1 de calidad **mergeada a `main`** (PR #104: logs DBG 0, refactor de cohesión en `editor_viral.py`, suite de 330 tests). Fase 2 en PR **#105 abierto**: fix crítico de código inalcanzable en `engine.py` (pipeline local), 395 tests, cobertura 69% agregada, `backend_express/dist/` fuera del rastreo (cierra Issue 2 del doc de seguimiento). Detalle de estado en §17.
 
 ---
 
@@ -419,6 +419,16 @@ Idempotente, sin Alembic:
 
 ### 6.4 Cambios recientes del motor (oct–nov 2026)
 
+- **FIX CRÍTICO (11-nov, PR #105): `run_clip_engine` tenía el pipeline local inalcanzable.**
+  Tras el bloque de RunPod, `_native_segments` + Claude + el `return` final estaban anidados
+  DENTRO de `_parse_transcript_native` después de su `return` (artefacto de merge): sin RunPod
+  configurado, la función devolvía `None` y **todo job local terminaba en "0 clips → FAILED"**.
+  El bloque se re-anidó dentro de `run_clip_engine`; verificado con introspección + tests
+  (`test_engine_coverage.py`). Cubierto en 7 escenarios por `test_engine_coverage.py`.
+- **Limitación conocida del modo local con `.txt`:** el fallback a transcripción de texto plano
+  produce segmentos SIN timestamps de palabra → `build_sentence_map` (Claude) los exige y el
+  pipeline falla con "Error en API de Claude: No hay timestamps...". Las subidas con solo `.txt`
+  no producen clips en modo local — decisión de diseño pendiente (documentado en tests).
 - **Prompt con recuento obligatorio:** `construir_prompt()` en `main.py` exige "**array con entre 1 y 5 clips… NUNCA `[]`**"; si el LLM devuelve vacío hay fallback determinístico. Los 6 criterios de viralidad mantienen pesos (revelación 10 → predicción 5) y duración obligatoria 30–90 s (óptimo 45–70).
 - **Validación:** `validar_clips()` filtra duración fuera de 30–90 y `score < 5`, ordena desc y trunca a 10 (el log de error aún dice "15-120" — texto desactualizado).
 - **Reframe robusto:** `backend_fastapi/app/services/editor.py` pasó a *crop-primero* para evitar frames intermedios de ~3413 px que provocaban OOM en Render; captura `returncode` de ffmpeg.
@@ -878,13 +888,37 @@ Red `clipsai-net` bridge; volumen nombrado `clipsai_postgres_data`. `down` conse
 - Typecheck frontends: `npm run typecheck` (React `tsc --noEmit`, Vue `vue-tsc --noEmit`).
 - Build: `npm run build` → `dist/`.
 - Express: `npm run typecheck`, `curl /health`, `curl /docs`.
-- **Paridad backends (Issue 6):** `cd backend_express && npm run audit:openapi && npm run audit:parity`.
+- **Paridad backends (Issue 6):** `cd backend_express && npm run audit:openapi && npm run audit:parity` (el script ya compila en Windows vía `pathToFileURL`).
 - Infra: `docker compose logs -f`, `docker compose ps`, `curl :8000/health`, `curl :8000/docs`.
 - Pipeline Issue 29: `test_issue_29_pipeline.py` (ffprobe 9:16, ASS PlayRes, fallback).
 - Landing Issue 32: `npm run build` + `npx lighthouse http://localhost:3000/ --only-categories=seo` (SEO 100/100) + `curl /robots.txt` + `curl /sitemap.xml`.
 - Duplicación: `npx jscpd --min-lines 5 --min-tokens 50` (ver Issue 42 en `ISSUES.md`).
 - **No hay CI que ejecute tests/typecheck/lint** (el único workflow es el build del worker); la evaluación de calidad se corre manual/externamente vía `docs/EVALUACION.md`.
-- Cobertura de tests automatizados aún limitada (Issue 22 propuesta: `pytest` + `vitest`).
+
+**Suite de tests Python (Fase 1 + Fase 2, 395 tests herméticos — sin DB, sin red, sin FFmpeg):**
+
+| Suite | Cubre |
+|---|---|
+| `backend_fastapi/tests/conftest.py` + `_fixtures.py` | harness: `FakeSession` (protocolo SQLAlchemy de los routers), factories de modelos con `__name__` del modelo (para `db.get`), `TestClient` con overrides, `DATABASE_URL=""` forzado |
+| `test_routers_coverage.py` (87) | routers: auth/JWT real, users, videos (presign R2), jobs, clips, export, metrics, stats, social OAuth mockeado, sample, SSE |
+| `test_services_coverage.py` (44) | security JWT/bcrypt, `transcript_utils`, `ass_generator`, `storage_cleanup`, `runpod_service`, `hook_service`, `ffmpeg_service` |
+| `test_jobs_heavy_coverage.py` (33) | `_run_job` completo (R2/local/FAILED/Claude), `run_job_safely`, helpers |
+| `test_publish_service_coverage.py` (34) | `publish_clip_task` + publicadores TikTok/IG/YouTube con HTTP mockeado, refresh de tokens |
+| `test_social_editors_coverage.py` (32) | conectores OAuth (tiktok/youtube/instagram), `editor.py` (reframe), `claude_service` |
+| `test_engine_coverage.py` (29) | motor: timestamps/ventana de hook, WAV, `run_clip_engine` (RunPod + local+Claude) |
+| `test_pipeline_heavy_coverage.py` (36) | `whisper_service` (SDK mockeado) + `subtitle_pipeline` completo |
+| `backend/tests/test_runpod_integration.py` (12) | handler RunPod + cliente + presign |
+| `backend/tests/test_tracks_core_coverage.py` (63) | stubs del paquete desacoplado, `core/security` (ssrf/vault/rate-limit/storage), handler ramas |
+
+Comandos de cobertura (desde la raíz):
+```bash
+python -m pytest -q -p no:cacheprovider --cov=app --cov=backend --cov=backend_fastapi.app --cov-report=term   # global agregada (69%)
+python -m pytest -q -p no:cacheprovider --cov=app --cov=backend_fastapi/app --cov-report=term-missing        # literal (64%)
+```
+Reglas de oro de la suite: mockear SIEMPRE `is_runpod_configured` en tests "locales" (el `.env`
+real de la máquina tiene RUNPOD_API_KEY y delegaría de verdad); fechas de test en UTC (los
+routers agrupan por UTC); `caplog.at_level(...)` para capturar INFO; no usar
+`Mock(side_effect=Mock)` (devuelve Mock hijo sin atributos — usar función → `SimpleNamespace`).
 
 ---
 
@@ -896,7 +930,7 @@ Fuentes: [`ISSUES.md`](./ISSUES.md) (backlog detallado) y [`docs/EVALUACION.md`]
 
 | Estado | Cantidad | Lista |
 |--------|----------|-------|
-| ✅ Completado | 25 | 1, 2, 3, 4, 5, 6, 7, 14, 17, 18, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 32, 33, 34, 35 (+ 35 bis) (+ PR #34 Spark) |
+| ✅ Completado | 27 | 1, 2, 3, 4, 5, 6, 7, 14, 17, 18, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 32, 33, 34, 35 (+ 35 bis) (+ PR #34 Spark) **+ Fase 1 y Fase 2 de calidad (PR #104 mergeado / #105 abierto)** |
 | ⚠️ Parcial | 2 | 13 (seguridad/compose), 42 (dedup: jscpd en 6.53%, pendientes declarados) |
 | ⏳ Pendiente / a cerrar | 2 | 31 (SSE publish — **implementado en código**, falta cierre en GitHub #51), 47 (despliegue Render — blueprint creado) |
 | ↩️ Cerradas vía otras | 3 | 8, 9, 10/11/12 → Issues 27/28/29 |
@@ -913,49 +947,51 @@ Fuentes: [`ISSUES.md`](./ISSUES.md) (backlog detallado) y [`docs/EVALUACION.md`]
 | Subtítulos + Hook | ✅ | Issue 29 — `ENABLE_ASS_HOOK=True` en `jobs`; en worker vía `video_processor.py` |
 | OAuth + Publish real | ✅ | Issues 22–28 — YouTube/Instagram/TikTok + SSE de estado en UI |
 | Docs OpenAPI | ✅ | FastAPI `/docs` + Express `/docs`, `/openapi.json`, `/redoc` |
-| **Serverless RunPod + R2** | ✅ funcional / **no publicado** | pipeline completo en local/dev; ver §17.4 (59 commits adelante de `origin/main`) |
+| **Serverless RunPod + R2** | ✅ funcional / publicado en `main` | pipeline completo (mergeado con la Fase 1, PR #104); worker v28 en Docker Hub — verificar alineación `dev`↔`main` |
 | Despliegue cloud | ⚠️ | blueprint Render creado (Issue 47); ngrok legacy + Cloudflare Tunnel para callbacks |
 | Seguridad | ⚠️ | key filtrada histórica (Issue 13), rate-limit ausente, `JWT_SECRET` con default dev |
-| Calidad (cátedra) | ❌ | índice **5/100** — ver §17.3 |
+| Calidad (cátedra) | ⚠️ mejorando | índice cátedra 5/100 (informe 6-nov desactualizado); DBG 0 ✅, Coh ✅, cobertura 69 % — Fase 3 para 80 % |
 | CI | ⚠️ | solo build del worker; sin workflow de tests/typecheck |
 
 ### 17.3 Evaluación de calidad (docs/EVALUACION.md — 6 Nov 2026, perfil exigente)
 
-| Métrica | Valor | Meta | Estado |
-|---|---|---|---|
-| Índice de calidad | **5/100** | ≥ 50 | ❌ |
-| Criterios cumplidos | **11/16** | — | ❌ (NO aprobado) |
-| Duplicación | 10,3 % | ≤ 15 % | ✅ (jscpd: 6,53 % / 121 clones) |
-| Secretos hardcodeados (SEC) / SQL concatenado / `any` / HTTP en componentes | 0 / 0 / 0 / 0 | 0 | ✅ |
-| **DBG** (console.log/print olvidados) | **24** en 4 archivos | 0 | ❌ — `app/services/hook_service.py`, `backend/handler.py`, `backend_express/src/routes/jobs.ts`, `backend_fastapi/app/main.py` |
-| **Complejidad alta** | **273 bloques** en 99 archivos | ≤ 127 (5/1000 LOC) | ❌ |
-| **Cobertura de tests** | **18,0 %** (pytest 22 %, backend 3 %) | ≥ 80 % | ❌ |
-| Cohesión baja | 1 (`editor_viral.py`) | 0 | ❌ |
-| Funciones largas / acoplamiento | 203 / 10 | 10/1000 · 2/1000 | ✅ |
-| Endpoints backend | **117** | ≥ 5 | ✅ |
-| Vistas frontend | **96** | ≥ 6 | ✅ |
-| Código / archivos / tests | 25.488 LOC / 243 archivos / 6 tests | — | — |
-| Pushes directos a `main` sin PR | **6** | 0 | ⚠️ |
+> ⚠️ **El informe de la cátedra quedó desactualizado tras la Fase 1 y Fase 2** (se genera
+> externamente sobre `main`; su próximo recálculo ya verá: DBG 0, Coh resuelto,
+> `backend_express/dist` fuera del rastreo y ~395 tests). Estado REAL al 11-nov:
 
-**Autoría (RepoSense):** mateo 64 commits · 66 % LOC · IC 79 (Aprueba) — SantiValla 39 commits · 34 % LOC · IC 50 (Aprueba, con pausa de 19 d y recencia 57 %).
+| Métrica | Cátedra (6-nov) | Estado real (11-nov) |
+|---|---|---|
+| DBG (console.log/print) | 24 ❌ | **0** en los 4 archivos reportados ✅ |
+| Cohesión baja | 1 (`editor_viral.py`) ❌ | **resuelto** (geometría/render/catálogo/fachada) ✅ |
+| Cobertura de tests | 18,0 % ❌ | **69 % agregada** (suite 395 tests; core app+backend: 88 %) — meta 80 % → Fase 3 |
+| Duplicación | 10,3 % ✅ | sin cambios (jscpd 6,53 %) ✅ |
+| Secretos/SQL/any/HTTP | 0 ✅ | sin cambios ✅ |
+| Complejidad alta | 273 bloques ❌ | sin cambios (Fase 3+) ❌ |
+| Índice de calidad | 5/100 ❌ | a recalcular por la cátedra (DBG/Coh/Cob ya atienden las 3 señales más pesadas) |
 
-**Brechas que más pesan para subir el índice:** DBG (24), complejidad (273), cobertura (18 %) y cierre de la Issue 13 (key filtrada en git history). SEC/SQL/duplicación ya están en verde.
+**Autoría (RepoSense, 6-nov):** mateo 64 commits · 66 % LOC · IC 79 — SantiValla 39 commits · 34 % LOC · IC 50.
+
+**Brecha restante para el índice ≥50:** complejidad (273 bloques) y cobertura (80 %: Fase 3 —
+restos de `jobs.py` 382, `publish_service` 314, `main.py` lifespan 104, `runpod_service` 89).
 
 ### 17.4 Estado de ramas y sincronización
 
-- Rama de trabajo actual: `fix/sync-main-with-dev` — **árbol idéntico al `main` local** (ambos resolvieron los mismos conflictos de merge).
-- **`origin/main` está 59 commits atrás** respecto del árbol local: la rama remota **no contiene** el pipeline RunPod+R2 (`worker.Dockerfile`, `backend/handler.py`, `video_processor.py`, `storage_cleanup.py`, cambios de `jobs.py`/`engine.py`/`main.py`). Diff: 21 archivos, +1.699 / −377.
-- Sí están publicados en `origin/main` (PR #100): `frontend_common/`, `docs/EVALUACION.md`, `scripts/_verify-common.sh`, audits de Express y el workflow `docker-build.yml`.
-- ⚠️ **Riesgo:** la imagen del worker publicada en Docker Hub (v28) se construye desde `dev`, pero el backend en Render usa `origin/main` → pueden estar ejecutando código distinto. **Prioridad: sincronizar y hacer PR de la rama actual.**
+- **Fase 1 de calidad MERGEADA a `main`** (PR **#104**, merge `35289e9`; rama `fix/quality-audit-score` borrada por GitHub tras el merge). Incluye: DBG 0, refactor `editor_viral.py`, fix de `publish_service.py` (sintaxis rota), fix alias `/registro`, fix `audit-openapi.mjs` Windows, 330 tests, `ISSUES_CALIDAD_PENDIENTES.md`.
+- **Fase 2 en PR ABIERTO #105** (`feat/quality-perfection-phase2` → `main`): fix crítico de código inalcanzable en `engine.py`, 65 tests nuevos (395 total), cobertura 69%, `dist/` fuera del rastreo, 2 flakes de reloj corregidos.
+- ⚠️ El pipeline RunPod+R2 ahora **está en `origin/main`** (venía con el merge de #104, que había arrancado desde `fix/sync-main-with-dev`).
+- ⚠️ Riesgo vigente: la imagen del worker en Docker Hub (v28) se builda desde `dev`; verificar que `dev` esté alineado con `main` post-merge.
 
 ### 17.5 Issues pendientes y deuda abierta
 
 | # | Título | Estado / criterio |
 |---|--------|-------------------|
-| 31 | SSE estado de publicación en UI | implementado (`usePublishSSE` / `usePublishStream` → `/clips/{id}/publish-stream`); **falta cerrar en GitHub #51** |
+| — | **Fase 3 de cobertura** | restos de `jobs.py` (382), `publish_service.py` (314), `main.py` lifespan (104), `runpod_service` polling (89) → para superar 80% agregada (ver `ISSUES_CALIDAD_PENDIENTES.md` issue 3) |
 | 13 | Seguridad | rotar `ANTHROPIC_API_KEY` filtrada + `git filter-repo`/BFG; obligar `JWT_SECRET` en prod; rate-limit |
-| 42 | Deduplicación profunda | jscpd 6,53 % ✅; pendientes: unificar `app/services` ↔ `backend_fastapi/app/services` (~700 L), fixtures duplicados, helpers `clips.ts` |
+| 42 | Deduplicación profunda | jscpd 6,53 % ✅; pendientes: unificar `app/services` ↔ `backend_fastapi/app/services` (~700 L), fixtures duplicados, helpers `clips.ts`, gemelos `backend/services/*` ↔ `backend/track_*/*` |
+| 31 | SSE estado de publicación en UI | implementado (`usePublishSSE` / `usePublishStream` → `/clips/{id}/publish-stream`); **falta cerrar en GitHub #51** |
 | 47 | Despliegue Render | blueprint creado; falta validar end-to-end (OAuth callbacks con dominio público, disco, RunPod secrets) |
+| — | Cache de Meta en publicación | `_get_ngrok_domain` + `_resolve_instagram_business_id` hacen HTTP en cada publish (ver `ISSUES_CALIDAD_PENDIENTES.md` issue 1) |
+| — | Fallback `.txt` sin timestamps | `engine.py` local con transcripción de texto plano no puede generar clips (build_sentence_map exige timestamps de palabra) — decisión de diseño pendiente |
 | — | Paridad de comportamiento Express | jobs: `spawnSync` local 20 s sin ASS+hook ni RunPod (§9) |
 | — | CI de calidad | no hay workflow que ejecute tests/typecheck/audit en PR |
 
