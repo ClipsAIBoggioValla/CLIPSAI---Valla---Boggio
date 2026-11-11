@@ -42,7 +42,7 @@
 | Alumno | Sesiones | Cumplimiento | Pausa | Recencia | IC | Nivel | Para subir de nivel |
 |---|--:|--:|--:|--:|--:|--|--|
 | mateo | 36 | 100% | 12 d | 93% | **78** | Aprueba | Pausa 12 d (máx. 5 d) |
-| SantiValla | 16 | 65% | 19 d | 64% | **51** | Aprueba | Cumplimiento 65% (mín. 100%); Pausa 19 d (máx. 5 d); Recencia 64% (mín. 75%) |
+| SantiValla | 17 | 66% | 19 d | 100% | **57** | Aprueba | Cumplimiento 66% (mín. 100%); Pausa 19 d (máx. 5 d) |
 
 > Para aprobar el IC: **2 sesiones por semana** sostenidas, sin pausas mayores a **10 días** y con actividad en las **últimas 2 semanas**. Se excluyen merges, bots y al docente. Zona horaria UTC-3.
 
@@ -182,11 +182,11 @@ Criterios que hoy están en rojo y, para cada uno, una explicación breve de **c
 
 ## 6. Actividad en clase (miércoles y viernes)
 
-> Se consideran las **23 clases** del período (miércoles y viernes, según `config/constancia.json`; feriados y semanas sin clase descontados). `Commits` = commits de trabajo (no-merge); `Merges` = merges de PR (también son push). Los días sin actividad dicen **sin actividad**.
+> Se consideran las **26 clases** del período (miércoles y viernes, según `config/constancia.json`; feriados y semanas sin clase descontados). `Commits` = commits de trabajo (no-merge); `Merges` = merges de PR (también son push). Los días sin actividad dicen **sin actividad**.
 
 ### mateo
 
-**15/23 clases con actividad** · 72 commits · 21 merges
+**17/26 clases con actividad** · 75 commits · 23 merges
 
 | Fecha | Actividad | Repositorios | Commits / merges |
 |---|:--:|---|--:|
@@ -213,10 +213,13 @@ Criterios que hoy están en rojo y, para cada uno, una explicación breve de **c
 | 2026-10-23 | **Sí** | CLIPSAI---Valla---Boggio | 8 / 0 |
 | 2026-10-28 | **Sí** | CLIPSAI---Valla---Boggio | 9 / 0 |
 | 2026-10-30 | **Sí** | CLIPSAI---Valla---Boggio | 10 / 0 |
+| 2026-11-04 | **Sí** | CLIPSAI---Valla---Boggio | 3 / 0 |
+| 2026-11-06 | **Sí** | CLIPSAI---Valla---Boggio | 0 / 2 |
+| 2026-11-11 | No | sin actividad | 0 / 0 |
 
 ### SantiValla
 
-**16/23 clases con actividad** · 43 commits · 10 merges
+**18/26 clases con actividad** · 45 commits · 10 merges
 
 | Fecha | Actividad | Repositorios | Commits / merges |
 |---|:--:|---|--:|
@@ -243,6 +246,9 @@ Criterios que hoy están en rojo y, para cada uno, una explicación breve de **c
 | 2026-10-23 | **Sí** | CLIPSAI---Valla---Boggio | 2 / 0 |
 | 2026-10-28 | **Sí** | CLIPSAI---Valla---Boggio | 1 / 0 |
 | 2026-10-30 | **Sí** | CLIPSAI---Valla---Boggio | 1 / 2 |
+| 2026-11-04 | No | sin actividad | 0 / 0 |
+| 2026-11-06 | **Sí** | CLIPSAI---Valla---Boggio | 1 / 0 |
+| 2026-11-11 | **Sí** | CLIPSAI---Valla---Boggio | 1 / 0 |
 
 ## 7. Anexo: dónde mirar
 
