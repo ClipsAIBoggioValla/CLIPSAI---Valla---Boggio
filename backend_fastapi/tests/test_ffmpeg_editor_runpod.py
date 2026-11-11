@@ -58,7 +58,7 @@ def test_reframe_video(tmp_path: Path) -> None:
     out = tmp_path / "out.mp4"
     out.write_bytes(b"y" * 100)
     with patch("backend_fastapi.app.services.editor.subprocess.run") as m:
-        m.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        m.return_value = MagicMock(returncode=0, stdout="1080x1920", stderr="")
         res = reframe_video(src, out)
     assert isinstance(res, str)
 
