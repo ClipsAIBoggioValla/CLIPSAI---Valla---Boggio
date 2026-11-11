@@ -566,7 +566,9 @@ class TestMetrics:
     def test_metrics_200_con_datos(self, client, db) -> None:
         import datetime as dt
 
-        dia = dt.date.today().isoformat()
+        # La ruta agrupa por date(created_at) comparado con datetime.now(UTC):
+        # usar la MISMA fecha que verá el router para no divergir cerca de medianoche UTC.
+        dia = dt.datetime.now(dt.timezone.utc).date().isoformat()
         # El router hace 3 db.scalar seguidos: jobs, clips y segundos del video
         db.scalar_results = [1, 2, 600.0]
         db.push_result(FakeResult(rows=[("TikTok", 3)]))          # platform_rows
