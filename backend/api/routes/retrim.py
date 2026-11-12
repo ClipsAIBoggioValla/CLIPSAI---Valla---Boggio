@@ -54,6 +54,48 @@ def _assert_ownership_and_get_clip(db, clip_id: str, user_id: uuid.UUID) -> Clip
     return clip
 
 
+def _leer_metadata_retrim(body: RetrimRequest) -> float:
+    """Duración del re-trim (validada por validate_range en el endpoint)."""
+    return body.end_time - body.start_time
+
+
+def _ffmpeg_retrim(body: RetrimRequest, src: Path, out_path: Path) -> None:
+    """Ejecuta el recorte FFmpeg. HTTPException con detalle si falla o timeout."""
+    duration = _leer_metadata_retrim(body)
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-ss",
+        str(body.start_time),
+        "-i",
+        str(src),
+        "-t",
+        str(duration),
+        "-c:v",
+        "libx264",
+        "-preset",
+        "ultrafast",
+        "-crf",
+        "18",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        "-movflags",
+        "+faststart",
+        str(out_path),
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=120)
+        if result.returncode != 0:
+            detail = result.stderr.decode(errors="ignore")[:600] if result.stderr else "FFmpeg error"
+            raise HTTPException(status_code=500, detail=f"FFmpeg re-trim falló: {detail}")
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=500, detail=f"FFmpeg no instalado: {e}") from e
+    except subprocess.TimeoutExpired as e:
+        raise HTTPException(status_code=504, detail="Timeout FFmpeg re-trim 120s") from e
+
+
 @router.post("/{clip_id}/retrim", response_model=RetrimResponse)
 async def retrim_clip(
     clip_id: str,
@@ -96,39 +138,7 @@ async def retrim_clip(
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{clip_id}_retrim_{int(body.start_time)}_{int(body.end_time)}.mp4"
 
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-ss",
-        str(body.start_time),
-        "-i",
-        str(src),
-        "-t",
-        str(duration),
-        "-c:v",
-        "libx264",
-        "-preset",
-        "ultrafast",
-        "-crf",
-        "18",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
-        "-movflags",
-        "+faststart",
-        str(out_path),
-    ]
-
-    try:
-        result = subprocess.run(cmd, capture_output=True, timeout=120)
-        if result.returncode != 0:
-            detail = result.stderr.decode(errors="ignore")[:600] if result.stderr else "FFmpeg error"
-            raise HTTPException(status_code=500, detail=f"FFmpeg re-trim falló: {detail}")
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=500, detail=f"FFmpeg no instalado: {e}") from e
-    except subprocess.TimeoutExpired as e:
-        raise HTTPException(status_code=504, detail="Timeout FFmpeg re-trim 120s") from e
+    _ffmpeg_retrim(body, src, out_path)
 
     if not out_path.exists():
         raise HTTPException(status_code=500, detail="Re-trim no produjo archivo")

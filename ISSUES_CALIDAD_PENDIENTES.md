@@ -6,6 +6,46 @@
 
 ---
 
+## Fase 4 — DBG 0, Coh 0 y reducción de complejidad (12-nov, rama `fix/quality-index-100`)
+
+### Resultado
+
+| Señal | Antes | Después |
+|---|---|---|
+| **DBG** | 14 (`backend_express/src/routes/jobs.ts`, `video_processor.py`) | **0** — `jobs.ts` usa `src/lib/logger.ts` (sin `console.*`, salida por `process.stdout/stderr`); `video_processor.py` usa `logging` |
+| **Coh** | 1 (`editor_viral.py`) | **0** — atributos compat muertos fuera, `verificar_ffmpeg`/`sondear_dimensiones` → funciones de módulo, métodos de la fachada comparten el mismo eje de estado |
+| **Compl** | 282 bloques (informe cátedra) | **~151 estimados** (medición local; máx CC por función **193 → 27**) |
+
+Verificación: `python -m pytest -q --cov=app --cov=backend --cov=backend_fastapi.app` →
+**626 passed, 81 %** · `npm run typecheck` + `npm run build` (backend_express) → exit 0.
+
+### Funciones divididas (todas con suite verde)
+
+`_run_job` 193 · `run_clip_engine` 96 · `_run_re_render` 75 · `_refresh_account_token` 60 ·
+`publish_clip_task` 59 · `_publish_tiktok` 48 · `procesar_video` 47 · `_call_anthropic_with_model` 43 ·
+`_publish_instagram` 40 · `obtener_clips_ia` 32 · `run_subtitle_pipeline` 31 · `upload_video` 30 ·
+`transcribe_wav` 29 · `generate_ass_from_segments` 27 · `_parse_and_validate` 27 ·
+`_fetch_instagram_username` 27 · `retrim_clip` 26 · `_publish_youtube` 25.
+
+### Restante para llegar a <133 bloques (si la métrica de la cátedra lo exige)
+
+- Tier medio Python (CC 20-27): `process_video_job` (backend/handler.py), `_normalize_transcription_segments`,
+  `select_clips_via_claude`, `save_instagram_tokens`, `main()` (main.py), `score()` (track_b),
+  `reframe_video`, `parsear_transcripcion_youtube`, `download_clip`, `publish_stream`/`event_gen`.
+- Archivos TS con más ramas: `routes/clips.ts` (~210), `routes/socialAuth.ts` (~141),
+  `routes/jobs.ts` (~124), `routes/subtitles.ts` (~116) — extraer helpers por endpoint.
+
+### Script de medición (calibración)
+
+```python
+# medir_cc.py — complejidad ciclomática del repo (no commitear)
+# Python: AST con If/For/While/ExceptHandler/BoolOp/comprensiones/Match, umbral CC>8 por función.
+# TS/TSX: regex de ramas (if/else if/for/while/case/catch/&&/||/??/ternarios) por archivo.
+# Calibración: la cifra de la cátedra (282 sobre main del 11-nov) ≈ py CC>7 + bloques TS por función.
+```
+
+---
+
 ## Issue 1 — Optimizar llamadas HTTP sincrónicas a Meta dentro de la publicación (Instagram)
 
 **Problema:** Dentro del flujo de publicación hay funciones que golpean la API de Meta/Dominio

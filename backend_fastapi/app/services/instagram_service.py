@@ -102,8 +102,8 @@ def exchange_short_for_long_lived_token(short_token: str) -> dict[str, Any]:
     return resp.json()
 
 
-def _fetch_instagram_username(access_token: str) -> str | None:
-    display_name: str | None = None
+def _nombre_desde_me(access_token: str) -> str | None:
+    """Capa 1: GET /me → name. None si no hay nombre."""
     try:
         url = f"https://graph.facebook.com/v18.0/me?fields=id,name&access_token={access_token}"
         logger.info("[META API CALL] Requesting %s", url.replace(access_token, "HIDDEN_TOKEN"))
@@ -117,7 +117,7 @@ def _fetch_instagram_username(access_token: str) -> str | None:
                 data = {}
             name = data.get("name")
             if name and str(name).strip():
-                display_name = str(name).strip()
+                return str(name).strip()
         else:
             try:
                 err_data = res.json()
@@ -126,6 +126,39 @@ def _fetch_instagram_username(access_token: str) -> str | None:
                 pass
     except Exception as e:
         logger.error("[META /me EXCEPTION]: %s", str(e), exc_info=True)
+    return None
+
+
+def _username_de_pagina_ig(ig: dict, access_token: str, display_name: str | None) -> tuple[str | None, str | None]:
+    """Extrae username de una página IG (directo, o consulta /{ig_id}). Devuelve (username, display_name)."""
+    username = ig.get("username")
+    if username and str(username).strip():
+        return str(username).strip(), display_name
+    ig_name = ig.get("name")
+    if ig_name and str(ig_name).strip() and not display_name:
+        display_name = str(ig_name).strip()
+    if ig.get("id"):
+        try:
+            r2_url = f"https://graph.facebook.com/v18.0/{ig['id']}?fields=id,username,name&access_token={access_token}"
+            logger.info("[META API CALL] Requesting %s", r2_url.replace(access_token, "HIDDEN_TOKEN"))
+            r2 = requests.get(r2_url, timeout=10)
+            logger.info("[META /me STATUS]: %s | [BODY]: %s", r2.status_code, r2.text)
+            if r2.status_code == 200:
+                try:
+                    d2 = r2.json()
+                    logger.info("[META /me RAW JSON]: %s", d2)
+                except Exception:
+                    d2 = {}
+                username2 = d2.get("username") or d2.get("name")
+                if username2 and str(username2).strip():
+                    return str(username2).strip(), display_name
+        except Exception as e2:
+            logger.error("[META /me EXCEPTION]: %s", str(e2), exc_info=True)
+    return None, display_name
+
+
+def _username_desde_accounts(access_token: str, display_name: str | None) -> tuple[str | None, str | None]:
+    """Capa 2: GET /me/accounts → instagram_business_account de cada página."""
     try:
         acc_url = f"https://graph.facebook.com/v18.0/me/accounts?fields=id,name,access_token,instagram_business_account{{id,username,name}}&access_token={access_token}"
         logger.info("[META API CALL] Requesting %s", acc_url.replace(access_token, "HIDDEN_TOKEN"))
@@ -140,30 +173,9 @@ def _fetch_instagram_username(access_token: str) -> str | None:
             for page in data.get("data") or []:
                 ig = page.get("instagram_business_account")
                 if ig:
-                    username = ig.get("username")
-                    if username and str(username).strip():
-                        return str(username).strip()
-                    ig_name = ig.get("name")
-                    if ig_name and str(ig_name).strip() and not display_name:
-                        display_name = str(ig_name).strip()
-                    if ig.get("id"):
-                        try:
-                            r2_url = f"https://graph.facebook.com/v18.0/{ig['id']}?fields=id,username,name&access_token={access_token}"
-                            logger.info("[META API CALL] Requesting %s", r2_url.replace(access_token, "HIDDEN_TOKEN"))
-                            r2 = requests.get(r2_url, timeout=10)
-                            logger.info("[META /me STATUS]: %s | [BODY]: %s", r2.status_code, r2.text)
-                            if r2.status_code == 200:
-                                try:
-                                    d2 = r2.json()
-                                    logger.info("[META /me RAW JSON]: %s", d2)
-                                except Exception:
-                                    d2 = {}
-                                username2 = d2.get("username") or d2.get("name")
-                                if username2 and str(username2).strip():
-                                    return str(username2).strip()
-                        except Exception as e2:
-                            logger.error("[META /me EXCEPTION]: %s", str(e2), exc_info=True)
-                            continue
+                    username, display_name = _username_de_pagina_ig(ig, access_token, display_name)
+                    if username:
+                        return username, display_name
         else:
             try:
                 err_data = res_acc.json()
@@ -172,6 +184,14 @@ def _fetch_instagram_username(access_token: str) -> str | None:
                 pass
     except Exception as e:
         logger.error("[META /me/accounts EXCEPTION]: %s", str(e), exc_info=True)
+    return None, display_name
+
+
+def _fetch_instagram_username(access_token: str) -> str | None:
+    display_name = _nombre_desde_me(access_token)
+    username, display_name = _username_desde_accounts(access_token, display_name)
+    if username:
+        return username
     if display_name:
         return display_name
     logger.error("[INSTAGRAM API ERROR] No se pudo extraer username real de Meta")
