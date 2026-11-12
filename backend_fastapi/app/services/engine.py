@@ -330,80 +330,94 @@ def ensure_wav_audio(video_path: str) -> str:
     return wav_path
 
 
-def run_clip_engine(
-    video_path: str,
-    transcription_path: str,
-    progress_callback: Any | None = None,
-    *,
-    allow_runpod: bool = True,
-) -> dict[str, Any]:
-    vp = _validate_video_source(video_path)
-    tp = Path(transcription_path)
-    if not tp.exists():
-        raise FileNotFoundError(f"Transcripcion no encontrada: {transcription_path}")
+def _intentar_runpod(vp: Any, tp: Any, progress_callback: Any, log: Any) -> dict[str, Any] | None:
+    """Delega el procesamiento a RunPod si está configurado. None si no corresponde."""
+    from .runpod_service import is_runpod_configured, process_local_video_via_runpod
 
-    if allow_runpod:
-        from .runpod_service import is_runpod_configured, process_local_video_via_runpod
+    if not is_runpod_configured():
+        return None
 
-        if is_runpod_configured():
-            logging.getLogger(__name__).info("RunPod configurado; delegando transcripción y análisis fuera de Render")
-            result = process_local_video_via_runpod(
-                vp,
-                transcription_path=tp if tp.is_file() else None,
-            )
-            segments = result.get("transcription_segments")
-            if not isinstance(segments, list) or not segments:
-                raise RuntimeError(
-                    "RunPod no devolvió segmentos de transcripción; actualiza el worker para que los incluya "
-                    "y evitar cargar Whisper localmente en Render."
-                )
-            result.setdefault("engine", "runpod")
-            result.setdefault("video", str(vp))
-            result.setdefault("transcription", str(tp) if tp.is_file() else "")
-            if progress_callback is not None:
-                try:
-                    progress_callback(35)
-                except Exception as exc:
-                    logging.getLogger(__name__).warning("Callback de progreso RunPod falló: %s", exc)
-            return result
+    log.info("RunPod configurado; delegando transcripción y análisis fuera de Render")
+    result = process_local_video_via_runpod(
+        vp,
+        transcription_path=tp if tp.is_file() else None,
+    )
+    segments = result.get("transcription_segments")
+    if not isinstance(segments, list) or not segments:
+        raise RuntimeError(
+            "RunPod no devolvió segmentos de transcripción; actualiza el worker para que los incluya "
+            "y evitar cargar Whisper localmente en Render."
+        )
+    result.setdefault("engine", "runpod")
+    result.setdefault("video", str(vp))
+    result.setdefault("transcription", str(tp) if tp.is_file() else "")
+    if progress_callback is not None:
+        try:
+            progress_callback(35)
+        except Exception as exc:
+            log.warning("Callback de progreso RunPod falló: %s", exc)
+    return result
 
-    current_file = Path(__file__).resolve()
-    root = None
+
+def _raiz_por_marcadores(current_file: Path) -> Path | None:
+    """Busca la raíz del repo por archivos marcadores (docker-compose, SISTEMA.md, paquetes)."""
     for _p in current_file.parents:
         try:
             if (_p / "docker-compose.yml").exists() or (_p / "SISTEMA.md").exists():
-                root = _p
-                break
+                return _p
             if (_p / "backend").is_dir() and (_p / "backend_fastapi").is_dir():
-                root = _p
-                break
+                return _p
             if (_p / "backend_fastapi").is_dir() and (_p / ".env").exists() and (_p / "engine.py").exists():
-                root = _p
-                break
+                return _p
             if (_p / ".env").exists() and (_p / "backend_fastapi").is_dir():
-                root = _p
-                break
+                return _p
         except Exception:
             continue
-    if root is None:
-        for _idx in (2, 3, 1, 0):
-            if _idx < len(current_file.parents):
-                cand = current_file.parents[_idx]
-                try:
-                    if str(cand) in ("/", "\\", "C:\\", "C:/"):
-                        continue
-                    if not cand.exists():
-                        continue
-                    if (cand / "app").is_dir() or (cand / "storage").exists() or (cand / "backend_fastapi").is_dir() or (cand / "engine.py").exists():
-                        root = cand
-                        break
-                    if root is None:
-                        root = cand
-                except Exception:
-                    continue
-        if root is None:
-            root = current_file.parents[min(2, len(current_file.parents) - 1)]
+    return None
 
+
+def _candidato_fallback_valido(cand: Path) -> bool:
+    """Un candidato de fallback es válido si existe y parece el proyecto."""
+    if str(cand) in ("/", "\\", "C:\\", "C:/"):
+        return False
+    if not cand.exists():
+        return False
+    return (
+        (cand / "app").is_dir()
+        or (cand / "storage").exists()
+        or (cand / "backend_fastapi").is_dir()
+        or (cand / "engine.py").exists()
+    )
+
+
+def _raiz_por_fallback(current_file: Path) -> Path | None:
+    """Fallback heurístico por profundidad de directorio cuando no hay marcadores."""
+    root = None
+    for _idx in (2, 3, 1, 0):
+        if _idx < len(current_file.parents):
+            cand = current_file.parents[_idx]
+            try:
+                if _candidato_fallback_valido(cand):
+                    return cand
+                if root is None:
+                    root = cand
+            except Exception:
+                continue
+    return root
+
+
+def _resolver_raiz_proyecto() -> Path:
+    current_file = Path(__file__).resolve()
+    root = _raiz_por_marcadores(current_file)
+    if root is None:
+        root = _raiz_por_fallback(current_file)
+    if root is None:
+        root = current_file.parents[min(2, len(current_file.parents) - 1)]
+    return root
+
+
+def _configurar_sys_path(root: Path) -> None:
+    """Deja en sys.path la raíz del proyecto y los paquetes importables (determinista)."""
     _self_dir = str(Path(__file__).resolve().parent)
     _self_parent = str(Path(__file__).resolve().parent.parent)
     for _p in (_self_dir, _self_parent):
@@ -432,145 +446,206 @@ def run_clip_engine(
     except Exception:
         pass
 
-    _log = logging.getLogger(__name__)
 
-    def _native_segments() -> list[dict]:
-        wav_path: str | None = None
-        try:
-            if vp.is_file():
-                wav_path = ensure_wav_audio(str(vp))
-                _log.info("Extracción física WAV completada: %s", wav_path)
-                from .whisper_service import transcribe_audio  # type: ignore
-                try:
-                    wav_size = Path(wav_path).stat().st_size
-                    dur_res = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", wav_path], capture_output=True, text=True, timeout=10)
-                    wav_dur = dur_res.stdout.strip() if dur_res.returncode == 0 else "desconocida"
-                    _log.info("WAV extraído: %s (%.1f KB, duración %s s) — enviando a Whisper", wav_path, wav_size / 1024, wav_dur)
-                except Exception:
-                    pass
-                segs = transcribe_audio(wav_path, language="es")
-                try:
-                    total_chars = sum(len(str(s.get("text", ""))) for s in segs)
-                    _log.info("Transcripción Whisper: %s segmentos, %s caracteres extraídos", len(segs) if segs else 0, total_chars)
-                except Exception:
-                    _log.info("Transcripción Whisper: %s segmentos", len(segs) if segs else 0)
-                if segs and len(segs) > 0:
-                    preserved_segments: list[dict[str, Any]] = []
-                    for segment in segs:
-                        words: list[dict[str, Any]] = []
-                        for word in segment.get("words", []):
-                            try:
-                                word_start = float(word["start"])
-                                word_end = float(word["end"])
-                                word_text = str(word.get("text", "")).strip()
-                                if word_text and word_end >= word_start:
-                                    words.append(
-                                        {"start": word_start, "end": word_end, "text": word_text}
-                                    )
-                            except (KeyError, TypeError, ValueError):
-                                continue
-                        preserved_segments.append(
-                            {
-                                "start": float(segment["start"]),
-                                "end": float(segment["end"]),
-                                "text": str(segment["text"]),
-                                "words": words,
-                            }
-                        )
-                    return preserved_segments
-                try:
-                    wav_size = Path(wav_path).stat().st_size if wav_path and Path(wav_path).exists() else 0
-                    _log.warning("Whisper no generó segmentos: wav_size=%s bytes, wav_path=%s — inspeccionando FFmpeg logs", wav_size, wav_path)
-                except Exception:
-                    pass
-                raise ValueError("El video subido no contiene audio o no se detectó voz interpretable para generar subtítulos.")
-        except ValueError as ve:
-            _log.warning("Motor nativo: Whisper ValueError no audio/voz (%s) — intentando fallback a transcripción file", ve)
-            if tp.is_file():
-                try:
-                    txt = tp.read_text(encoding="utf-8", errors="ignore")
-                    if txt.strip():
-                        _log.info("Motor nativo: Whisper falló pero hay transcripción file, usando transcripción")
-                        pass
-                    else:
-                        raise
-                except ValueError:
-                    raise
-            else:
-                raise
-        except Exception as e:
-            if "no contiene audio" in str(e) or "no se detectó voz" in str(e) or "Fallo en FFmpeg" in str(e):
-                _log.warning("Motor nativo: Whisper no audio/voz (%s) — fallback a transcripción", e)
-            else:
-                _log.warning("Motor nativo: Whisper no disponible (%s)", e)
-        finally:
-            if wav_path:
-                try:
-                    Path(wav_path).unlink(missing_ok=True)
-                    _log.info("WAV temporal limpiado: %s", wav_path)
-                except Exception:
-                    pass
-        try:
-            if tp.is_file():
-                txt = tp.read_text(encoding="utf-8", errors="ignore")
-                segs = _parse_transcript_native(txt)
-                if segs:
-                    total_chars = sum(len(str(s.get("text", ""))) for s in segs)
-                    _log.info("Motor nativo: segmentos desde transcripción file=%s (%s segs, %s caracteres)", tp, len(segs), total_chars)
-                    return segs
-                # No disparar ValueError genérico, lanzar RuntimeError detallado para Job
-                try:
-                    wav_size_diag = 0
-                    vol_diag = "no detectado"
-                    raw_diag = ""
-                    raise RuntimeError(
-                        f"Whisper devolvió 0 segmentos. "
-                        f"WAV Size: {wav_size_diag} bytes. "
-                        f"FFmpeg Volume Info: {vol_diag}. "
-                        f"Whisper Raw Result: '{raw_diag}'"
+def _preservar_segmentos_whisper(segs: list[dict]) -> list[dict]:
+    """Convierte los segmentos de Whisper en dicts con words válidas (start<=end)."""
+    preserved_segments: list[dict[str, Any]] = []
+    for segment in segs:
+        words: list[dict[str, Any]] = []
+        for word in segment.get("words", []):
+            try:
+                word_start = float(word["start"])
+                word_end = float(word["end"])
+                word_text = str(word.get("text", "")).strip()
+                if word_text and word_end >= word_start:
+                    words.append(
+                        {"start": word_start, "end": word_end, "text": word_text}
                     )
-                except RuntimeError:
-                    raise
-        except ValueError as ve:
-            raise RuntimeError(
-                f"Whisper devolvió 0 segmentos. "
-                f"WAV Size: 0 bytes. "
-                f"FFmpeg Volume Info: no detectado. "
-                f"Whisper Raw Result: '' — {ve}"
-            ) from ve
-        except Exception as e:
-            _log.warning("Motor nativo: parse transcription file fallo: %s", e)
-        return []
+            except (KeyError, TypeError, ValueError):
+                continue
+        preserved_segments.append(
+            {
+                "start": float(segment["start"]),
+                "end": float(segment["end"]),
+                "text": str(segment["text"]),
+                "words": words,
+            }
+        )
+    return preserved_segments
 
-    native_segments = _native_segments()
-    if not native_segments:
-        # Diagnóstico exacto para Job (reemplaza ValueError genérico engine.py:243)
-        try:
-            wav_size = 0
-            vol_info = "no detectado"
-            raw_text = ""
-            # Si hay wav temporal previo, intentar obtener info (ya limpiado, usar 0)
-            raise RuntimeError(
-                f"Whisper devolvió 0 segmentos. "
-                f"WAV Size: {wav_size} bytes. "
-                f"FFmpeg Volume Info: {vol_info}. "
-                f"Whisper Raw Result: '{raw_text}'"
-            )
-        except RuntimeError:
+
+def _logear_transcripcion_whisper(segs: list[dict], log: Any) -> None:
+    try:
+        total_chars = sum(len(str(s.get("text", ""))) for s in segs)
+        log.info("Transcripción Whisper: %s segmentos, %s caracteres extraídos", len(segs) if segs else 0, total_chars)
+    except Exception:
+        log.info("Transcripción Whisper: %s segmentos", len(segs) if segs else 0)
+
+
+def _transcribir_wav(wav_path: str, log: Any) -> list[dict]:
+    """Transcribe el WAV con Whisper local y loguea duración/tamaño. Lanza ValueError si no hay voz."""
+    from .whisper_service import transcribe_audio  # type: ignore
+
+    try:
+        wav_size = Path(wav_path).stat().st_size
+        dur_res = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", wav_path], capture_output=True, text=True, timeout=10)
+        wav_dur = dur_res.stdout.strip() if dur_res.returncode == 0 else "desconocida"
+        log.info("WAV extraído: %s (%.1f KB, duración %s s) — enviando a Whisper", wav_path, wav_size / 1024, wav_dur)
+    except Exception:
+        pass
+    segs = transcribe_audio(wav_path, language="es")
+    _logear_transcripcion_whisper(segs, log)
+    if segs and len(segs) > 0:
+        return segs
+    _logear_wav_vacio(wav_path, log)
+    raise ValueError("El video subido no contiene audio o no se detectó voz interpretable para generar subtítulos.")
+
+
+def _logear_wav_vacio(wav_path: str | None, log: Any) -> None:
+    try:
+        wav_size = Path(wav_path).stat().st_size if wav_path and Path(wav_path).exists() else 0
+        log.warning("Whisper no generó segmentos: wav_size=%s bytes, wav_path=%s — inspeccionando FFmpeg logs", wav_size, wav_path)
+    except Exception:
+        pass
+
+
+def _segmentos_nativos(vp: Path, tp: Path, log: Any) -> list[dict]:
+    """Pipeline de transcripción nativo: Whisper local con fallback a transcripción file."""
+    wav_path: str | None = None
+    try:
+        if vp.is_file():
+            wav_path = ensure_wav_audio(str(vp))
+            log.info("Extracción física WAV completada: %s", wav_path)
+            return _preservar_segmentos_whisper(_transcribir_wav(wav_path, log))
+    except ValueError as ve:
+        log.warning("Motor nativo: Whisper ValueError no audio/voz (%s) — intentando fallback a transcripción file", ve)
+        if tp.is_file():
+            if not _transcripcion_file_no_vacia(tp, log):
+                raise
+        else:
             raise
-        except Exception as e:
-            raise RuntimeError(
-                f"Whisper devolvió 0 segmentos. WAV Size: 0 bytes. FFmpeg Volume Info: no detectado. Whisper Raw Result: '' — {e}"
+    except Exception as e:
+        if "no contiene audio" in str(e) or "no se detectó voz" in str(e) or "Fallo en FFmpeg" in str(e):
+            log.warning("Motor nativo: Whisper no audio/voz (%s) — fallback a transcripción", e)
+        else:
+            log.warning("Motor nativo: Whisper no disponible (%s)", e)
+    finally:
+        if wav_path:
+            try:
+                Path(wav_path).unlink(missing_ok=True)
+                log.info("WAV temporal limpiado: %s", wav_path)
+            except Exception:
+                pass
+    return _segmentos_desde_txt(tp, log)
+
+
+def _transcripcion_file_no_vacia(tp: Path, log: Any) -> bool:
+    """True si el archivo de transcripción tiene texto útil (para el fallback)."""
+    try:
+        txt = tp.read_text(encoding="utf-8", errors="ignore")
+        if txt.strip():
+            log.info("Motor nativo: Whisper falló pero hay transcripción file, usando transcripción")
+            return True
+        return False
+    except ValueError:
+        return False
+
+
+def _segmentos_desde_txt(tp: Path, log: Any) -> list[dict]:
+    """Parsea la transcripción de texto plano; RuntimeError si termina vacía."""
+    try:
+        if tp.is_file():
+            txt = tp.read_text(encoding="utf-8", errors="ignore")
+            segs = _parse_transcript_native(txt)
+            if segs:
+                total_chars = sum(len(str(s.get("text", ""))) for s in segs)
+                log.info("Motor nativo: segmentos desde transcripción file=%s (%s segs, %s caracteres)", tp, len(segs), total_chars)
+                return segs
+            # No disparar ValueError genérico, lanzar RuntimeError detallado para Job
+            raise RuntimeError(_diagnostico_cero_segmentos())
+    except ValueError as ve:
+        raise RuntimeError(f"{_diagnostico_cero_segmentos()} — {ve}") from ve
+    except Exception as e:
+        log.warning("Motor nativo: parse transcription file fallo: %s", e)
+    return []
+
+
+def _diagnostico_cero_segmentos() -> str:
+    """Mensaje de diagnóstico estándar cuando Whisper/parse no producen segmentos."""
+    # Si hay wav temporal previo, intentar obtener info (ya limpiado, usar 0)
+    wav_size = 0
+    vol_info = "no detectado"
+    raw_text = ""
+    return (
+        f"Whisper devolvió 0 segmentos. "
+        f"WAV Size: {wav_size} bytes. "
+        f"FFmpeg Volume Info: {vol_info}. "
+        f"Whisper Raw Result: '{raw_text}'"
+    )
+
+
+def _formatear_hhmmss(s: float) -> str:
+    """Segundos → 'HH:MM:SS.mmm' (formato de timestamps del engine)."""
+    total_ms = max(0, round(s * 1000))
+    total_seconds, milliseconds = divmod(total_ms, 1000)
+    hours, remaining = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remaining, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{milliseconds:03d}"
+
+
+def _mapear_clip_claude(clip_raw: dict, sentence_map: dict) -> dict | None:
+    """Convierte un clip crudo de Claude en el payload del engine. None si se rechaza."""
+    try:
+        start_sentence_id = str(clip_raw["start_sentence_id"])
+        end_sentence_id = str(clip_raw["end_sentence_id"])
+        st, en = _resolve_sentence_timestamps(
+            start_sentence_id, end_sentence_id, sentence_map
+        )
+        if not (15.0 <= en - st <= 60.0):
+            logging.getLogger(__name__).warning(
+                "Claude clip rechazado por duración tras padding: %s → %s (%.3fs)",
+                start_sentence_id,
+                end_sentence_id,
+                en - st,
             )
+            return None
+        hook_selection = _select_clip_hook(clip_raw, sentence_map, st, en)
+        titulo = str(clip_raw.get("title", "Clip viral"))[:120]
+        return {
+            "inicio": _formatear_hhmmss(st),
+            "fin": _formatear_hhmmss(en),
+            "start_time": st,
+            "end_time": en,
+            "start_sentence_id": start_sentence_id,
+            "end_sentence_id": end_sentence_id,
+            "has_hook": bool(hook_selection["has_hook"]),
+            "hook_selection": hook_selection,
+            "titulo": titulo,
+            "titulo_sugerido": titulo,
+            "score": float(clip_raw.get("score", 8)),
+            "criterio_principal": "claude_semantico",
+            "hook_texto": str(hook_selection.get("text", ""))[:120],
+            "primer_segundo": _formatear_hhmmss(st),
+            "motivo": "Selección semántica vía Claude (claude_service)",
+            "archivo": "",
+        }
+    except Exception:
+        return None
 
-    # ACTUALIZACIÓN INMEDIATA POST-WHISPER: progress 35% antes de Claude
-    if progress_callback is not None:
-        try:
-            progress_callback(35)
-        except Exception as cb_e:
-            _log.warning(f"progress_callback 35% fallo: {cb_e}")
-    _log.info("Transcripción Whisper completada. Avanzando a 35% e iniciando Claude.")
 
+def _normalizar_error_claude(msg: str) -> str:
+    """Asegura el prefijo estándar 'Error en API de Claude' para el Job."""
+    if "Error al comunicar con Claude API" not in msg and "Error en API de Claude" not in msg and "Error en la API de Claude" not in msg:
+        msg = f"Error en API de Claude: {msg}"
+    if "Error en la API de Claude" in msg:
+        msg = msg.replace("Error en API de Claude:", "Error en API de Claude:")
+    if "Error al comunicar con Claude API" in msg:
+        msg = msg.replace("Error en API de Claude:", "Error en API de Claude:")
+    return msg
+
+
+def _seleccionar_con_claude(native_segments: list[dict], vp: Path, tp: Path, log: Any) -> dict[str, Any]:
+    """Selección semántica de clips vía Claude + mapeo a clips del engine."""
     try:
         from .claude_service import build_sentence_map, select_clips_via_claude
 
@@ -584,50 +659,8 @@ def run_clip_engine(
             duration_hint=_dur_hint,
             sentence_map=sentence_map,
         )
-        _log.info("Análisis de virabilidad completado exitosamente vía Claude API (engine nativo: %s clips semánticos)", len(_claude_raw))
-        def _fmt_claude(s: float) -> str:
-            total_ms = max(0, round(s * 1000))
-            total_seconds, milliseconds = divmod(total_ms, 1000)
-            hours, remaining = divmod(total_seconds, 3600)
-            minutes, seconds = divmod(remaining, 60)
-            return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{milliseconds:03d}"
-        _claude_clips: list[dict] = []
-        for _c in _claude_raw:
-            try:
-                start_sentence_id = str(_c["start_sentence_id"])
-                end_sentence_id = str(_c["end_sentence_id"])
-                st, en = _resolve_sentence_timestamps(
-                    start_sentence_id, end_sentence_id, sentence_map
-                )
-                if not (15.0 <= en - st <= 60.0):
-                    _log.warning(
-                        "Claude clip rechazado por duración tras padding: %s → %s (%.3fs)",
-                        start_sentence_id,
-                        end_sentence_id,
-                        en - st,
-                    )
-                    continue
-                hook_selection = _select_clip_hook(_c, sentence_map, st, en)
-                _claude_clips.append({
-                    "inicio": _fmt_claude(st),
-                    "fin": _fmt_claude(en),
-                    "start_time": st,
-                    "end_time": en,
-                    "start_sentence_id": start_sentence_id,
-                    "end_sentence_id": end_sentence_id,
-                    "has_hook": bool(hook_selection["has_hook"]),
-                    "hook_selection": hook_selection,
-                    "titulo": str(_c.get("title", "Clip viral"))[:120],
-                    "titulo_sugerido": str(_c.get("title", "Clip viral"))[:120],
-                    "score": float(_c.get("score", 8)),
-                    "criterio_principal": "claude_semantico",
-                    "hook_texto": str(hook_selection.get("text", ""))[:120],
-                    "primer_segundo": _fmt_claude(st),
-                    "motivo": "Selección semántica vía Claude (claude_service)",
-                    "archivo": "",
-                })
-            except Exception:
-                continue
+        log.info("Análisis de virabilidad completado exitosamente vía Claude API (engine nativo: %s clips semánticos)", len(_claude_raw))
+        _claude_clips = [_mapeado for _c in _claude_raw if (_mapeado := _mapear_clip_claude(_c, sentence_map)) is not None]
         if not _claude_clips:
             raise RuntimeError(
                 "Error en API de Claude: no quedaron clips con IDs de oración válidos "
@@ -642,19 +675,49 @@ def run_clip_engine(
             "transcription_segments": native_segments,
         }
     except RuntimeError as e:
-        msg = str(e)
-        if "Error al comunicar con Claude API" not in msg and "Error en API de Claude" not in msg and "Error en la API de Claude" not in msg:
-            msg = f"Error en API de Claude: {msg}"
-        if "Error en la API de Claude" in msg:
-            msg = msg.replace("Error en API de Claude:", "Error en API de Claude:")
-        if "Error al comunicar con Claude API" in msg:
-            msg = msg.replace("Error en API de Claude:", "Error en API de Claude:")
-        _log.error(msg)
+        msg = _normalizar_error_claude(str(e))
+        log.error(msg)
         raise RuntimeError(msg) from e
     except Exception as e:
         msg = f"Error en API de Claude: {e}"
-        _log.error(msg)
+        log.error(msg)
         raise RuntimeError(msg) from e
+
+
+def run_clip_engine(
+    video_path: str,
+    transcription_path: str,
+    progress_callback: Any | None = None,
+    *,
+    allow_runpod: bool = True,
+) -> dict[str, Any]:
+    _log = logging.getLogger(__name__)
+    vp = _validate_video_source(video_path)
+    tp = Path(transcription_path)
+    if not tp.exists():
+        raise FileNotFoundError(f"Transcripcion no encontrada: {transcription_path}")
+
+    if allow_runpod:
+        resultado_runpod = _intentar_runpod(vp, tp, progress_callback, _log)
+        if resultado_runpod is not None:
+            return resultado_runpod
+
+    _configurar_sys_path(_resolver_raiz_proyecto())
+
+    native_segments = _segmentos_nativos(vp, tp, _log)
+    if not native_segments:
+        # Diagnóstico exacto para Job (reemplaza ValueError genérico engine.py:243)
+        raise RuntimeError(_diagnostico_cero_segmentos())
+
+    # ACTUALIZACIÓN INMEDIATA POST-WHISPER: progress 35% antes de Claude
+    if progress_callback is not None:
+        try:
+            progress_callback(35)
+        except Exception as cb_e:
+            _log.warning(f"progress_callback 35% fallo: {cb_e}")
+    _log.info("Transcripción Whisper completada. Avanzando a 35% e iniciando Claude.")
+
+    return _seleccionar_con_claude(native_segments, vp, tp, _log)
 
 
 def _parse_transcript_native(text: str) -> list[dict]:
