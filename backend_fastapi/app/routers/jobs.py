@@ -10,6 +10,7 @@ import shutil
 import sys
 import tempfile
 import traceback
+import functools
 import uuid
 from pathlib import Path
 
@@ -320,18 +321,14 @@ def _select_hook_for_clip(
     return fallback_in_clip
 
 
-def _render_clip_with_ass_and_hook(
+def _validar_args_render(
     video_path: str,
     clip_start: float,
     clip_end: float,
-    segments: list[dict],
     hook_sel: tuple[float, float, dict | None] | None,
-    job_id: uuid.UUID,
     clip_index: int,
-    clip_title: str | None,
-) -> tuple[str, dict]:
-    """Construye cada clip en orden: recorte → crop 9:16 → subtítulos ASS."""
-    # Validación de argumentos FFmpeg antes de ejecutar: evitar código de salida 4 por args inválidos
+) -> tuple[float, float]:
+    """Validación de argumentos FFmpeg antes de ejecutar: evitar código de salida 4 por args inválidos."""
     try:
         clip_start = float(clip_start)
         clip_end = float(clip_end)
@@ -342,21 +339,29 @@ def _render_clip_with_ass_and_hook(
         duration = clip_end - clip_start
         if not (2.0 <= duration <= 90.0):
             raise ValueError(f"Duración {duration:.1f}s fuera de rango permitido 2-90s (start={clip_start}, end={clip_end})")
-        if hook_sel is not None:
-            hs, he, _ = hook_sel
-            hs = float(hs); he = float(he)
-            hook_meta = hook_sel[2] if isinstance(hook_sel[2], dict) else {}
-            hook_mode = str(hook_meta.get("mode", "teaser"))
-            if not (2.5 < (he - hs) < 5.5):
-                raise ValueError(f"Hook duración {(he-hs):.3f}s debe estar estrictamente entre 2.5 y 5.5s")
-            if hook_mode == "in_clip" and not (clip_start <= hs < he <= clip_end):
-                raise ValueError(f"Hook in-clip [{hs},{he}] fuera del cuerpo [{clip_start},{clip_end}]")
+        _validar_hook_sel(hook_sel, clip_start, clip_end)
+        return clip_start, clip_end
     except ValueError as ve:
         logger.error("[jobs] _render_clip_with_ass_and_hook args inválidos clip_%s: %s — %s", clip_index, ve, traceback.format_exc()[:500])
         raise
-    meta: dict = {"hook_applied": False, "ass_applied": False, "render": "fallback"}
-    src = Path(video_path)
-    # Verificación de ruta física del video antes de FFmpeg
+
+
+def _validar_hook_sel(hook_sel: tuple[float, float, dict | None] | None, clip_start: float, clip_end: float) -> None:
+    if hook_sel is None:
+        return
+    hs, he, _ = hook_sel
+    hs = float(hs)
+    he = float(he)
+    hook_meta = hook_sel[2] if isinstance(hook_sel[2], dict) else {}
+    hook_mode = str(hook_meta.get("mode", "teaser"))
+    if not (2.5 < (he - hs) < 5.5):
+        raise ValueError(f"Hook duración {(he-hs):.3f}s debe estar estrictamente entre 2.5 y 5.5s")
+    if hook_mode == "in_clip" and not (clip_start <= hs < he <= clip_end):
+        raise ValueError(f"Hook in-clip [{hs},{he}] fuera del cuerpo [{clip_start},{clip_end}]")
+
+
+def _validar_video_fuente(video_path: str, src: Path) -> None:
+    """Verificación de ruta física del video antes de FFmpeg."""
     if not video_path or not str(video_path).strip():
         raise FileNotFoundError("Ruta de video vacía — verificar video.filepath")
     if not os.path.exists(str(video_path)):
@@ -372,6 +377,135 @@ def _render_clip_with_ass_and_hook(
     except Exception as e:
         logger.warning("[jobs] advertencia al verificar tamaño video: %s", e)
 
+
+def _clip_titulo_desde_segmentos(segments: list[dict], clip_start: float, clip_end: float) -> list[dict]:
+    """Filtra segmentos dentro del clip y shiftea a 0 (para el ASS simple)."""
+    clipped: list[dict] = []
+    for s in segments:
+        try:
+            st = float(s.get("start", 0))
+            en = float(s.get("end", 0))
+            txt = str(s.get("text", "")).strip()
+            if not txt or en <= st:
+                continue
+            if en < clip_start or st > clip_end:
+                continue
+            cs = max(st, clip_start)
+            ce = min(en, clip_end)
+            if ce > cs:
+                clipped.append({"start": cs - clip_start, "end": ce - clip_start, "text": txt})
+        except Exception:
+            continue
+    if not clipped:
+        # Sin segmentos en ventana: usa todos shifteados proporcionalmente
+        clipped = [{"start": 0, "end": min(3.0, clip_end - clip_start), "text": "CLIPSAI"}]
+    return clipped
+
+
+def _generar_ass(clip_start: float, clip_end: float, segments: list[dict], hook_sel: tuple | None, hook_mode: str, clip_title: str | None) -> Path | None:
+    """Prepara el archivo ASS (hooked o simple). None si la generación falla."""
+    try:
+        tmp_ass = tempfile.NamedTemporaryFile(suffix=".ass", delete=False)
+        tmp_ass.close()
+        ass_path_obj = Path(tmp_ass.name)
+        if hook_sel and hook_mode == "teaser":
+            hs, he, _ = hook_sel
+            from ..services.ass_generator import generate_hooked_ass
+
+            # Convertir segments a SubtitleSegment type
+            segs_for_ass = [{"start": float(s["start"]), "end": float(s["end"]), "text": str(s["text"])} for s in segments]
+            generate_hooked_ass(segs_for_ass, clip_start, clip_end, hs, he, ass_path_obj, title=clip_title or "clipsai")
+            logger.info("[jobs] ASS hooked generado %s (hook %.1f-%.1f)", ass_path_obj, hs, he)
+        else:
+            clipped = _clip_titulo_desde_segmentos(segments, clip_start, clip_end)
+            from ..services.ass_generator import write_ass_file
+
+            write_ass_file(clipped, ass_path_obj, title=clip_title or "clipsai")
+            logger.info("[jobs] ASS simple generado %s (%s segs)", ass_path_obj, len(clipped))
+        return ass_path_obj
+    except Exception as e:
+        logger.warning("[jobs] ASS generación fallo, continuará sin ASS: %s", e)
+        return None
+
+
+def _logear_probe_reframe(trimmed_path: Path) -> None:
+    """Log detallado antes del reframe para debug."""
+    try:
+        import subprocess as _sp
+        _probe_cmd = ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,duration", "-of", "json", str(trimmed_path)]
+        _probe_res = _sp.run(_probe_cmd, capture_output=True, text=True, timeout=10)
+        if _probe_res.returncode == 0 and _probe_res.stdout.strip():
+            import json as _json
+            _probe_data = _json.loads(_probe_res.stdout)
+            _streams = _probe_data.get("streams", [])
+            if _streams:
+                _w = _streams[0].get("width", "?")
+                _h = _streams[0].get("height", "?")
+                _dur = _streams[0].get("duration", "?")
+                logger.info("[jobs] reframe input: %s (%sx%s, %ss)", trimmed_path.name, _w, _h, _dur)
+        _size = trimmed_path.stat().st_size if trimmed_path.exists() else 0
+        logger.info("[jobs] reframe input size: %d bytes, exists=%s", _size, trimmed_path.exists())
+    except Exception as probe_err:
+        logger.warning("[jobs] no se pudo propear trimmed_path: %s", probe_err)
+
+
+def _cortar_clip_intermedio(src: Path, clip_start: float, clip_end: float, hook_sel: tuple | None, hook_mode: str, trimmed_path: Path) -> None:
+    """a) Recortar por timestamps (o componer primero el teaser y el clip)."""
+    from ..services.ffmpeg_service import build_hook_clip, cut_segment
+
+    if hook_sel and hook_mode == "teaser":
+        hs, he, _ = hook_sel
+        build_hook_clip(src, clip_start, clip_end, hs, he, trimmed_path)
+    else:
+        cut_segment(src, clip_start, clip_end, trimmed_path)
+
+
+def _reframar_y_quemar(trimmed_path: Path, reframed_path: Path, ass_path_obj: Path | None, final_path: Path, hook_sel: tuple | None, hook_mode: str, meta: dict) -> None:
+    """b+c) Reencuadre 9:16 obligatorio y quemado del ASS sobre el archivo reencuadrado."""
+    from ..services.editor import reframe_video
+    from ..services.ffmpeg_service import burn_subtitles
+
+    _logear_probe_reframe(trimmed_path)
+    reframe_video(trimmed_path, reframed_path, aspect_ratio="9:16")
+    meta["aspect_ratio"] = "9:16"
+
+    # Quemar ASS únicamente sobre el archivo que ya fue reencuadrado.
+    if ass_path_obj and ass_path_obj.is_file():
+        burn_subtitles(reframed_path, ass_path_obj, final_path)
+        meta["ass_applied"] = True
+    else:
+        shutil.move(str(reframed_path), str(final_path))
+
+    meta["hook_applied"] = bool(hook_sel)
+    if hook_sel:
+        meta["hook_mode"] = hook_mode
+    if meta["ass_applied"]:
+        meta["render"] = "hook+ass" if hook_sel else "ass"
+    else:
+        meta["render"] = "hook" if hook_sel else "cut"
+    logger.info(
+        "[jobs] render %s 9:16 ok -> %s",
+        meta["render"],
+        final_path,
+    )
+
+
+def _render_clip_with_ass_and_hook(
+    video_path: str,
+    clip_start: float,
+    clip_end: float,
+    segments: list[dict],
+    hook_sel: tuple[float, float, dict | None] | None,
+    job_id: uuid.UUID,
+    clip_index: int,
+    clip_title: str | None,
+) -> tuple[str, dict]:
+    """Construye cada clip en orden: recorte → crop 9:16 → subtítulos ASS."""
+    clip_start, clip_end = _validar_args_render(video_path, clip_start, clip_end, hook_sel, clip_index)
+    meta: dict = {"hook_applied": False, "ass_applied": False, "render": "fallback"}
+    src = Path(video_path)
+    _validar_video_fuente(video_path, src)
+
     # Directorio final persistente
     out_dir = STORAGE_CLIPS_DIR / str(job_id)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -379,113 +513,24 @@ def _render_clip_with_ass_and_hook(
     final_path = out_dir / final_name
 
     # Preparar ASS
-    ass_path_obj: Path | None = None
-    use_ass = bool(segments)
     hook_meta = hook_sel[2] if hook_sel and isinstance(hook_sel[2], dict) else {}
     hook_mode = str(hook_meta.get("mode", "teaser"))
-    if use_ass:
-        try:
-            tmp_ass = tempfile.NamedTemporaryFile(suffix=".ass", delete=False)
-            tmp_ass.close()
-            ass_path_obj = Path(tmp_ass.name)
-            if hook_sel and hook_mode == "teaser":
-                hs, he, _ = hook_sel
-                from ..services.ass_generator import generate_hooked_ass
-
-                # Convertir segments a SubtitleSegment type
-                segs_for_ass = [{"start": float(s["start"]), "end": float(s["end"]), "text": str(s["text"])} for s in segments]
-                generate_hooked_ass(segs_for_ass, clip_start, clip_end, hs, he, ass_path_obj, title=clip_title or "clipsai")
-                logger.info("[jobs] ASS hooked generado %s (hook %.1f-%.1f)", ass_path_obj, hs, he)
-            else:
-                # Filtrar segmentos dentro del clip y shiftear a 0
-                clipped: list[dict] = []
-                for s in segments:
-                    try:
-                        st = float(s.get("start", 0)); en = float(s.get("end", 0)); txt = str(s.get("text", "")).strip()
-                        if not txt or en <= st:
-                            continue
-                        if en < clip_start or st > clip_end:
-                            continue
-                        cs = max(st, clip_start); ce = min(en, clip_end)
-                        if ce > cs:
-                            clipped.append({"start": cs - clip_start, "end": ce - clip_start, "text": txt})
-                    except Exception:
-                        continue
-                if not clipped:
-                    # Sin segmentos en ventana: usa todos shifteados proporcionalmente
-                    clipped = [{"start": 0, "end": min(3.0, clip_end - clip_start), "text": "CLIPSAI"}]
-                from ..services.ass_generator import write_ass_file
-
-                write_ass_file(clipped, ass_path_obj, title=clip_title or "clipsai")
-                logger.info("[jobs] ASS simple generado %s (%s segs)", ass_path_obj, len(clipped))
-            meta["ass_applied"] = True
-        except Exception as e:
-            logger.warning("[jobs] ASS generación fallo, continuará sin ASS: %s", e)
-            ass_path_obj = None
-            meta["ass_applied"] = False
+    ass_path_obj = _generar_ass(clip_start, clip_end, segments, hook_sel, hook_mode, clip_title) if segments else None
 
     # Construir el clip intermedio; todos los caminos pasan obligatoriamente por crop 9:16.
     try:
-        from ..services.editor import reframe_video
-        from ..services.ffmpeg_service import build_hook_clip, burn_subtitles, cut_segment
-
         with tempfile.TemporaryDirectory(prefix=f"clipsai_render_{clip_index}_") as temp_dir:
             temp_root = Path(temp_dir)
             trimmed_path = temp_root / "trimmed.mp4"
             reframed_path = temp_root / "reframed_9x16.mp4"
 
             # a) Recortar por timestamps (o componer primero el teaser y el clip).
-            if hook_sel and hook_mode == "teaser":
-                hs, he, _ = hook_sel
-                build_hook_clip(src, clip_start, clip_end, hs, he, trimmed_path)
-            else:
-                cut_segment(src, clip_start, clip_end, trimmed_path)
+            _cortar_clip_intermedio(src, clip_start, clip_end, hook_sel, hook_mode, trimmed_path)
 
             # b) Reencuadrar explícitamente a 9:16. Un error aborta el render, nunca usa 16:9.
-            # Log detallado antes del reframe para debug
-            try:
-                import subprocess as _sp
-                _probe_cmd = ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,duration", "-of", "json", str(trimmed_path)]
-                _probe_res = _sp.run(_probe_cmd, capture_output=True, text=True, timeout=10)
-                if _probe_res.returncode == 0 and _probe_res.stdout.strip():
-                    import json as _json
-                    _probe_data = _json.loads(_probe_res.stdout)
-                    _streams = _probe_data.get("streams", [])
-                    if _streams:
-                        _w = _streams[0].get("width", "?")
-                        _h = _streams[0].get("height", "?")
-                        _dur = _streams[0].get("duration", "?")
-                        logger.info("[jobs] reframe input: %s (%sx%s, %ss)", trimmed_path.name, _w, _h, _dur)
-                _size = trimmed_path.stat().st_size if trimmed_path.exists() else 0
-                logger.info("[jobs] reframe input size: %d bytes, exists=%s", _size, trimmed_path.exists())
-            except Exception as probe_err:
-                logger.warning("[jobs] no se pudo propear trimmed_path: %s", probe_err)
-            
             if not trimmed_path.exists() or trimmed_path.stat().st_size == 0:
                 raise RuntimeError(f"trimmed_path no existe o está vacío: {trimmed_path}")
-            
-            reframe_video(trimmed_path, reframed_path, aspect_ratio="9:16")
-            meta["aspect_ratio"] = "9:16"
-
-            # c) Quemar ASS únicamente sobre el archivo que ya fue reencuadrado.
-            if ass_path_obj and ass_path_obj.is_file():
-                burn_subtitles(reframed_path, ass_path_obj, final_path)
-                meta["ass_applied"] = True
-            else:
-                shutil.move(str(reframed_path), str(final_path))
-
-            meta["hook_applied"] = bool(hook_sel)
-            if hook_sel:
-                meta["hook_mode"] = hook_mode
-            if meta["ass_applied"]:
-                meta["render"] = "hook+ass" if hook_sel else "ass"
-            else:
-                meta["render"] = "hook" if hook_sel else "cut"
-            logger.info(
-                "[jobs] render %s 9:16 ok -> %s",
-                meta["render"],
-                final_path,
-            )
+            _reframar_y_quemar(trimmed_path, reframed_path, ass_path_obj, final_path, hook_sel, hook_mode, meta)
             return str(final_path), meta
     finally:
         if ass_path_obj:
@@ -544,636 +589,791 @@ def _fallback_result(video: Video | None) -> dict:  # type: ignore[no-redef]
     raise RuntimeError("Modo fallback deshabilitado — se requiere procesamiento real (Whisper + FFmpeg + LLM). Verificar video/transcripción y claves LLM.")
 
 
+def _flush_stdout() -> None:
+    """Flush best-effort de stdout: los handlers de logging pueden fallar sin importar."""
+    try:
+        sys.stdout.flush()
+    except Exception:
+        pass
+
+
+def _iniciar_job(db: Any, job_id: uuid.UUID) -> Any:
+    """Marca el job como PROCESSING al 10%. None si el job no existe."""
+    job: Job | None = db.get(Job, job_id)
+    if job is None:
+        logger.warning("[jobs] _run_job: job %s no encontrado", job_id)
+        return None
+    job.status = JobStatus.PROCESSING.value
+    job.progress = 10
+    db.commit()
+    # Persistencia inmediata ya con commit + flush
+    _flush_stdout()
+    logger.info("[jobs] _run_job iniciado job=%s progress=10%%", job_id)
+    return job
+
+
+def _validar_fuentes(db: Any, job: Any) -> tuple[Any, str, str]:
+    """Valida filepath del video y transcripción. Devuelve (video, video_path, transcription_path).
+
+    Raises:
+        RuntimeError/FileNotFoundError: si el video o la única fuente de transcripción faltan.
+    """
+    video: Video | None = db.get(Video, job.video_id)
+    if video is None:
+        raise RuntimeError("Video asociado no encontrado")
+
+    video_path_str = str(video.filepath or "").strip()
+    if not video_path_str:
+        raise FileNotFoundError("video.filepath está vacío en BD — no se puede procesar")
+    if not os.path.exists(video_path_str):
+        raise FileNotFoundError(f"Archivo de video no existe en disco: {video_path_str}")
+    if not Path(video_path_str).is_file():
+        raise FileNotFoundError(f"Video no es archivo regular: {video_path_str}")
+    try:
+        if Path(video_path_str).stat().st_size == 0:
+            raise RuntimeError(f"Video vacío (0 bytes): {video_path_str}")
+    except FileNotFoundError:
+        raise
+
+    transcription_path_str = _validar_transcripcion(video)
+    return video, video_path_str, transcription_path_str
+
+
+def _validar_transcripcion(video: Any) -> str:
+    """Resuelve la transcripción (filepath en disco o transcript en BD). "" si no hay ninguna."""
+    transcription_path_str = str(video.transcription_filepath or "").strip()
+    has_transcript_text = bool(video.transcript and video.transcript.strip())
+    if not transcription_path_str and not has_transcript_text:
+        logger.warning("[jobs] video %s sin transcription_filepath ni transcript — intentando Whisper como fallback", video.id)
+        return ""
+    if transcription_path_str and not os.path.exists(transcription_path_str):
+        logger.warning("[jobs] transcription_filepath no existe: %s — se usará transcript en BD si existe (len=%s)", transcription_path_str, len(video.transcript or ""))
+        if not has_transcript_text:
+            raise FileNotFoundError(f"Transcripción no encontrada ni en disco ni en BD: {transcription_path_str}")
+        return ""  # forzar uso de transcript en BD vía fallback interno
+    return transcription_path_str
+
+
+def _actualizar_progreso_diagnostico(db: Any, job: Any, job_id: uuid.UUID, con_transcripcion: bool) -> None:
+    """Log de diagnóstico + persistencia inmediata del progreso (35% con transcripción, 10% sin)."""
+    if con_transcripcion:
+        logger.info(f"[JOB {job_id}] Transcripción provista por el usuario. Omitiendo Whisper y avanzando a 35%.")
+        pct = 35
+    else:
+        logger.warning(f"[JOB {job_id}] No se detectó transcripción previa. Ejecutando Whisper como fallback.")
+        pct = 10
+    try:
+        cur_diag = db.get(Job, job_id)
+        if cur_diag is not None:
+            _set_progress(db, cur_diag, pct)
+    except Exception as _diag_e:
+        logger.warning(f"[JOB {job_id}] No se pudo persistir progress {pct}% tras diagnóstico transcripción: {_diag_e}")
+
+
+def _callback_whisper(db: Any, job: Any, job_id: uuid.UUID, pct: int = 35) -> None:
+    """Callback post-Whisper: actualiza progress (35%) ANTES de Claude con commit y log explícito."""
+    try:
+        cur = db.get(Job, job_id)
+        if cur is not None:
+            _set_progress(db, cur, pct)
+        else:
+            _set_progress(db, job, pct)
+    except Exception as e:
+        logger.warning(f"[jobs] No se pudo actualizar progress a {pct}% para job {job_id}: {e}")
+    logger.info(f"[jobs] Job {job_id}: Transcripción Whisper completada. Avanzando a 35% e iniciando Claude.")
+
+
+def _log_config_claude() -> None:
+    """Log de configuración Claude (verificación .env) — verifica API Key leyendo de entorno."""
+    try:
+        _claude_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+        if not _claude_key:
+            # Reintentar via Settings
+            try:
+                from ..config import get_settings
+                _claude_key = (get_settings().anthropic_api_key or "").strip()
+            except Exception:
+                _claude_key = ""
+        if _claude_key:
+            logger.info("[jobs] ANTHROPIC_API_KEY presente (prefijo %s...), modelo=%s — se usará Claude para selección semántica", _claude_key[:10], os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5-5"))
+        else:
+            logger.warning("[jobs] ANTHROPIC_API_KEY no configurada — se usará heurística nativa (revisar backend_fastapi/app/config.py y docker-compose.yml)")
+    except Exception:
+        pass
+
+
+def _marcar_failed_por_claude(db: Any, job_id: uuid.UUID, exc: Exception) -> None:
+    """Marca el job FAILED con el mensaje exacto de error de Claude (timeout/API key)."""
+    err_str = str(exc)
+    try:
+        fail_job = db.get(Job, job_id)
+        if fail_job is not None:
+            fail_job.status = JobStatus.FAILED.value
+            fail_job.error_message = f"Error en Claude: {err_str}"
+            # Intentar guardar también en result_metadata para observabilidad
+            try:
+                fail_job.result_metadata = {"error": f"Error en Claude: {err_str}", "error_type": type(exc).__name__, "engine": "claude_failed"}
+            except Exception:
+                pass
+            db.commit()
+            logger.info(f"[jobs] Job {job_id} marcado como failed por error de Claude (timeout/API key)")
+    except Exception as db_e:
+        logger.error(f"[jobs] No se pudo marcar job {job_id} como failed tras error Claude: {db_e}")
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
+
+def _es_error_de_claude(err_str: str) -> bool:
+    lowered = err_str.lower()
+    return (
+        "claude" in lowered
+        or "anthropic" in lowered
+        or "timeout" in lowered
+        or "Timeout" in err_str
+    )
+
+
+def _log_exito_engine(result: Any, job_id: uuid.UUID) -> None:
+    """Log de confirmación cuando Claude responde exitosamente."""
+    try:
+        _engine_type = str(result.get("engine", "")).lower() if isinstance(result, dict) else ""
+        if _engine_type in ("native_claude", "real") and result.get("clips"):
+            # Verificar si algún clip tiene criterio claude_semantico
+            _has_claude = any("claude" in str(c.get("criterio_principal", "")).lower() or "claude" in str(c.get("engine", "")).lower() for c in result.get("clips", []) if isinstance(c, dict))
+            if _has_claude or _engine_type == "native_claude":
+                logger.info("Análisis de virabilidad completado exitosamente vía Claude API (job %s, %s clips semánticos)", job_id, len(result.get("clips", [])))
+            elif _engine_type == "native" and os.getenv("ANTHROPIC_API_KEY", "").strip():
+                logger.info("Análisis de virabilidad completado exitosamente vía Claude API (job %s, engine=%s)", job_id, _engine_type)
+    except Exception:
+        pass
+
+
+def _invocar_engine(db: Any, job: Any, job_id: uuid.UUID, video_path_str: str, transcription_path_str: str) -> Any:
+    """Llama a `run_clip_engine` (modo 100% real) con callback de progreso y manejo de errores de Claude."""
+    from ..services.engine import run_clip_engine
+
+    _log_config_claude()
+    logger.info("[jobs] invocando run_clip_engine video=%s transcripcion=%s job=%s", video_path_str, transcription_path_str or "<transcript BD>", job_id)
+
+    # Resiliencia y timeouts en llamada a Claude (60-90s) — envolver con try/except explícito
+    try:
+        result = run_clip_engine(
+            video_path_str,
+            transcription_path_str or "",
+            progress_callback=functools.partial(_callback_whisper, db, job, job_id),
+        )
+    except Exception as e:
+        err_str = str(e)
+        if _es_error_de_claude(err_str):
+            logger.error(f"[jobs] Job {job_id}: Error en Claude: {err_str}")
+            _marcar_failed_por_claude(db, job_id, e)
+        # Re-lanzar para que el handler global también lo capture y haga traceback completo
+        raise
+    _log_exito_engine(result, job_id)
+    return result
+
+
+def _normalizar_segmentos_cache(raw_segments: Any) -> list[dict]:
+    """Filtra segmentos de transcripción crudos a {start,end,text} válidos."""
+    cached: list[dict] = []
+    if not isinstance(raw_segments, list):
+        return cached
+    for raw_segment in raw_segments:
+        if not isinstance(raw_segment, dict):
+            continue
+        try:
+            start_time = float(raw_segment.get("start", 0))
+            end_time = float(raw_segment.get("end", 0))
+            text = str(raw_segment.get("text", "")).strip()
+            if text and end_time > start_time >= 0:
+                cached.append({"start": start_time, "end": end_time, "text": text})
+        except (KeyError, TypeError, ValueError):
+            continue
+    return cached
+
+
+def _extraer_resultado(result: Any, video: Any, job_id: uuid.UUID) -> tuple[list, list[dict]]:
+    """Extrae clips_payload + segmentos cacheados del resultado del engine y filtra por score."""
+    clips_payload: list = []
+    cached_transcription_segments: list[dict] = []
+    if isinstance(result, dict):
+        clips_payload = result.get("clips") or result.get("result") or result.get("clips_generated") or []
+        # Los segmentos ya vienen normalizados desde runpod_service.py
+        cached_transcription_segments = _normalizar_segmentos_cache(result.get("transcription_segments", []))
+    elif isinstance(result, list):
+        clips_payload = result
+
+    if not clips_payload:
+        # Control de arrays vacíos: mensaje descriptivo en lugar de error críptico o "4"
+        # Esto evita que el frontend reciba solo "4" y permite diagnóstico real
+        raise RuntimeError(
+            f"El engine real no devolvió clips (0 clips). "
+            f"Posibles causas: transcripción vacía o sin segmentos detectables, "
+            f"Whisper no generó segmentos (verificar audio/idioma), "
+            f"LLM sin respuesta o filtrado por score. "
+            f"Debug: clips_payload vacío, job={job_id}, video={video.id}. "
+            f"Revisar logs whisper/LLM y verificar que el video tenga audio nítido y transcripción válida."
+        )
+
+    # Filtrado por score medio-alto sin límite máximo (prompt: eliminar [:6]/max_clips)
+    # Preservar start/end de Whisper; solo descartar por score < umbral
+    _initial = len(clips_payload)
+    _filtered = [c for c in clips_payload if _meets_score_threshold(c.get("score"))]
+    if len(_filtered) < _initial:
+        logger.info("[jobs] filtrado por score ≥6.0/60: %s → %s clips (descartados %s por score bajo)", _initial, len(_filtered), _initial - len(_filtered))
+    # Sin truncamiento [:6] / max_clips — se devuelven TODOS los válidos (3, 8, 15)
+    return _filtered, cached_transcription_segments
+
+
+def _clip_desde_r2(item: dict, video: Any, job_id: uuid.UUID) -> Any:
+    """Construye el Clip con la URL R2 que ya renderizó el worker."""
+    from ..models import Clip as ClipR2
+
+    url_r2 = str(item.get("url_r2") or "").strip()
+    title = item.get("titulo") or item.get("title") or item.get("titulo_sugerido") or item.get("name") or "Clip"
+    start = _parse_time_to_seconds(item.get("inicio", item.get("start_time", item.get("start", 0))))
+    end = _parse_time_to_seconds(item.get("fin", item.get("end_time", item.get("end", 0))))
+    if end <= start:
+        end = start + 30.0
+    try:
+        score_val = float(item["score"]) if item.get("score") is not None else None
+    except (TypeError, ValueError):
+        score_val = None
+    tags_r2: dict = {"url_r2": url_r2, "_render": "runpod_r2", "has_ass": True}
+    if item.get("criterio_principal"):
+        tags_r2["criterio_principal"] = str(item.get("criterio_principal"))
+    if item.get("hook_texto"):
+        tags_r2["hook_texto"] = str(item.get("hook_texto"))
+    return ClipR2(
+        video_id=video.id,
+        job_id=job_id,
+        title=str(title)[:255],
+        start_time=float(start),
+        end_time=float(end),
+        score=score_val,
+        tags=tags_r2,
+        storage_path=url_r2,
+        status="ready",
+    )
+
+
+def _persistir_clips_r2(db: Any, video: Any, result: Any, clips_payload: list, job_id: uuid.UUID) -> bool:
+    """Worker R2 path: si RunPod devolvió clips con url_r2, persiste las URLs y marca COMPLETED.
+
+    El worker ya generó el clip vertical 9:16 + subtítulos ASS y lo subió a R2:
+    NO ejecutar ffmpeg/reframe/editor local. Devuelve True si el job terminó por esta vía.
+    """
+    r2_clips = [
+        c for c in clips_payload
+        if isinstance(c, dict) and str(c.get("url_r2") or "").strip().lower().startswith(("http://", "https://"))
+    ]
+    if not r2_clips:
+        return False
+
+    logger.info("[jobs] worker devolvió %s/%s clips con url_r2 (job=%s) — omitiendo render local", len(r2_clips), len(clips_payload), job_id)
+    clips_r2_to_create = [_clip_desde_r2(item, video, job_id) for item in r2_clips]
+
+    _cur_r2 = db.get(Job, job_id)
+    if _cur_r2 is None:
+        return True
+    if isinstance(result, dict):
+        result["_source"] = "runpod_r2"
+        result["_r2_clip_count"] = len(clips_r2_to_create)
+        result["_render_stats"] = {"total": len(clips_payload), "runpod_r2": len(clips_r2_to_create)}
+    _cur_r2.result_metadata = result
+    _cur_r2.status = JobStatus.COMPLETED.value
+    _cur_r2.progress = 100
+    _cur_r2.error_message = None
+    for c in clips_r2_to_create:
+        db.add(c)
+    db.commit()
+    _flush_stdout()
+    logger.info("[jobs] job %s COMPLETED 100%% con %s clips del worker (URLs R2 persistidas, sin ffmpeg local)", job_id, len(clips_r2_to_create))
+    return True
+
+
+def _resolver_segmentos(db: Any, job: Any, video: Any, cached_transcription_segments: list[dict], job_id: uuid.UUID) -> list[dict]:
+    """Issue #29: prepara segmentos para ASS + teaser con todos los fallbacks.
+
+    Devuelve los segmentos ([] si no hubo suerte — el render continúa sin ASS).
+    """
+    # 1) Reusar segmentos normalizados del engine (ya vienen de runpod_service.py)
+    segments = list(cached_transcription_segments)
+
+    # 2) Fallback: cargar desde video/transcripción si no hay segmentos en caché
+    if not segments:
+        logger.warning("[jobs] Sin segmentos en caché, intentando _load_transcription_segments")
+        try:
+            segments = _load_transcription_segments(video)
+        except Exception as load_err:
+            logger.warning("[jobs] _load_transcription_segments falló: %s", load_err)
+            segments = []
+
+    # 3) Fallback final: generar segmentos planos estimados desde transcript de BD
+    if not segments and video.transcript and video.transcript.strip():
+        logger.warning("[jobs] Sin segmentos Whisper, generando segmentos planos desde transcript BD")
+        try:
+            segments = _parse_transcript_text_to_segments(video.transcript)
+        except Exception as parse_err:
+            logger.warning("[jobs] _parse_transcript_text_to_segments falló: %s", parse_err)
+            segments = []
+
+    # 4) Si aún no hay segmentos, NO lanzar error inmediatamente — permitir render sin ASS
+    if not segments:
+        logger.error(
+            "[jobs] CRÍTICO: No hay segmentos de transcripción disponibles para ASS/Hook. "
+            "Los clips se renderizarán SIN subtítulos. "
+            "Causas posibles: Whisper no transcribió, transcripción vacía, formato inválido. "
+            "job=%s video=%s",
+            job_id, video.id
+        )
+        return []
+
+    if cached_transcription_segments:
+        logger.info("[jobs] reutilizando %s segmentos Whisper en memoria para ASS/Hook", len(segments))
+    else:
+        logger.info("[jobs] usando %s segmentos de fallback para ASS/Hook", len(segments))
+    # 65% Finalización análisis hooks (Claude)
+    try:
+        _set_progress(db, job, 65)
+    except Exception:
+        pass
+    return segments
+
+
+def _parsear_clip_item(item: dict, idx: int) -> dict:
+    """Normaliza un item del payload del engine: title, start/end (con clamp), score y tags."""
+    title = item.get("title") or item.get("titulo") or item.get("titulo_sugerido") or item.get("name") or "Clip"
+    start_raw = item.get("start_time", item.get("inicio", item.get("start", 0)))
+    end_raw = item.get("end_time", item.get("fin", item.get("end", 10)))
+    start = _parse_time_to_seconds(start_raw)
+    end = _parse_time_to_seconds(end_raw)
+    if end <= start:
+        end = start + 30.0
+    # Clamp ffmpeg limits: 2-90s, si fuera de rango, ajusta a 30s fallback
+    if not (2.0 <= (end - start) <= 90.0):
+        logger.warning("[jobs] clip %s duracion %.1f fuera de rango, clamp a 30s", idx, end - start)
+        end = start + 30.0
+    score = item.get("score")
+    try:
+        score_val = float(score) if score is not None else None
+    except Exception:
+        score_val = None
+    tags = item.get("tags")
+    if tags is not None and not isinstance(tags, list):
+        tags = [str(tags)]
+    return {"title": title, "start": start, "end": end, "score_val": score_val, "tags": tags}
+
+
+def _hook_fallback_por_fallo(start: float, end: float) -> tuple:
+    """Hook de emergencia: primeros 3 segundos del clip."""
+    return (
+        float(start),
+        min(float(start) + 3.0, float(end)),
+        {
+            "mode": "in_clip",
+            "source": "in_clip_fallback",
+            "curiosity_score": None,
+            "makes_sense_standalone": False,
+        }
+    )
+
+
+def _seleccionar_hook(item: dict, datos: dict, segments: list[dict]) -> tuple | None:
+    """Hook para este clip: selector del engine con fallback in-clip si explota."""
+    try:
+        return _select_hook_for_clip(
+            float(datos["start"]), float(datos["end"]), item.get("hook_selection")
+        )
+    except Exception as e:
+        logger.warning("[jobs] hook select fallo clip %s: %s", datos["idx"], e)
+        return _hook_fallback_por_fallo(datos["start"], datos["end"])
+
+
+def _log_ventana_clip(idx: int, datos: dict, segments: list[dict], hook_sel: tuple | None) -> None:
+    """Log de segmentos y hook para este clip."""
+    if not segments:
+        return
+    segs_en_ventana = [s for s in segments if s["start"] < datos["end"] and s["end"] > datos["start"]]
+    if hook_sel:
+        hs, he, hmeta = hook_sel
+        logger.info(
+            "[jobs] Clip %s: %s segmentos en ventana [%.1f-%.1f], hook de %.1f s a %.1f s (modo=%s)",
+            idx, len(segs_en_ventana), datos["start"], datos["end"], hs, he,
+            hmeta.get("mode", "unknown") if isinstance(hmeta, dict) else "none"
+        )
+    else:
+        logger.info(
+            "[jobs] Clip %s: %s segmentos en ventana [%.1f-%.1f], SIN hook",
+            idx, len(segs_en_ventana), datos["start"], datos["end"]
+        )
+
+
+def _sumar_stat_render(render_stats: dict, tipo_render: str) -> None:
+    """Acumula el contador del tipo de render ('hook+ass', 'ass', 'hook', 'cut', fallback)."""
+    if tipo_render == "hook+ass":
+        render_stats["hook+ass"] += 1
+    elif tipo_render == "ass":
+        render_stats["ass"] += 1
+    elif tipo_render == "hook":
+        render_stats["hook"] += 1
+    elif tipo_render in ("cut", "cut_no_ffmpeg_check"):
+        render_stats["cut"] += 1
+    else:
+        render_stats["fallback"] += 1
+
+
+def _enriquecer_tags(base_tags: dict, render_meta: dict, hook_sel: tuple | None, segments: list[dict], tipo_render: str) -> None:
+    """Agrega metadata de hook/ass al dict de tags del clip."""
+    if render_meta.get("hook_applied"):
+        hs, he, hmeta = hook_sel if hook_sel else (None, None, None)
+        base_tags["hook"] = {"start": hs, "end": he, "applied": True}
+        if hmeta:
+            base_tags["hook"]["title"] = hmeta.get("text", "")[:120]
+            base_tags["hook"]["curiosity_score"] = hmeta.get("curiosity_score")
+            base_tags["hook"]["standalone"] = hmeta.get("makes_sense_standalone", False)
+            base_tags["hook"]["mode"] = hmeta.get("mode", "teaser")
+        base_tags["hook"]["source"] = hmeta.get("source", "in_clip_fallback") if hmeta else "in_clip_fallback"
+    if render_meta.get("ass_applied"):
+        base_tags["ass"] = {"applied": True, "segments": len(segments)}
+    base_tags["_render"] = tipo_render
+
+
+def _actualizar_progreso_render(db: Any, job_id: uuid.UUID, idx: int, total: int) -> None:
+    """Progreso incremental durante el renderizado (65% -> 90%)."""
+    try:
+        prog = 65 + int(25 * (idx + 1) / (total or 1))
+        prog = min(90, prog)
+        _cur = db.get(Job, job_id)
+        if _cur is not None:
+            _set_progress(db, _cur, prog)
+    except Exception:
+        pass
+
+
+def _renderar_clip_item(
+    db: Any,
+    video: Any,
+    job: Any,
+    job_id: uuid.UUID,
+    idx: int,
+    item: dict,
+    datos: dict,
+    segments: list[dict],
+    hook_sel: tuple | None,
+    total: int,
+    render_stats: dict,
+    base_tags: dict,
+) -> str:
+    """Renderiza un clip físicamente (FFmpeg + ASS), valida el archivo y devuelve el storage final.
+
+    En modo real el error de render se propaga (no se deja storage vacío simulado).
+    """
+    storage = item.get("storage_path") or item.get("file_path") or item.get("path") or ""
+    if not isinstance(storage, str):
+        storage = str(storage) if storage is not None else ""
+    storage = storage.strip()
+    title = datos["title"]
+
+    video_exists = False
+    try:
+        video_exists = Path(video.filepath).is_file()
+    except Exception:
+        video_exists = False
+    if not video_exists:
+        # Video origen no existe — error real, sin fallback de prueba
+        raise FileNotFoundError(f"Video origen no encontrado en disco: {video.filepath} — no se puede renderizar clip {idx}")
+
+    try:
+        # Pasar segments/hook solo si ASS/Hook habilitado, pero siempre renderizar físico
+        final_path, render_meta = _render_clip_with_ass_and_hook(
+            video.filepath, float(datos["start"]), float(datos["end"]), segments, hook_sel, job.id, idx, str(title)[:255] if title else None
+        )
+        final_storage = final_path
+        tipo_render = render_meta.get("render", "fallback")
+        # Actualizar stats
+        _sumar_stat_render(render_stats, tipo_render)
+        # Enriquecer tags con hook/ass
+        _enriquecer_tags(base_tags, render_meta, hook_sel, segments, tipo_render)
+        logger.info("[jobs] clip %s render %s -> %s", idx, tipo_render, final_storage)
+        # Actualizar progreso incrementalmente durante renderizado (65% -> 90%)
+        _actualizar_progreso_render(db, job_id, idx, total)
+    except Exception as e:
+        tb = traceback.format_exc()
+        logger.warning("[jobs] render fallo clip %s (%s), fallback storage original: %s\n%s", idx, e, storage, tb)
+        render_stats["fallback"] += 1
+        # Mensaje descriptivo completo en lugar de solo str(e) que podía ser "4"
+        err_detail = f"{type(e).__name__}: {e}\n{tb[:1500]}"
+        base_tags["_render_error"] = err_detail[:800]
+        base_tags["_render"] = "failed_fallback"
+        # Modo real: propagates error — no se deja storage vacío simulado
+        raise RuntimeError(f"Render FFmpeg falló para clip {idx} [{type(e).__name__}: {e}] — ver traceback en logs") from e
+
+    # Validación física obligatoria: el archivo recortado debe existir en storage
+    if not final_storage or not Path(final_storage).is_file() or Path(final_storage).stat().st_size == 0:
+        raise RuntimeError(f"Clip {idx} no generó archivo .mp4 físico en storage: {final_storage}")
+    return final_storage
+
+
+def _crear_clip_persistible(video: Any, job: Any, datos: dict, base_tags: dict, tags: Any, final_storage: str) -> Any:
+    """Instancia el ORM Clip con tags merged (base_tags si hay, si no los crudos)."""
+    from ..models import Clip
+
+    merged_tags: dict | list | None = base_tags if base_tags else tags
+    title = datos["title"]
+    return Clip(
+        video_id=video.id,
+        job_id=job.id,
+        title=str(title)[:255] if title else None,
+        start_time=float(datos["start"]),
+        end_time=float(datos["end"]),
+        score=datos["score_val"],
+        tags=merged_tags,
+        storage_path=final_storage or "",
+        status="ready",
+    )
+
+
+def _renderizar_clips(
+    db: Any,
+    video: Any,
+    job: Any,
+    result: Any,
+    clips_payload: list,
+    segments: list[dict],
+    job_id: uuid.UUID,
+) -> None:
+    """Renderiza cada clip del payload, acumula stats y marca el job COMPLETED al 100%."""
+    clips_to_create = []
+    render_stats = {"total": len(clips_payload), "hook+ass": 0, "ass": 0, "hook": 0, "cut": 0, "fallback": 0}
+    for idx, item in enumerate(clips_payload):
+        if not isinstance(item, dict):
+            continue
+        datos = _parsear_clip_item(item, idx)
+        datos["idx"] = idx
+        hook_sel = _seleccionar_hook(item, datos, segments) if segments else None
+        _log_ventana_clip(idx, datos, segments, hook_sel)
+
+        base_tags: dict = {}
+        tags = datos["tags"]
+        if isinstance(tags, list) and tags:
+            base_tags["_raw_tags"] = tags
+
+        final_storage = _renderar_clip_item(db, video, job, job_id, idx, item, datos, segments, hook_sel, len(clips_payload), render_stats, base_tags)
+        clips_to_create.append(_crear_clip_persistible(video, job, datos, base_tags, tags, final_storage))
+
+    _completar_job_exitoso(db, job_id, result, clips_to_create, render_stats, segments)
+
+
+def _completar_job_exitoso(
+    db: Any,
+    job_id: uuid.UUID,
+    result: Any,
+    clips_to_create: list,
+    render_stats: dict,
+    segments: list[dict],
+) -> None:
+    """90% → stats de render → validación física → COMPLETED 100% + commit."""
+    # 90% Recorte y renderizado completado
+    try:
+        _cur2 = db.get(Job, job_id)
+        if _cur2 is not None:
+            _set_progress(db, _cur2, 90)
+    except Exception:
+        pass
+
+    # Guardar stats de render en result_metadata para observabilidad
+    try:
+        result["_render_stats"] = render_stats
+        result["_ass_hook_enabled"] = bool(segments)
+        if segments:
+            result["_segments_count"] = len(segments)
+        rendered_hook_count = render_stats["hook"] + render_stats["hook+ass"]
+        if rendered_hook_count:
+            result["_hooks_count"] = rendered_hook_count
+    except Exception:
+        pass
+
+    refreshed: Job | None = db.get(Job, job_id)
+    if refreshed is None:
+        return
+    # Validación final: todos los clips deben tener storage_path físico real
+    for c in clips_to_create:
+        if not c.storage_path or not Path(c.storage_path).is_file():
+            raise RuntimeError(f"Clip '{c.title}' no generó archivo físico: {c.storage_path}")
+
+    refreshed.result_metadata = result
+    refreshed.status = JobStatus.COMPLETED.value
+    refreshed.progress = 100
+    refreshed.error_message = None
+    for c in clips_to_create:
+        db.add(c)
+    db.commit()
+    _flush_stdout()
+    logger.info("Job %s completado 100%% real (%s clips físicos: %s)", job_id, len(clips_to_create), render_stats)
+
+
+def _marcar_failed_spec(db: Any, job_id: uuid.UUID, exc: Exception, error_trace: str) -> None:
+    """Guardado inmediato en BD — spec: status failed con Details."""
+    try:
+        _spec_fail = db.get(Job, job_id)
+        if _spec_fail is not None:
+            _spec_fail.status = JobStatus.FAILED.value
+            _spec_fail.error_message = f"{str(exc)} | Details: {error_trace[-300:]}"
+            try:
+                _spec_fail.result_metadata = {"error": f"{str(exc)} | Details: {error_trace[-300:]}", "error_type": type(exc).__name__, "traceback": error_trace[:3000], "engine": "real", "failed": True}
+            except Exception:
+                pass
+            db.commit()
+            _flush_stdout()
+            logger.info(f"[JOB {job_id}] Guardado en BD estado failed tras error crítico")
+    except Exception as _spec_db_e:
+        logger.error(f"[JOB {job_id}] No se pudo guardar error crítico en BD: {_spec_db_e}")
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
+
+def _mensaje_descriptivo(exc: Exception, tb_full: str, job_id: uuid.UUID) -> str:
+    """Mensaje humano + tipo de excepción + traceback abreviado (no solo "4")."""
+    raw_msg = str(exc).strip()
+    if not raw_msg or len(raw_msg) <= 4 or raw_msg == "4":
+        # Caso Error 4: str(e) era "4" por excepción mal formateada o código FFmpeg — expandir a descriptivo
+        descriptive = (
+            f"{type(exc).__name__}: {raw_msg or 'error sin mensaje'} — "
+            f"Fallo en pipeline de Job {job_id}. "
+            f"Posibles causas: segments vacío (Whisper sin audio), "
+            f"filepath no existe, o FFmpeg args inválidos. "
+            f"Traceback:\n{tb_full[:1500]}"
+        )
+    else:
+        descriptive = f"{type(exc).__name__}: {raw_msg}\n{tb_full[:1200]}"
+    # También detectar causas comunes para mensajes más útiles
+    if "segments" in tb_full and ("IndexError" in tb_full or "list index out of range" in tb_full):
+        descriptive = (
+            "No se detectaron segmentos de audio suficientes en el video — "
+            f"Whisper devolvió lista vacía o muy corta. Job {job_id}: {type(exc).__name__}: {raw_msg}\n{tb_full[:1200]}"
+        )
+    elif "FileNotFoundError" in tb_full or "No such file" in tb_full:
+        descriptive = descriptive  # ya es descriptivo con path
+    return descriptive
+
+
+def _guardar_metadata_detallada(db: Any, failed2: Any, exc: Exception, descriptive: str, tb_full: str, error_trace: str) -> None:
+    """Si el job ya estaba FAILED por spec, solo asegura el result_metadata detallado."""
+    try:
+        if not failed2.result_metadata or "descriptive" not in str(failed2.result_metadata):
+            failed2.result_metadata = {
+                "error": descriptive[:2000],
+                "error_type": type(exc).__name__,
+                "traceback": tb_full[:3000],
+                "engine": "real",
+                "failed": True,
+                "spec_error": f"{str(exc)} | Details: {error_trace[-300:]}",
+            }
+            db.commit()
+    except Exception:
+        pass
+    logger.info("[jobs] job %s ya marcado FAILED por spec, se preserva mensaje spec", failed2.id)
+
+
+def _persistir_metadata_fallo(db: Any, failed2: Any, exc: Exception, descriptive: str, tb_full: str) -> None:
+    try:
+        failed2.result_metadata = {
+            "error": descriptive[:2000],
+            "error_type": type(exc).__name__,
+            "traceback": tb_full[:3000],
+            "engine": "real",
+            "failed": True,
+        }
+    except Exception:
+        # Fallback mínimo si result_metadata falla
+        try:
+            failed2.result_metadata = {"error": descriptive[:2000], "engine": "real", "failed": True}
+        except Exception:
+            pass
+    db.commit()
+
+
+def _marcar_failed_descriptivo(db: Any, job_id: uuid.UUID, exc: Exception, descriptive: str, tb_full: str, error_trace: str) -> None:
+    """Segunda pasada: mensaje descriptivo (no solo "4") + metadata detallada."""
+    try:
+        failed2: Job | None = db.get(Job, job_id)
+        if failed2 is not None:
+            # Si ya tiene el formato spec con Details:, no sobrescribir error_message principal
+            if failed2.error_message and "Details:" in failed2.error_message and "| Details:" in failed2.error_message:
+                _guardar_metadata_detallada(db, failed2, exc, descriptive, tb_full, error_trace)
+            else:
+                failed2.status = JobStatus.FAILED.value
+                failed2.error_message = descriptive[:2000]
+            _persistir_metadata_fallo(db, failed2, exc, descriptive, tb_full)
+            logger.info("[jobs] job %s marcado FAILED con mensaje descriptivo (%s chars)", job_id, len(descriptive))
+    except Exception as db_exc:
+        logger.exception("[jobs] error al marcar FAILED job=%s: %s", job_id, db_exc)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
+
+def _manejar_fallo(db: Any, job_id: uuid.UUID, exc: Exception) -> None:
+    """Wrapper global de `_run_job` — captura NINGÚN processing silencioso."""
+    error_trace = traceback.format_exc()
+    logger.error(f"[JOB {job_id}] ERROR CRÍTICO EN PIPELINE:\n{error_trace}")
+    _flush_stdout()
+    _marcar_failed_spec(db, job_id, exc, error_trace)
+    # FIX legado: Capturar e imprimir Traceback completo en lugar de solo str(e) que almacenó "4"
+    tb_full = error_trace
+    logger.exception("Fallo irrecuperable job=%s — modo 100%% real sin fallback\nTraceback:\n%s", job_id, tb_full)
+    descriptive = _mensaje_descriptivo(exc, tb_full, job_id)
+    _marcar_failed_descriptivo(db, job_id, exc, descriptive, tb_full, error_trace)
+
+
+def _limpiar_storage_post_job(job_id: uuid.UUID) -> None:
+    """Limpieza post-job para evitar [Errno 28] en Render."""
+    try:
+        from ..services.storage_cleanup import cleanup_storage
+        freed = cleanup_storage(max_age_hours=2)
+        logger.info("[jobs] Cleanup post-job para job=%s: liberó %.2f MB", job_id, freed / (1024 * 1024))
+    except Exception as cleanup_err:
+        logger.warning("[jobs] Cleanup post-job falló (non-fatal) para job=%s: %s", job_id, cleanup_err)
+
+
 def _run_job(job_id: uuid.UUID) -> None:
     db = SessionLocal()
-    ENABLE_ASS_HOOK = True  # default defensivo; sync con la constante del módulo (línea 55)
     try:
         # Wrapper global — inicio con log inmediato y flush
         logger.info(f"[JOB {job_id}] Inicio de procesamiento de job.")
-        try:
-            sys.stdout.flush()
-        except Exception:
-            pass
-        job: Job | None = db.get(Job, job_id)
+        _flush_stdout()
+        job = _iniciar_job(db, job_id)
         if job is None:
-            logger.warning("[jobs] _run_job: job %s no encontrado", job_id)
             return
-        job.status = JobStatus.PROCESSING.value
-        job.progress = 10
-        db.commit()
-        # Persistencia inmediata ya con commit + flush
-        try:
-            sys.stdout.flush()
-        except Exception:
-            pass
-        logger.info("[jobs] _run_job iniciado job=%s progress=10%%", job_id)
+        video, video_path_str, transcription_path_str = _validar_fuentes(db, job)
 
-        video: Video | None = db.get(Video, job.video_id)
-        if video is None:
-            raise RuntimeError("Video asociado no encontrado")
-
-        # Validaciones previas exhaustivas antes de llamar al engine/Whisper/FFmpeg
-        # 1) Verificar filepath del video en disco
-        video_path_str = str(video.filepath or "").strip()
-        if not video_path_str:
-            raise FileNotFoundError("video.filepath está vacío en BD — no se puede procesar")
-        if not os.path.exists(video_path_str):
-            raise FileNotFoundError(f"Archivo de video no existe en disco: {video_path_str}")
-        if not Path(video_path_str).is_file():
-            raise FileNotFoundError(f"Video no es archivo regular: {video_path_str}")
-        try:
-            if Path(video_path_str).stat().st_size == 0:
-                raise RuntimeError(f"Video vacío (0 bytes): {video_path_str}")
-        except FileNotFoundError:
-            raise
-        # 2) Verificar transcripción (puede ser filepath o texto en BD)
-        transcription_path_str = str(video.transcription_filepath or "").strip()
-        has_transcript_text = bool(video.transcript and video.transcript.strip())
-        if not transcription_path_str and not has_transcript_text:
-            logger.warning("[jobs] video %s sin transcription_filepath ni transcript — intentando Whisper como fallback", video.id)
-        elif transcription_path_str and not os.path.exists(transcription_path_str):
-            logger.warning("[jobs] transcription_filepath no existe: %s — se usará transcript en BD si existe (len=%s)", transcription_path_str, len(video.transcript or ""))
-            if not has_transcript_text:
-                raise FileNotFoundError(f"Transcripción no encontrada ni en disco ni en BD: {transcription_path_str}")
-            transcription_path_str = ""  # forzar uso de transcript en BD vía fallback interno
-
-        # 3. Diagnóstico Claro de la Transcripción — logs explícitos y persistencia inmediata de progreso
-        transcript_data = has_transcript_text
-        transcription_filepath = transcription_path_str
-        if transcript_data or transcription_filepath:
-            logger.info(f"[JOB {job_id}] Transcripción provista por el usuario. Omitiendo Whisper y avanzando a 35%.")
-            try:
-                cur_diag = db.get(Job, job_id)
-                if cur_diag is not None:
-                    _set_progress(db, cur_diag, 35)
-                    # Actualizar referencia job para siguientes _set_progress
-                    job = cur_diag
-            except Exception as _diag_e:
-                logger.warning(f"[JOB {job_id}] No se pudo persistir progress 35% tras diagnóstico transcripción: {_diag_e}")
-        else:
-            logger.warning(f"[JOB {job_id}] No se detectó transcripción previa. Ejecutando Whisper como fallback.")
-            try:
-                cur_diag2 = db.get(Job, job_id)
-                if cur_diag2 is not None:
-                    _set_progress(db, cur_diag2, 10)
-                    job = cur_diag2
-            except Exception as _diag_e2:
-                logger.warning(f"[JOB {job_id}] No se pudo persistir progress 10% tras diagnóstico transcripción: {_diag_e2}")
-
-        from ..services.engine import run_clip_engine
+        # Diagnóstico Claro de la Transcripción — logs explícitos y persistencia inmediata de progreso
+        con_transcripcion = bool(transcription_path_str) or bool(video.transcript and video.transcript.strip())
+        _actualizar_progreso_diagnostico(db, job, job_id, con_transcripcion)
 
         # Modo 100% real — sin fallback sintético. Si el engine falla, el job pasa a FAILED con traceback completo.
-        logger.info("[jobs] invocando run_clip_engine video=%s transcripcion=%s job=%s", video_path_str, transcription_path_str or "<transcript BD>", job_id)
-        # Log de configuración Claude (verificación .env) — verifica API Key leyendo de entorno
-        try:
-            _claude_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
-            if not _claude_key:
-                # Reintentar via Settings
-                try:
-                    from ..config import get_settings
-                    _claude_key = (get_settings().anthropic_api_key or "").strip()
-                except Exception:
-                    _claude_key = ""
-            if _claude_key:
-                logger.info("[jobs] ANTHROPIC_API_KEY presente (prefijo %s...), modelo=%s — se usará Claude para selección semántica", _claude_key[:10], os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5-5"))
-            else:
-                logger.warning("[jobs] ANTHROPIC_API_KEY no configurada — se usará heurística nativa (revisar backend_fastapi/app/config.py y docker-compose.yml)")
-        except Exception:
-            pass
+        result = _invocar_engine(db, job, job_id, video_path_str, transcription_path_str)
 
-        # Callback inmediato post-Whisper: actualiza progress=35 ANTES de Claude con commit y log explícito
-        def _on_whisper_done(pct: int = 35) -> None:
-            try:
-                cur = db.get(Job, job_id)
-                if cur is not None:
-                    _set_progress(db, cur, pct)
-                else:
-                    _set_progress(db, job, pct)
-            except Exception as e:
-                logger.warning(f"[jobs] No se pudo actualizar progress a {pct}% para job {job_id}: {e}")
-            logger.info(f"[jobs] Job {job_id}: Transcripción Whisper completada. Avanzando a 35% e iniciando Claude.")
-
-        # Resiliencia y timeouts en llamada a Claude (60-90s) — envolver con try/except explícito
-        try:
-            result = run_clip_engine(video_path_str, transcription_path_str or "", progress_callback=_on_whisper_done)
-        except Exception as e:
-            err_str = str(e)
-            # Verificar si es error de Claude / timeout / API key
-            is_claude_err = "Claude" in err_str or "ANTHROPIC" in err_str or "anthropic" in err_str.lower() or "timeout" in err_str.lower() or "Timeout" in err_str
-            if is_claude_err:
-                logger.error(f"[jobs] Job {job_id}: Error en Claude: {err_str}")
-                # Actualizar job a failed con mensaje exacto requerido
-                try:
-                    fail_job = db.get(Job, job_id)
-                    if fail_job is not None:
-                        fail_job.status = JobStatus.FAILED.value
-                        fail_job.error_message = f"Error en Claude: {err_str}"
-                        # Intentar guardar también en result_metadata para observabilidad
-                        try:
-                            fail_job.result_metadata = {"error": f"Error en Claude: {err_str}", "error_type": type(e).__name__, "engine": "claude_failed"}
-                        except Exception:
-                            pass
-                        db.commit()
-                        logger.info(f"[jobs] Job {job_id} marcado como failed por error de Claude (timeout/API key)")
-                except Exception as db_e:
-                    logger.error(f"[jobs] No se pudo marcar job {job_id} como failed tras error Claude: {db_e}")
-                    try:
-                        db.rollback()
-                    except Exception:
-                        pass
-            # Re-lanzar para que el handler global también lo capture y haga traceback completo
-            raise
-        # Log de confirmación cuando Claude responde exitosamente (usa resultado de Claude en lugar de heurística)
-        try:
-            _engine_type = str(result.get("engine", "")).lower() if isinstance(result, dict) else ""
-            if _engine_type in ("native_claude", "real") and result.get("clips"):
-                # Verificar si algún clip tiene criterio claude_semantico
-                _has_claude = any("claude" in str(c.get("criterio_principal", "")).lower() or "claude" in str(c.get("engine", "")).lower() for c in result.get("clips", []) if isinstance(c, dict))
-                if _has_claude or _engine_type == "native_claude":
-                    logger.info("Análisis de virabilidad completado exitosamente vía Claude API (job %s, %s clips semánticos)", job_id, len(result.get("clips", [])))
-                elif _engine_type == "native" and os.getenv("ANTHROPIC_API_KEY", "").strip():
-                    logger.info("Análisis de virabilidad completado exitosamente vía Claude API (job %s, engine=%s)", job_id, _engine_type)
-        except Exception:
-            pass
-
-        clips_payload = []
-        cached_transcription_segments: list[dict] = []
-        if isinstance(result, dict):
-            clips_payload = result.get("clips") or result.get("result") or result.get("clips_generated") or []
-            # Los segmentos ya vienen normalizados desde runpod_service.py
-            raw_segments = result.get("transcription_segments", [])
-            if isinstance(raw_segments, list):
-                for raw_segment in raw_segments:
-                    if not isinstance(raw_segment, dict):
-                        continue
-                    try:
-                        start_time = float(raw_segment.get("start", 0))
-                        end_time = float(raw_segment.get("end", 0))
-                        text = str(raw_segment.get("text", "")).strip()
-                        if text and end_time > start_time >= 0:
-                            cached_transcription_segments.append(
-                                {"start": start_time, "end": end_time, "text": text}
-                            )
-                    except (KeyError, TypeError, ValueError):
-                        continue
-        elif isinstance(result, list):
-            clips_payload = result
-
-        if not clips_payload:
-            # Control de arrays vacíos: mensaje descriptivo en lugar de error críptico o "4"
-            # Esto evita que el frontend reciba solo "4" y permite diagnóstico real
-            raise RuntimeError(
-                f"El engine real no devolvió clips (0 clips). "
-                f"Posibles causas: transcripción vacía o sin segmentos detectables, "
-                f"Whisper no generó segmentos (verificar audio/idioma), "
-                f"LLM sin respuesta o filtrado por score. "
-                f"Debug: clips_payload vacío, job={job_id}, video={video.id}. "
-                f"Revisar logs whisper/LLM y verificar que el video tenga audio nítido y transcripción válida."
-            )
-
-        # Filtrado por score medio-alto sin límite máximo (prompt: eliminar [:6]/max_clips)
-        # Preservar start/end de Whisper; solo descartar por score < umbral
-        _initial = len(clips_payload)
-        _filtered = [c for c in clips_payload if _meets_score_threshold(c.get("score"))]
-        if len(_filtered) < _initial:
-            logger.info("[jobs] filtrado por score ≥6.0/60: %s → %s clips (descartados %s por score bajo)", _initial, len(_filtered), _initial - len(_filtered))
-        clips_payload = _filtered
-        # Sin truncamiento [:6] / max_clips — se devuelven TODOS los válidos (3, 8, 15)
-
-        # --- Worker R2 path: si RunPod devolvió clips con url_r2, el worker ya generó
-        # el clip vertical 9:16 + subtítulos ASS y lo subió a R2. NO ejecutar ffmpeg/
-        # reframe/editor local: persistir las URLs, marcar 100% y COMPLETED.
-        r2_clips = [
-            c for c in clips_payload
-            if isinstance(c, dict) and str(c.get("url_r2") or "").strip().lower().startswith(("http://", "https://"))
-        ]
-        if r2_clips:
-            from ..models import Clip as ClipR2
-
-            logger.info("[jobs] worker devolvió %s/%s clips con url_r2 (job=%s) — omitiendo render local", len(r2_clips), len(clips_payload), job_id)
-            clips_r2_to_create = []
-            for item in r2_clips:
-                url_r2 = str(item.get("url_r2") or "").strip()
-                title = item.get("titulo") or item.get("title") or item.get("titulo_sugerido") or item.get("name") or "Clip"
-                start = _parse_time_to_seconds(item.get("inicio", item.get("start_time", item.get("start", 0))))
-                end = _parse_time_to_seconds(item.get("fin", item.get("end_time", item.get("end", 0))))
-                if end <= start:
-                    end = start + 30.0
-                try:
-                    score_val = float(item["score"]) if item.get("score") is not None else None
-                except (TypeError, ValueError):
-                    score_val = None
-                tags_r2: dict = {"url_r2": url_r2, "_render": "runpod_r2", "has_ass": True}
-                if item.get("criterio_principal"):
-                    tags_r2["criterio_principal"] = str(item.get("criterio_principal"))
-                if item.get("hook_texto"):
-                    tags_r2["hook_texto"] = str(item.get("hook_texto"))
-                clips_r2_to_create.append(
-                    ClipR2(
-                        video_id=video.id,
-                        job_id=job_id,
-                        title=str(title)[:255],
-                        start_time=float(start),
-                        end_time=float(end),
-                        score=score_val,
-                        tags=tags_r2,
-                        storage_path=url_r2,
-                        status="ready",
-                    )
-                )
-
-            _cur_r2 = db.get(Job, job_id)
-            if _cur_r2 is None:
-                return
-            if isinstance(result, dict):
-                result["_source"] = "runpod_r2"
-                result["_r2_clip_count"] = len(clips_r2_to_create)
-                result["_render_stats"] = {"total": len(clips_payload), "runpod_r2": len(clips_r2_to_create)}
-            _cur_r2.result_metadata = result
-            _cur_r2.status = JobStatus.COMPLETED.value
-            _cur_r2.progress = 100
-            _cur_r2.error_message = None
-            for c in clips_r2_to_create:
-                db.add(c)
-            db.commit()
-            try:
-                sys.stdout.flush()
-            except Exception:
-                pass
-            logger.info("[jobs] job %s COMPLETED 100%% con %s clips del worker (URLs R2 persistidas, sin ffmpeg local)", job_id, len(clips_r2_to_create))
+        clips_payload, cached_segments = _extraer_resultado(result, video, job_id)
+        if _persistir_clips_r2(db, video, result, clips_payload, job_id):
             return
 
-        # --- Issue #29: preparar segmentos y hooks para ASS + teaser — flujo obligatorio Claude sin fallback heurístico
-        segments: list[dict] = []
-        if ENABLE_ASS_HOOK:
-            # 1) Reusar segmentos normalizados del engine (ya vienen de runpod_service.py)
-            segments = cached_transcription_segments
-            
-            # 2) Fallback: cargar desde video/transcripción si no hay segmentos en caché
-            if not segments:
-                logger.warning("[jobs] Sin segmentos en caché, intentando _load_transcription_segments")
-                try:
-                    segments = _load_transcription_segments(video)
-                except Exception as load_err:
-                    logger.warning("[jobs] _load_transcription_segments falló: %s", load_err)
-                    segments = []
-            
-            # 3) Fallback final: generar segmentos planos estimados desde transcript de BD
-            if not segments and video.transcript and video.transcript.strip():
-                logger.warning("[jobs] Sin segmentos Whisper, generando segmentos planos desde transcript BD")
-                try:
-                    segments = _parse_transcript_text_to_segments(video.transcript)
-                except Exception as parse_err:
-                    logger.warning("[jobs] _parse_transcript_text_to_segments falló: %s", parse_err)
-                    segments = []
-            
-            # 4) Si aún no hay segmentos, NO lanzar error inmediatamente — permitir render sin ASS
-            if not segments:
-                logger.error(
-                    "[jobs] CRÍTICO: No hay segmentos de transcripción disponibles para ASS/Hook. "
-                    "Los clips se renderizarán SIN subtítulos. "
-                    "Causas posibles: Whisper no transcribió, transcripción vacía, formato inválido. "
-                    "job=%s video=%s",
-                    job_id, video.id
-                )
-                # Continuar sin segmentos (render sin ASS)
-                ENABLE_ASS_HOOK = False
-            
-            if segments:
-                if cached_transcription_segments:
-                    logger.info("[jobs] reutilizando %s segmentos Whisper en memoria para ASS/Hook", len(segments))
-                else:
-                    logger.info("[jobs] usando %s segmentos de fallback para ASS/Hook", len(segments))
-                # 65% Finalización análisis hooks (Claude)
-                try:
-                    _set_progress(db, job, 65)
-                except Exception:
-                    pass
-
-        from ..models import Clip
-
-        clips_to_create = []
-        render_stats = {"total": len(clips_payload), "hook+ass": 0, "ass": 0, "hook": 0, "cut": 0, "fallback": 0}
-        for idx, item in enumerate(clips_payload):
-            if not isinstance(item, dict):
-                continue
-            title = item.get("title") or item.get("titulo") or item.get("titulo_sugerido") or item.get("name") or "Clip"
-            start_raw = item.get("start_time", item.get("inicio", item.get("start", 0)))
-            end_raw = item.get("end_time", item.get("fin", item.get("end", 10)))
-            start = _parse_time_to_seconds(start_raw)
-            end = _parse_time_to_seconds(end_raw)
-            if end <= start:
-                end = start + 30.0
-            # Clamp ffmpeg limits: 2-90s, si fuera de rango, ajusta a 30s fallback
-            if not (2.0 <= (end - start) <= 90.0):
-                logger.warning("[jobs] clip %s duracion %.1f fuera de rango, clamp a 30s", idx, end - start)
-                end = start + 30.0
-            score = item.get("score")
-            try:
-                score_val = float(score) if score is not None else None
-            except Exception:
-                score_val = None
-            tags = item.get("tags")
-            if tags is not None and not isinstance(tags, list):
-                tags = [str(tags)]
-            # Base tags dict para guardar metadata hook/ass
-            base_tags: dict = {}
-            if isinstance(tags, list) and tags:
-                base_tags["_raw_tags"] = tags
-            # Selección hook para este clip
-            hook_sel = None
-            if ENABLE_ASS_HOOK and segments:
-                try:
-                    hook_sel = _select_hook_for_clip(
-                        float(start), float(end), item.get("hook_selection")
-                    )
-                except Exception as e:
-                    logger.warning("[jobs] hook select fallo clip %s: %s", idx, e)
-                    # Fallback: usar primeros 3 segundos del clip
-                    hook_sel = (
-                        float(start),
-                        min(float(start) + 3.0, float(end)),
-                        {
-                            "mode": "in_clip",
-                            "source": "in_clip_fallback",
-                            "curiosity_score": None,
-                            "makes_sense_standalone": False,
-                        }
-                    )
-            
-            # Log de segmentos y hook para este clip
-            if ENABLE_ASS_HOOK and segments:
-                segs_en_ventana = [s for s in segments if s["start"] < end and s["end"] > start]
-                if hook_sel:
-                    hs, he, hmeta = hook_sel
-                    logger.info(
-                        "[jobs] Clip %s: %s segmentos en ventana [%.1f-%.1f], hook de %.1f s a %.1f s (modo=%s)",
-                        idx, len(segs_en_ventana), start, end, hs, he,
-                        hmeta.get("mode", "unknown") if isinstance(hmeta, dict) else "none"
-                    )
-                else:
-                    logger.info(
-                        "[jobs] Clip %s: %s segmentos en ventana [%.1f-%.1f], SIN hook",
-                        idx, len(segs_en_ventana), start, end
-                    )
-
-            # Render FFmpeg + ASS
-            storage = item.get("storage_path") or item.get("file_path") or item.get("path") or ""
-            if not isinstance(storage, str):
-                storage = str(storage) if storage is not None else ""
-            storage = storage.strip()
-            render_meta: dict = {}
-            final_storage = storage
-            # Corte y renderizado físico SIEMPRE — eliminar Modo Simulado (prompt: ejecutar FFmpeg con start/end Whisper)
-            video_exists = False
-            try:
-                video_exists = Path(video.filepath).is_file()
-            except Exception:
-                video_exists = False
-
-            if video_exists:
-                try:
-                    # Pasar segments/hook solo si ASS/Hook habilitado, pero siempre renderizar físico
-                    segs_for_render = segments if ENABLE_ASS_HOOK else []
-                    hook_for_render = hook_sel if ENABLE_ASS_HOOK else None
-                    final_path, render_meta = _render_clip_with_ass_and_hook(
-                        video.filepath, float(start), float(end), segs_for_render, hook_for_render, job.id, idx, str(title)[:255] if title else None
-                    )
-                    final_storage = final_path
-                    # Actualizar stats
-                    r = render_meta.get("render", "fallback")
-                    if r == "hook+ass":
-                        render_stats["hook+ass"] += 1
-                    elif r == "ass":
-                        render_stats["ass"] += 1
-                    elif r == "hook":
-                        render_stats["hook"] += 1
-                    elif r in ("cut", "cut_no_ffmpeg_check"):
-                        render_stats["cut"] += 1
-                    else:
-                        render_stats["fallback"] += 1
-                    # Enriquecer tags con hook/ass
-                    if render_meta.get("hook_applied"):
-                        hs, he, hmeta = hook_sel if hook_sel else (None, None, None)
-                        base_tags["hook"] = {"start": hs, "end": he, "applied": True}
-                        if hmeta:
-                            base_tags["hook"]["title"] = hmeta.get("text", "")[:120]
-                            base_tags["hook"]["curiosity_score"] = hmeta.get("curiosity_score")
-                            base_tags["hook"]["standalone"] = hmeta.get("makes_sense_standalone", False)
-                            base_tags["hook"]["mode"] = hmeta.get("mode", "teaser")
-                        base_tags["hook"]["source"] = hmeta.get("source", "in_clip_fallback") if hmeta else "in_clip_fallback"
-                    if render_meta.get("ass_applied"):
-                        base_tags["ass"] = {"applied": True, "segments": len(segments)}
-                    base_tags["_render"] = r
-                    # Permitir que el engine archive su path temporal no persista
-                    logger.info("[jobs] clip %s render %s -> %s", idx, r, final_storage)
-                    # Actualizar progreso incrementalmente durante renderizado (65% -> 90%)
-                    try:
-                        total = len(clips_payload) or 1
-                        prog = 65 + int(25 * (idx + 1) / total)
-                        prog = min(90, prog)
-                        # Necesitamos refrescar job desde db para actualizar progress
-                        _cur = db.get(Job, job_id)
-                        if _cur is not None:
-                            _set_progress(db, _cur, prog)
-                            # re-asignar job para siguientes iteraciones
-                            job = _cur
-                    except Exception:
-                        pass
-                except Exception as e:
-                    tb = traceback.format_exc()
-                    logger.warning("[jobs] render fallo clip %s (%s), fallback storage original: %s\n%s", idx, e, storage, tb)
-                    render_stats["fallback"] += 1
-                    # Mensaje descriptivo completo en lugar de solo str(e) que podía ser "4"
-                    err_detail = f"{type(e).__name__}: {e}\n{tb[:1500]}"
-                    base_tags["_render_error"] = err_detail[:800]
-                    base_tags["_render"] = "failed_fallback"
-                    # Modo real: propagates error — no se deja storage vacío simulado
-                    raise RuntimeError(f"Render FFmpeg falló para clip {idx} [{type(e).__name__}: {e}] — ver traceback en logs") from e
-            else:
-                # Video origen no existe — error real, sin fallback de prueba
-                raise FileNotFoundError(f"Video origen no encontrado en disco: {video.filepath} — no se puede renderizar clip {idx}")
-
-            # Validación física obligatoria: el archivo recortado debe existir en storage
-            if not final_storage or not Path(final_storage).is_file() or Path(final_storage).stat().st_size == 0:
-                raise RuntimeError(f"Clip {idx} no generó archivo .mp4 físico en storage: {final_storage}")
-
-            # Merge tags originales + base_tags
-            merged_tags: dict | list | None = None
-            if base_tags:
-                merged_tags = base_tags
-                # Si había tags lista, preservarla bajo _raw
-            else:
-                merged_tags = tags
-
-            clips_to_create.append(
-                Clip(
-                    video_id=video.id,
-                    job_id=job.id,
-                    title=str(title)[:255] if title else None,
-                    start_time=float(start),
-                    end_time=float(end),
-                    score=score_val,
-                    tags=merged_tags,
-                    storage_path=final_storage or "",
-                    status="ready",
-                )
-            )
-
-        # 90% Recorte y renderizado completado
-        try:
-            _cur2 = db.get(Job, job_id)
-            if _cur2 is not None:
-                _set_progress(db, _cur2, 90)
-        except Exception:
-            pass
-
-        # Guardar stats de render en result_metadata para observabilidad
-        try:
-            result["_render_stats"] = render_stats
-            result["_ass_hook_enabled"] = ENABLE_ASS_HOOK
-            if segments:
-                result["_segments_count"] = len(segments)
-            rendered_hook_count = render_stats["hook"] + render_stats["hook+ass"]
-            if rendered_hook_count:
-                result["_hooks_count"] = rendered_hook_count
-        except Exception:
-            pass
-
-        refreshed: Job | None = db.get(Job, job_id)
-        if refreshed is None:
-            return
-        # Validación final: todos los clips deben tener storage_path físico real
-        for c in clips_to_create:
-            if not c.storage_path or not Path(c.storage_path).is_file():
-                raise RuntimeError(f"Clip '{c.title}' no generó archivo físico: {c.storage_path}")
-
-        refreshed.result_metadata = result
-        refreshed.status = JobStatus.COMPLETED.value
-        refreshed.progress = 100
-        refreshed.error_message = None
-        for c in clips_to_create:
-            db.add(c)
-        db.commit()
-        try:
-            sys.stdout.flush()
-        except Exception:
-            pass
-        logger.info("Job %s completado 100%% real (%s clips físicos: %s)", job_id, len(clips_to_create), render_stats)
+        # Issue #29: preparar segmentos y hooks para ASS + teaser — flujo obligatorio Claude sin fallback heurístico
+        segments = _resolver_segmentos(db, job, video, cached_segments, job_id)
+        _renderizar_clips(db, video, job, result, clips_payload, segments, job_id)
     except Exception as e:
-        # Decorador / Wrapper Global — captura NINGÚN processing silencioso
-        error_trace = traceback.format_exc()
-        logger.error(f"[JOB {job_id}] ERROR CRÍTICO EN PIPELINE:\n{error_trace}")
-        try:
-            sys.stdout.flush()
-        except Exception:
-            pass
-        # Guardar en Base de Datos de inmediato — spec: status failed con Details
-        try:
-            _spec_fail = db.get(Job, job_id)
-            if _spec_fail is not None:
-                _spec_fail.status = JobStatus.FAILED.value
-                _spec_fail.error_message = f"{str(e)} | Details: {error_trace[-300:]}"
-                try:
-                    _spec_fail.result_metadata = {"error": f"{str(e)} | Details: {error_trace[-300:]}", "error_type": type(e).__name__, "traceback": error_trace[:3000], "engine": "real", "failed": True}
-                except Exception:
-                    pass
-                db.commit()
-                try:
-                    sys.stdout.flush()
-                except Exception:
-                    pass
-                logger.info(f"[JOB {job_id}] Guardado en BD estado failed tras error crítico")
-        except Exception as _spec_db_e:
-            logger.error(f"[JOB {job_id}] No se pudo guardar error crítico en BD: {_spec_db_e}")
-            try:
-                db.rollback()
-            except Exception:
-                pass
-        # FIX legado: Capturar e imprimir Traceback completo en lugar de solo str(e) que almacenó "4"
-        exc = e
-        tb_full = error_trace
-        logger.exception("Fallo irrecuperable job=%s — modo 100%% real sin fallback\nTraceback:\n%s", job_id, tb_full)
-        # Mensaje descriptivo humano + tipo de excepción + traceback abreviado (no solo "4")
-        # Si str(exc) es vacío o un solo carácter como "4", usar tb para diagnóstico
-        raw_msg = str(exc).strip()
-        if not raw_msg or len(raw_msg) <= 4 or raw_msg == "4":
-            # Caso Error 4: str(e) era "4" por excepción mal formateada o código FFmpeg — expandir a descriptivo
-            descriptive = (
-                f"{type(exc).__name__}: {raw_msg or 'error sin mensaje'} — "
-                f"Fallo en pipeline de Job {job_id}. "
-                f"Posibles causas: segments vacío (Whisper sin audio), "
-                f"filepath no existe, o FFmpeg args inválidos. "
-                f"Traceback:\n{tb_full[:1500]}"
-            )
-        else:
-            descriptive = f"{type(exc).__name__}: {raw_msg}\n{tb_full[:1200]}"
-        # También detectar causas comunes para mensajes más útiles
-        if "segments" in tb_full and ("IndexError" in tb_full or "list index out of range" in tb_full):
-            descriptive = (
-                "No se detectaron segmentos de audio suficientes en el video — "
-                f"Whisper devolvió lista vacía o muy corta. Job {job_id}: {type(exc).__name__}: {raw_msg}\n{tb_full[:1200]}"
-            )
-        elif "FileNotFoundError" in tb_full or "No such file" in tb_full:
-            descriptive = descriptive  # ya es descriptivo con path
-        # Guardar en BD con mensaje descriptivo (no solo "4") — preservar spec si ya guardado
-        try:
-            failed2: Job | None = db.get(Job, job_id)
-            if failed2 is not None:
-                # Si ya tiene el formato spec con Details:, no sobrescribir error_message principal
-                if failed2.error_message and "Details:" in failed2.error_message and "| Details:" in failed2.error_message:
-                    # Ya guardado por spec, solo asegurar result_metadata detallado
-                    try:
-                        if not failed2.result_metadata or "descriptive" not in str(failed2.result_metadata):
-                            failed2.result_metadata = {
-                                "error": descriptive[:2000],
-                                "error_type": type(exc).__name__,
-                                "traceback": tb_full[:3000],
-                                "engine": "real",
-                                "failed": True,
-                                "spec_error": f"{str(exc)} | Details: {error_trace[-300:]}",
-                            }
-                            db.commit()
-                    except Exception:
-                        pass
-                    logger.info("[jobs] job %s ya marcado FAILED por spec, se preserva mensaje spec", job_id)
-                else:
-                    failed2.status = JobStatus.FAILED.value
-                    failed2.error_message = descriptive[:2000]
-                try:
-                    failed2.result_metadata = {
-                        "error": descriptive[:2000],
-                        "error_type": type(exc).__name__,
-                        "traceback": tb_full[:3000],
-                        "engine": "real",
-                        "failed": True,
-                    }
-                except Exception:
-                    # Fallback mínimo si result_metadata falla
-                    try:
-                        failed2.result_metadata = {"error": descriptive[:2000], "engine": "real", "failed": True}
-                    except Exception:
-                        pass
-                db.commit()
-                logger.info("[jobs] job %s marcado FAILED con mensaje descriptivo (%s chars)", job_id, len(descriptive))
-        except Exception as db_exc:
-            logger.exception("[jobs] error al marcar FAILED job=%s: %s", job_id, db_exc)
-            try:
-                db.rollback()
-            except Exception:
-                pass
+        _manejar_fallo(db, job_id, e)
     finally:
         db.close()
-        # Limpieza post-job para evitar [Errno 28] en Render.
-        try:
-            from ..services.storage_cleanup import cleanup_storage
-            freed = cleanup_storage(max_age_hours=2)
-            logger.info("[jobs] Cleanup post-job para job=%s: liberó %.2f MB", job_id, freed / (1024 * 1024))
-        except Exception as cleanup_err:
-            logger.warning("[jobs] Cleanup post-job falló (non-fatal) para job=%s: %s", job_id, cleanup_err)
+        _limpiar_storage_post_job(job_id)
 
 
-# Wrapper Global para BackgroundTasks — spec exacta con asyncio.to_thread para desbloquear event loop
 async def run_job_safely(job_id: str) -> None:
     """Wrapper async con try...except global para BackgroundTasks (spec)."""
     try:

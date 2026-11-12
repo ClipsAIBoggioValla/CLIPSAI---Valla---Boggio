@@ -98,6 +98,324 @@ def _verificar_ffmpeg() -> bool:
         return False
 
 
+def _error_ia_desde_excepcion(exc: Exception) -> ProcesamientoResultado:
+    """Mapea la excepción del paso IA a un resultado de error tipado."""
+    if isinstance(exc, ValueError):
+        return ProcesamientoResultado.error_resultado(
+            error=f"Respuesta de IA inválida: {exc}",
+            error_tipo="IAError",
+            error_detalle=traceback.format_exc()
+        )
+    if isinstance(exc, ConnectionError):
+        return ProcesamientoResultado.error_resultado(
+            error=f"Error de conexión con API de IA: {exc}",
+            error_tipo="ConexionError",
+            error_detalle=traceback.format_exc()
+        )
+    if isinstance(exc, TimeoutError):
+        return ProcesamientoResultado.error_resultado(
+            error=f"Timeout consultando API de IA: {exc}",
+            error_tipo="TimeoutError",
+            error_detalle=traceback.format_exc()
+        )
+    return ProcesamientoResultado.error_resultado(
+        error=f"Error inesperado en IA: {exc}",
+        error_tipo="IAError",
+        error_detalle=traceback.format_exc()
+    )
+
+
+def _timestamp_a_segundos(ts_str: str) -> float:
+    """Convierte M:SS, MM:SS o H:MM:SS a segundos."""
+    ts_parts = ts_str.split(":")
+    if len(ts_parts) == 2:
+        return int(ts_parts[0]) * 60 + float(ts_parts[1])
+    if len(ts_parts) == 3:
+        return int(ts_parts[0]) * 3600 + int(ts_parts[1]) * 60 + float(ts_parts[2])
+    return float(ts_str)
+
+
+def _extraer_segmentos_transcripcion(transcripcion_formatted: str) -> list[dict]:
+    """Lee segmentos de transcripción para incluirlos en el resultado.
+
+    Formato esperado por jobs.py: {"start": float, "end": float, "text": str}
+    """
+    transcription_segments: list[dict] = []
+    try:
+        with open(transcripcion_formatted, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+    except Exception as read_err:
+        print(f"[engine] No se pudieron leer segmentos de transcripción: {read_err}")
+        return transcription_segments
+
+    for i, line in enumerate(lines):
+        segmento = _segmento_de_linea(line, lines, i)
+        if segmento is not None:
+            transcription_segments.append(segmento)
+
+    # Log de los primeros 3 segmentos como muestra
+    if transcription_segments:
+        print(f"[engine] Generados {len(transcription_segments)} segmentos de transcripción:")
+        for seg in transcription_segments[:3]:
+            print(f"  - start={seg['start']}, end={seg['end']}, text='{seg['text'][:50]}'")
+    else:
+        print(f"[engine] WARNING: No se generaron segmentos de transcripción")
+    return transcription_segments
+
+
+def _segmento_de_linea(line: str, lines: list[str], i: int) -> dict | None:
+    """Parsea una línea 'timestamp - texto' en un segmento. None si no aplica."""
+    line = line.strip()
+    if ' - ' not in line:
+        return None
+    parts = line.split(' - ', 1)
+    if len(parts) != 2:
+        return None
+    timestamp_str, text = parts
+    if not text.strip():
+        return None
+    try:
+        start_seconds = _timestamp_a_segundos(timestamp_str)
+    except (ValueError, IndexError) as ts_err:
+        print(f"[engine] No se pudo parsear timestamp '{timestamp_str}': {ts_err}")
+        return None
+    if start_seconds < 0:
+        return None
+    # Estimar end como start del siguiente segmento (o start + 3.0 para el último)
+    end_seconds = start_seconds + 3.0
+    next_start = _timestamp_del_siguiente(lines, i + 1)
+    if next_start is not None and next_start > start_seconds:
+        end_seconds = next_start
+    return {
+        "start": round(start_seconds, 2),
+        "end": round(end_seconds, 2),
+        "text": text.strip()
+    }
+
+
+def _timestamp_del_siguiente(lines: list[str], idx: int) -> float | None:
+    """Timestamp del segmento siguiente ('M:SS - ...'). None si no parsea."""
+    if idx >= len(lines):
+        return None
+    next_line = lines[idx].strip()
+    if ' - ' not in next_line:
+        return None
+    next_parts = next_line.split(' - ', 1)
+    if len(next_parts) != 2 or not next_parts[0].strip():
+        return None
+    try:
+        return _timestamp_a_segundos(next_parts[0].strip())
+    except (ValueError, IndexError):
+        return None
+
+
+def _transcripcion_valida_provista(transcripcion_formatted: str) -> None:
+    """Valida que la transcripción parseada tenga contenido utilizable.
+
+    Raises:
+        ValueError: si el archivo falta, está vacío o tiene muy pocos segmentos.
+    """
+    print("[engine] Intentando parsear transcripción proporcionada...")
+    if not os.path.exists(transcripcion_formatted):
+        print(f"[engine] Archivo de transcripción no generado. Usando Whisper...")
+        raise ValueError("Archivo no generado")
+
+    with open(transcripcion_formatted, 'r', encoding='utf-8') as f:
+        contenido = f.read().strip()
+
+    if not contenido or len(contenido) < 10:
+        print(f"[engine] Transcripción vacía o muy corta ({len(contenido)} chars). Usando Whisper...")
+        raise ValueError("Transcripción vacía")
+
+    # Contar líneas no vacías
+    lineas = [l for l in contenido.split('\n') if l.strip()]
+    if len(lineas) < 3:
+        print(f"[engine] Solo {len(lineas)} segmentos. Usando Whisper...")
+        raise ValueError("Muy pocos segmentos")
+
+    print(f"[engine] Transcripción válida: {len(lineas)} segmentos")
+
+
+def _transcribir_con_whisper(audio_path: str, transcripcion_formatted: str) -> None:
+    """Transcribe el audio con Whisper y valida el resultado.
+
+    Raises:
+        ValueError: si Whisper no generó archivo o devolvió vacío.
+    """
+    print("[engine] Transcribiendo audio con Whisper...")
+    transcribir_audio(audio_path, transcripcion_formatted)
+
+    # Verificar resultado
+    if not os.path.exists(transcripcion_formatted):
+        raise ValueError("Whisper no generó archivo de transcripción")
+
+    with open(transcripcion_formatted, 'r', encoding='utf-8') as f:
+        contenido = f.read().strip()
+
+    if not contenido:
+        raise ValueError("Whisper devolvió transcripción vacía")
+
+    print(f"[engine] Whisper generó transcripción: {len(contenido)} chars")
+
+
+def _error_transcripcion_whisper(whisper_err: Exception) -> ProcesamientoResultado:
+    return ProcesamientoResultado.error_resultado(
+        error=f"Falló transcripción con Whisper: {whisper_err}",
+        error_tipo="TranscripcionError",
+        error_detalle=traceback.format_exc()
+    )
+
+
+def _preparar_transcripcion(
+    trabajo_dir: str,
+    audio_path: str,
+    transcripcion_original: str,
+    transcripcion_formatted: str,
+) -> ProcesamientoResultado | None:
+    """Parsea la transcripción proporcionada o usa Whisper como fallback.
+
+    Devuelve un error_resultado si Whisper también falla; None si OK.
+    """
+    from whisper_transcriber import parsear_transcripcion_youtube
+
+    try:
+        parsear_transcripcion_youtube(transcripcion_original, transcripcion_formatted)
+        # Verificar si se generaron segmentos válidos
+        _transcripcion_valida_provista(transcripcion_formatted)
+    except Exception as e:
+        # Si falla el parseo o la transcripción está vacía, usar Whisper
+        print(f"[engine] Parseo falló o transcripción vacía: {e}")
+        try:
+            _transcribir_con_whisper(audio_path, transcripcion_formatted)
+        except Exception as whisper_err:
+            return _error_transcripcion_whisper(whisper_err)
+    return None
+
+
+def _leer_clips_info(clips_dir: str) -> list[ClipInfo]:
+    """Lee info de clips generados desde clips_info.json."""
+    clips_info_path = os.path.join(clips_dir, "clips_info.json")
+    clips_resultado = []
+    if os.path.exists(clips_info_path):
+        with open(clips_info_path, "r", encoding="utf-8") as f:
+            info_clips = json.load(f)
+        for info in info_clips:
+            clips_resultado.append(ClipInfo(
+                archivo=info.get("archivo", ""),
+                inicio=info.get("inicio", ""),
+                fin=info.get("fin", ""),
+                titulo_sugerido=info.get("titulo_sugerido", ""),
+                hook_texto=info.get("hook_texto", ""),
+                criterio_principal=info.get("criterio_principal", ""),
+                score=info.get("score", 0),
+                primer_segundo=info.get("primer_segundo", ""),
+                motivo=info.get("motivo", ""),
+            ))
+    return clips_resultado
+
+
+def _ejecutar_pipeline_interno(
+    trabajo_dir: str,
+    clips_dir: str,
+    video_original: str,
+    transcripcion_original: str,
+) -> ProcesamientoResultado:
+    """Pasos 3-6 del pipeline: audio → análisis → transcripción → IA → corte → resultado."""
+    from main import (
+        extraer_audio,
+        analizar_audio_video,
+        leer_transcripcion_para_ia,
+        preparar_transcripcion_para_ia,
+        enriquecer_datos_para_ia,
+        obtener_clips_ia,
+        validar_clips,
+        procesar_clips,
+        AUDIO_ANALYZER_AVAILABLE,
+    )
+
+    # 4.1 Extraer audio
+    audio_path = os.path.join(trabajo_dir, "audio.mp3")
+    try:
+        extraer_audio(video_original, audio_path)
+    except Exception as e:
+        return ProcesamientoResultado.error_resultado(
+            error=f"Falló extracción de audio: {e}",
+            error_tipo="AudioError",
+            error_detalle=traceback.format_exc()
+        )
+
+    # 4.2 Analizar audio (opcional, continua si falla)
+    datos_audio: list = []
+    if AUDIO_ANALYZER_AVAILABLE:
+        try:
+            datos_audio = analizar_audio_video(audio_path)
+        except Exception:
+            # No es fatal, continuamos sin datos de audio
+            datos_audio = []
+
+    # 4.3 Parsear transcripción o usar Whisper si está vacía
+    transcripcion_formatted = os.path.join(trabajo_dir, "transcripcion_formatted.txt")
+    error_transcripcion = _preparar_transcripcion(trabajo_dir, audio_path, transcripcion_original, transcripcion_formatted)
+    if error_transcripcion is not None:
+        return error_transcripcion
+
+    # 4.4 Preparar datos para IA
+    try:
+        texto_para_ia = leer_transcripcion_para_ia(transcripcion_formatted)
+        datos_enriquecidos = enriquecer_datos_para_ia(datos_audio, transcripcion_formatted)
+        texto_para_ia = preparar_transcripcion_para_ia(transcripcion_formatted)
+        transcription_segments = _extraer_segmentos_transcripcion(transcripcion_formatted)
+    except Exception as e:
+        return ProcesamientoResultado.error_resultado(
+            error=f"Falló preparación de datos para IA: {e}",
+            error_tipo="PreparacionIAError",
+            error_detalle=traceback.format_exc()
+        )
+
+    # 4.5 Obtener clips de la IA
+    try:
+        clips_ia = obtener_clips_ia(texto_para_ia, datos_audio, datos_enriquecidos)
+    except Exception as e:
+        return _error_ia_desde_excepcion(e)
+
+    # 4.6 Validar clips
+    clips_validos = validar_clips(clips_ia)
+    if not clips_validos:
+        # Respuesta válida pero vacía - no es un error, el video no tiene clips relevantes
+        print(f"[engine] IA no encontró clips válidos (devolvió {len(clips_ia)} clips, ninguno pasó validación)")
+        return ProcesamientoResultado.exito_resultado(
+            clips=[],
+            carpeta_salida=clips_dir,
+            transcription_segments=transcription_segments
+        )
+
+    # 4.7 Generar clips de video
+    try:
+        archivos_generados = procesar_clips(video_original, clips_validos, clips_dir)
+    except Exception as e:
+        return ProcesamientoResultado.error_resultado(
+            error=f"Falló generación de clips de video: {e}",
+            error_tipo="GeneracionError",
+            error_detalle=traceback.format_exc()
+        )
+
+    if not archivos_generados:
+        # Si no se generaron archivos, retornar éxito con 0 clips
+        print(f"[engine] No se generaron archivos de clip, retornando resultado vacío")
+        return ProcesamientoResultado.exito_resultado(
+            clips=[],
+            carpeta_salida=clips_dir,
+            transcription_segments=transcription_segments
+        )
+
+    # 5/6. Leer info de clips generados y resultado exitoso
+    return ProcesamientoResultado.exito_resultado(
+        clips=_leer_clips_info(clips_dir),
+        carpeta_salida=clips_dir,
+        transcription_segments=transcription_segments
+    )
+
+
 def procesar_video(video_path: str, transcripcion_path: str) -> ProcesamientoResultado:
     """
     Procesa un video con su transcripción y genera clips virales.
@@ -150,267 +468,9 @@ def procesar_video(video_path: str, transcripcion_path: str) -> ProcesamientoRes
     transcripcion_original = os.path.abspath(transcripcion_path)
 
     try:
-        # 3. Importar y ejecutar pipeline interno
-        # Importamos aquí para que los errores de importación se capturen abajo
-        from main import (
-            extraer_audio,
-            analizar_audio_video,
-            leer_transcripcion_para_ia,
-            formatear_transcripcion,
-            preparar_transcripcion_para_ia,
-            enriquecer_datos_para_ia,
-            obtener_clips_ia,
-            validar_clips,
-            procesar_clips,
-            AUDIO_ANALYZER_AVAILABLE,
-        )
-        from whisper_transcriber import parsear_transcripcion_youtube, transcribir_audio
-
-        # 4. Ejecutar pipeline paso a paso con manejo de errores granular
-
-        # 4.1 Extraer audio
-        audio_path = os.path.join(trabajo_dir, "audio.mp3")
-        try:
-            extraer_audio(video_original, audio_path)
-        except Exception as e:
-            return ProcesamientoResultado.error_resultado(
-                error=f"Falló extracción de audio: {e}",
-                error_tipo="AudioError",
-                error_detalle=traceback.format_exc()
-            )
-
-        # 4.2 Analizar audio (opcional, continua si falla)
-        datos_audio = []
-        if AUDIO_ANALYZER_AVAILABLE:
-            try:
-                datos_audio = analizar_audio_video(audio_path)
-            except Exception as e:
-                # No es fatal, continuamos sin datos de audio
-                datos_audio = []
-        else:
-            # audio_analyzer no disponible, continuamos
-            pass
-
-        # 4.3 Parsear transcripción o usar Whisper si está vacía
-        transcripcion_formatted = os.path.join(trabajo_dir, "transcripcion_formatted.txt")
-        
-        # Primero intentar parsear la transcripción proporcionada
-        print("[engine] Intentando parsear transcripción proporcionada...")
-        try:
-            parsear_transcripcion_youtube(transcripcion_original, transcripcion_formatted)
-            
-            # Verificar si se generaron segmentos válidos
-            if os.path.exists(transcripcion_formatted):
-                with open(transcripcion_formatted, 'r', encoding='utf-8') as f:
-                    contenido = f.read().strip()
-                
-                if not contenido or len(contenido) < 10:
-                    print(f"[engine] Transcripción vacía o muy corta ({len(contenido)} chars). Usando Whisper...")
-                    raise ValueError("Transcripción vacía")
-                
-                # Contar líneas no vacías
-                lineas = [l for l in contenido.split('\n') if l.strip()]
-                if len(lineas) < 3:
-                    print(f"[engine] Solo {len(lineas)} segmentos. Usando Whisper...")
-                    raise ValueError("Muy pocos segmentos")
-                
-                print(f"[engine] Transcripción válida: {len(lineas)} segmentos")
-            else:
-                print(f"[engine] Archivo de transcripción no generado. Usando Whisper...")
-                raise ValueError("Archivo no generado")
-                
-        except Exception as e:
-            # Si falla el parseo o la transcripción está vacía, usar Whisper
-            print(f"[engine] Parseo falló o transcripción vacía: {e}")
-            print("[engine] Transcribiendo audio con Whisper...")
-            try:
-                # Transcribir audio directamente con Whisper
-                transcribir_audio(audio_path, transcripcion_formatted)
-                
-                # Verificar resultado
-                if not os.path.exists(transcripcion_formatted):
-                    raise ValueError("Whisper no generó archivo de transcripción")
-                
-                with open(transcripcion_formatted, 'r', encoding='utf-8') as f:
-                    contenido = f.read().strip()
-                
-                if not contenido:
-                    raise ValueError("Whisper devolvió transcripción vacía")
-                
-                print(f"[engine] Whisper generó transcripción: {len(contenido)} chars")
-                
-            except Exception as whisper_err:
-                return ProcesamientoResultado.error_resultado(
-                    error=f"Falló transcripción con Whisper: {whisper_err}",
-                    error_tipo="TranscripcionError",
-                    error_detalle=traceback.format_exc()
-                )
-
-        # 4.4 Preparar datos para IA
-        transcription_segments = []
-        try:
-            texto_para_ia = leer_transcripcion_para_ia(transcripcion_formatted)
-            datos_enriquecidos = enriquecer_datos_para_ia(datos_audio, transcripcion_formatted)
-            texto_para_ia = preparar_transcripcion_para_ia(transcripcion_formatted)
-            
-            # Leer segmentos de transcripción para incluirlos en el resultado
-            # Formato esperado por jobs.py: {"start": float, "end": float, "text": str}
-            try:
-                with open(transcripcion_formatted, 'r', encoding='utf-8') as f:
-                    lines = f.readlines()
-                
-                for i, line in enumerate(lines):
-                    line = line.strip()
-                    if ' - ' in line:
-                        parts = line.split(' - ', 1)
-                        if len(parts) == 2:
-                            timestamp_str, text = parts
-                            if not text.strip():
-                                continue
-                            # Convertir timestamp M:SS, MM:SS o H:MM:SS a segundos
-                            try:
-                                ts_parts = timestamp_str.split(':')
-                                if len(ts_parts) == 2:
-                                    start_seconds = int(ts_parts[0]) * 60 + float(ts_parts[1])
-                                elif len(ts_parts) == 3:
-                                    start_seconds = int(ts_parts[0]) * 3600 + int(ts_parts[1]) * 60 + float(ts_parts[2])
-                                else:
-                                    start_seconds = float(timestamp_str)
-                                
-                                if start_seconds < 0:
-                                    continue
-                                
-                                # Estimar end como start del siguiente segmento (o start + 3.0 para el último)
-                                end_seconds = start_seconds + 3.0
-                                if i + 1 < len(lines):
-                                    next_line = lines[i + 1].strip()
-                                    if ' - ' in next_line:
-                                        next_parts = next_line.split(' - ', 1)
-                                        if len(next_parts) == 2 and next_parts[0].strip():
-                                            next_ts = next_parts[0].strip()
-                                            next_ts_parts = next_ts.split(':')
-                                            try:
-                                                if len(next_ts_parts) == 2:
-                                                    next_start = int(next_ts_parts[0]) * 60 + float(next_ts_parts[1])
-                                                elif len(next_ts_parts) == 3:
-                                                    next_start = int(next_ts_parts[0]) * 3600 + int(next_ts_parts[1]) * 60 + float(next_ts_parts[2])
-                                                else:
-                                                    next_start = float(next_ts)
-                                                if next_start > start_seconds:
-                                                    end_seconds = next_start
-                                            except (ValueError, IndexError):
-                                                pass
-                                
-                                transcription_segments.append({
-                                    "start": round(start_seconds, 2),
-                                    "end": round(end_seconds, 2),
-                                    "text": text.strip()
-                                })
-                            except (ValueError, IndexError) as ts_err:
-                                print(f"[engine] No se pudo parsear timestamp '{timestamp_str}': {ts_err}")
-                
-                # Log de los primeros 3 segmentos como muestra
-                if transcription_segments:
-                    print(f"[engine] Generados {len(transcription_segments)} segmentos de transcripción:")
-                    for seg in transcription_segments[:3]:
-                        print(f"  - start={seg['start']}, end={seg['end']}, text='{seg['text'][:50]}'")
-                else:
-                    print(f"[engine] WARNING: No se generaron segmentos de transcripción")
-            except Exception as read_err:
-                print(f"[engine] No se pudieron leer segmentos de transcripción: {read_err}")
-        except Exception as e:
-            return ProcesamientoResultado.error_resultado(
-                error=f"Falló preparación de datos para IA: {e}",
-                error_tipo="PreparacionIAError",
-                error_detalle=traceback.format_exc()
-            )
-
-        # 4.5 Obtener clips de la IA
-        try:
-            clips_ia = obtener_clips_ia(texto_para_ia, datos_audio, datos_enriquecidos)
-        except ValueError as e:
-            return ProcesamientoResultado.error_resultado(
-                error=f"Respuesta de IA inválida: {e}",
-                error_tipo="IAError",
-                error_detalle=traceback.format_exc()
-            )
-        except ConnectionError as e:
-            return ProcesamientoResultado.error_resultado(
-                error=f"Error de conexión con API de IA: {e}",
-                error_tipo="ConexionError",
-                error_detalle=traceback.format_exc()
-            )
-        except TimeoutError as e:
-            return ProcesamientoResultado.error_resultado(
-                error=f"Timeout consultando API de IA: {e}",
-                error_tipo="TimeoutError",
-                error_detalle=traceback.format_exc()
-            )
-        except Exception as e:
-            return ProcesamientoResultado.error_resultado(
-                error=f"Error inesperado en IA: {e}",
-                error_tipo="IAError",
-                error_detalle=traceback.format_exc()
-            )
-
-        # 4.6 Validar clips
-        clips_validos = validar_clips(clips_ia)
-        if not clips_validos:
-            # Respuesta válida pero vacía - no es un error, el video no tiene clips relevantes
-            print(f"[engine] IA no encontró clips válidos (devolvió {len(clips_ia)} clips, ninguno pasó validación)")
-            return ProcesamientoResultado.exito_resultado(
-                clips=[],
-                carpeta_salida=clips_dir,
-                transcription_segments=transcription_segments
-            )
-
-        # 4.7 Generar clips de video
-        try:
-            archivos_generados = procesar_clips(video_original, clips_validos, clips_dir)
-        except Exception as e:
-            return ProcesamientoResultado.error_resultado(
-                error=f"Falló generación de clips de video: {e}",
-                error_tipo="GeneracionError",
-                error_detalle=traceback.format_exc()
-            )
-
-        if not archivos_generados:
-            # Si no se generaron archivos, retornar éxito con 0 clips
-            print(f"[engine] No se generaron archivos de clip, retornando resultado vacío")
-            return ProcesamientoResultado.exito_resultado(
-                clips=[],
-                carpeta_salida=clips_dir,
-                transcription_segments=transcription_segments
-            )
-
-        # 5. Leer info de clips generados desde clips_info.json
-        clips_info_path = os.path.join(clips_dir, "clips_info.json")
-        clips_resultado = []
-
-        if os.path.exists(clips_info_path):
-            with open(clips_info_path, "r", encoding="utf-8") as f:
-                info_clips = json.load(f)
-
-            for info in info_clips:
-                clips_resultado.append(ClipInfo(
-                    archivo=info.get("archivo", ""),
-                    inicio=info.get("inicio", ""),
-                    fin=info.get("fin", ""),
-                    titulo_sugerido=info.get("titulo_sugerido", ""),
-                    hook_texto=info.get("hook_texto", ""),
-                    criterio_principal=info.get("criterio_principal", ""),
-                    score=info.get("score", 0),
-                    primer_segundo=info.get("primer_segundo", ""),
-                    motivo=info.get("motivo", ""),
-                ))
-
-        # 6. Resultado exitoso
-        return ProcesamientoResultado.exito_resultado(
-            clips=clips_resultado,
-            carpeta_salida=clips_dir,
-            transcription_segments=transcription_segments
-        )
-
+        # 3-6. Importar y ejecutar pipeline interno paso a paso con manejo de errores granular
+        # (importamos aquí para que los errores de importación se capturen abajo)
+        return _ejecutar_pipeline_interno(trabajo_dir, clips_dir, video_original, transcripcion_original)
     except ImportError as e:
         return ProcesamientoResultado.error_resultado(
             error=f"Dependencia faltante: {e}",

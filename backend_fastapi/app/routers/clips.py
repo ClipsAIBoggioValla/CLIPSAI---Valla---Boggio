@@ -96,6 +96,228 @@ class ReRenderRequest(BaseModel):
     enable_hook: bool = True
 
 
+def _resolver_video_de_clip(db: Any, clip: Any) -> Any | None:
+    """Resuelve el Video asociado al clip (directo o vía job)."""
+    video = None
+    if clip.video_id is not None:
+        video = db.get(Video, clip.video_id)
+    if video is None and clip.job_id is not None:
+        from ..models import Job
+
+        job = db.get(Job, clip.job_id)
+        if job is not None:
+            video = db.get(Video, job.video_id)
+    return video
+
+
+def _parsear_transcript_simple(txt: str) -> list[dict]:
+    """Parser simple `HH:MM:SS - texto` con cursor de 3s para líneas sin timestamp."""
+    import re
+
+    segs: list[dict] = []
+    re_ts = re.compile(r"^(\d{1,2}:\d{2}(?::\d{2})?)\s*[-–]\s*(.+)$")
+    cursor = 0.0
+    for line in txt.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        m = re_ts.match(line)
+        if m:
+            ts_str = m.group(1)
+            t = m.group(2).strip()
+            try:
+                parts = ts_str.split(":")
+                if len(parts) == 3:
+                    s = int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+                elif len(parts) == 2:
+                    s = int(parts[0]) * 60 + float(parts[1])
+                else:
+                    s = float(parts[0])
+                segs.append({"start": s, "end": s + 3.0, "text": t})
+                cursor = s + 3.0
+                continue
+            except Exception:
+                pass
+        segs.append({"start": cursor, "end": cursor + 3.0, "text": line})
+        cursor += 3.0
+    return segs
+
+
+def _cargar_segmentos(video: Any) -> list[dict]:
+    """Segmentos para re-render: Whisper primero, fallback al parser simple."""
+    try:
+        from ..services.whisper_service import transcribe_video
+
+        segs = transcribe_video(str(video.filepath), language="es")
+        if segs:
+            return [{"start": float(s["start"]), "end": float(s["end"]), "text": str(s["text"])} for s in segs]
+    except Exception:
+        pass
+    # Fallback parse transcript
+    txt = None
+    if video.transcript:
+        txt = video.transcript
+    elif video.transcription_filepath and Path(str(video.transcription_filepath)).is_file():
+        txt = Path(str(video.transcription_filepath)).read_text(encoding="utf-8", errors="ignore")
+    if txt:
+        return _parsear_transcript_simple(txt)
+    return []
+
+
+def _detectar_hooks(video: Any, segments: list[dict]) -> list[dict]:
+    """Hooks LLM para re-render (lista vacía si falla)."""
+    if not segments:
+        return []
+    try:
+        from ..services.hook_service import detect_hooks
+
+        duration = None
+        try:
+            if video.duration_seconds:
+                duration = float(video.duration_seconds)
+            elif segments:
+                duration = float(segments[-1].get("end", 0))
+        except Exception:
+            duration = None
+        return detect_hooks(segments, duration_hint=duration, mock=False) or []
+    except Exception:
+        return []
+
+
+def _buscar_hook_llm(clip: Any, hooks: list[dict]) -> tuple | None:
+    """Busca el hook LLM con mejor score contenido dentro del clip."""
+    best = None
+    for h in hooks:
+        try:
+            hk = h.get("hook") or {}
+            hs = float(hk.get("start_time", hk.get("start", 0)))
+            he = float(hk.get("end_time", hk.get("end", 0)))
+            if clip.start_time <= hs < he <= clip.end_time and 3.0 <= (he - hs) <= 6.0:
+                score = int(h.get("viral_score", 0))
+                if best is None or score > best[2].get("viral_score", 0):
+                    best = (hs, he, h)
+        except Exception:
+            continue
+    return best
+
+
+def _hook_sintetico(clip: Any, segments: list[dict]) -> tuple | None:
+    """Hook sintético centrado en el clip (5s), ajustado al segmento más cercano."""
+    clip_dur = clip.end_time - clip.start_time
+    if not (15 <= clip_dur <= 90):
+        return None
+    hook_dur = 5.0
+    center = (clip.start_time + clip.end_time) / 2
+    hs = center - hook_dur / 2
+    he = hs + hook_dur
+    if segments:
+        try:
+            closest = min(segments, key=lambda s: abs(float(s.get("start", 0)) - hs))
+            cs = float(closest.get("start", hs))
+            if clip.start_time <= cs <= clip.end_time - hook_dur:
+                hs = cs
+                he = hs + hook_dur
+        except Exception:
+            pass
+    if hs < clip.start_time:
+        hs = clip.start_time
+        he = hs + hook_dur
+    if he > clip.end_time:
+        he = clip.end_time
+        hs = he - hook_dur
+    if he - hs >= 3.0:
+        return (round(hs, 2), round(he, 2), None)
+    return None
+
+
+def _elegir_hook_re_render(clip: Any, hooks: list[dict], segments: list[dict]) -> tuple | None:
+    """Hook para re-render: LLM contenido, si no sintético centrado. None si nada aplica."""
+    try:
+        best = _buscar_hook_llm(clip, hooks)
+        if best:
+            return best
+        return _hook_sintetico(clip, segments)
+    except Exception:
+        return None
+
+
+def _tags_hook_re_render(tags: dict, meta: dict, enable_hook: bool, hook_sel: tuple | None) -> None:
+    """Mantiene la estructura legacy 'hook' según el toggle y el resultado del render."""
+    if enable_hook and meta.get("hook_applied"):
+        hs, he, _ = hook_sel if hook_sel else (None, None, None)
+        tags["hook"] = {"start": hs, "end": he, "applied": True, "source": "re-render"}
+        # has_hook ya True arriba
+    elif not enable_hook:
+        tags.pop("hook", None)
+        tags["has_hook"] = False
+    else:
+        # enable_hook True pero hook no aplicado (ej. duración <15s)
+        if meta.get("hook_applied") is False or not meta.get("hook_applied"):
+            # Mantener has_hook True (usuario lo pidió) pero marcar detalle
+            if "hook" not in tags:
+                tags["hook"] = {"applied": False, "reason": "hook no aplicable o fallo FFmpeg", "requested": True}
+
+
+def _tags_ass_re_render(tags: dict, meta: dict, enable_ass: bool, segments: list[dict]) -> None:
+    """Mantiene la estructura legacy 'ass' según el toggle y el resultado del render."""
+    if enable_ass and meta.get("ass_applied"):
+        tags["ass"] = {"applied": True, "segments": len(segments) if segments else 0}
+        tags["has_ass"] = True
+    elif enable_ass and not meta.get("ass_applied"):
+        # enable_ass True pero ASS falló: mantener has_ass True y registrar error
+        tags["ass"] = {"applied": False, "reason": "ASS fallo, fallback sin subtítulos", "requested": True}
+        tags["has_ass"] = True
+    elif not enable_ass:
+        tags.pop("ass", None)
+        tags["has_ass"] = False
+
+
+def _tags_dict(clip: Any) -> dict:
+    """Tags del clip normalizados a dict (por si la columna guardó una lista)."""
+    tags = clip.tags if isinstance(clip.tags, dict) else {}
+    if not isinstance(tags, dict):
+        tags = {}
+    return tags
+
+
+def _re_render_exitoso(db: Any, clip: Any, clip_id: uuid.UUID, out_path: str, meta: dict, enable_ass: bool, enable_hook: bool, segments: list[dict], hook_sel: tuple | None) -> None:
+    """Persiste el resultado del re-render: storage, tags has_ass/has_hook y status ready."""
+    clip.storage_path = out_path
+    # Actualizar tags — FIX: actualizar explícitamente has_ass/has_hook = enable_* antes del commit (auditoría Parte 1)
+    tags = _tags_dict(clip)
+    # FIX explícito requerido por auditoría: has_ass/has_hook reflejan el toggle solicitado
+    tags["has_ass"] = bool(enable_ass)
+    tags["has_hook"] = bool(enable_hook)
+    _tags_hook_re_render(tags, meta, enable_hook, hook_sel)
+    _tags_ass_re_render(tags, meta, enable_ass, segments)
+    tags["_render"] = meta.get("render", "re-render")
+    tags["_re_render"] = {"enable_ass": enable_ass, "enable_hook": enable_hook, "at": __import__("datetime").datetime.utcnow().isoformat(), "out_path": out_path}
+    clip.tags = tags
+    clip.status = "ready"
+    clip.error_log = None
+    # FIX: storage_path ya actualizado arriba; updated_at se actualiza por trigger set_updated_at(), pero forzamos toque para cache busting
+    try:
+        from sqlalchemy import func as _func
+        clip.updated_at = _func.now()  # noqa: trigger también lo hará
+    except Exception:
+        pass
+    db.commit()
+    logger.info(f"[re-render] clip {clip_id} ok -> {out_path} meta={meta} has_ass={tags['has_ass']} has_hook={tags['has_hook']}")
+
+
+def _re_render_fallido(db: Any, clip: Any, clip_id: uuid.UUID, exc: Exception) -> None:
+    import traceback
+
+    clip.status = "FAILED"
+    clip.error_log = str(exc)[:2000] + "\n" + traceback.format_exc()[:2000]
+    # tags error
+    tags = _tags_dict(clip)
+    tags["_render_error"] = str(exc)[:500]
+    clip.tags = tags
+    db.commit()
+    logger.exception(f"[re-render] fallo clip {clip_id}")
+
+
 def _run_re_render(clip_id: uuid.UUID, enable_ass: bool, enable_hook: bool) -> None:
     from ..database import SessionLocal as _SessionLocal
 
@@ -105,15 +327,7 @@ def _run_re_render(clip_id: uuid.UUID, enable_ass: bool, enable_hook: bool) -> N
         if clip is None:
             return
         # Resolver video
-        video = None
-        if clip.video_id is not None:
-            video = db.get(Video, clip.video_id)
-        if video is None and clip.job_id is not None:
-            from ..models import Job
-
-            job = db.get(Job, clip.job_id)
-            if job is not None:
-                video = db.get(Video, job.video_id)
+        video = _resolver_video_de_clip(db, clip)
         if video is None or not Path(str(video.filepath)).is_file():
             clip.status = "FAILED"
             clip.error_log = "Video origen no encontrado para re-render"
@@ -126,112 +340,16 @@ def _run_re_render(clip_id: uuid.UUID, enable_ass: bool, enable_hook: bool) -> N
         if enable_ass or enable_hook:
             try:
                 # Reusar lógica de jobs.py sin importar circular: intentar whisper + parse
-                try:
-                    from ..services.whisper_service import transcribe_video
-
-                    segs = transcribe_video(str(video.filepath), language="es")
-                    if segs:
-                        segments = [{"start": float(s["start"]), "end": float(s["end"]), "text": str(s["text"])} for s in segs]
-                except Exception:
-                    pass
-                if not segments:
-                    # Fallback parse transcript
-                    import re
-
-                    txt = None
-                    if video.transcript:
-                        txt = video.transcript
-                    elif video.transcription_filepath and Path(str(video.transcription_filepath)).is_file():
-                        txt = Path(str(video.transcription_filepath)).read_text(encoding="utf-8", errors="ignore")
-                    if txt:
-                        # parser simple HH:MM:SS - texto
-                        segs2: list[dict] = []
-                        re_ts = re.compile(r"^(\d{1,2}:\d{2}(?::\d{2})?)\s*[-–]\s*(.+)$")
-                        cursor = 0.0
-                        for line in txt.splitlines():
-                            line=line.strip()
-                            if not line:
-                                continue
-                            m=re_ts.match(line)
-                            if m:
-                                ts_str=m.group(1); t=m.group(2).strip()
-                                try:
-                                    parts=ts_str.split(":")
-                                    if len(parts)==3:
-                                        s=int(parts[0])*3600+int(parts[1])*60+float(parts[2])
-                                    elif len(parts)==2:
-                                        s=int(parts[0])*60+float(parts[1])
-                                    else:
-                                        s=float(parts[0])
-                                    segs2.append({"start": s, "end": s+3.0, "text": t})
-                                    cursor=s+3.0
-                                    continue
-                                except Exception:
-                                    pass
-                            segs2.append({"start": cursor, "end": cursor+3.0, "text": line})
-                            cursor+=3.0
-                        segments = segs2
+                segments = _cargar_segmentos(video)
                 if enable_hook and segments:
-                    try:
-                        from ..services.hook_service import detect_hooks
-
-                        duration = None
-                        try:
-                            if video.duration_seconds:
-                                duration=float(video.duration_seconds)
-                            elif segments:
-                                duration=float(segments[-1].get("end",0))
-                        except Exception:
-                            duration=None
-                        hooks = detect_hooks(segments, duration_hint=duration, mock=False) or []
-                    except Exception:
-                        hooks=[]
+                    hooks = _detectar_hooks(video, segments)
             except Exception as e:
                 logger.warning(f"[re-render] segmentos/hooks fallo: {e}")
-                segments=[]
-                hooks=[]
+                segments = []
+                hooks = []
 
         # Seleccionar hook si enable_hook
-        hook_sel = None
-        if enable_hook and segments:
-            try:
-                # Buscar hook LLM contenido
-                best=None
-                for h in hooks:
-                    try:
-                        hk=h.get("hook") or {}
-                        hs=float(hk.get("start_time", hk.get("start",0))); he=float(hk.get("end_time", hk.get("end",0)))
-                        if clip.start_time <= hs < he <= clip.end_time and 3.0 <= (he-hs) <=6.0:
-                            score=int(h.get("viral_score",0))
-                            if best is None or score>best[2].get("viral_score",0):
-                                best=(hs,he,h)
-                    except Exception:
-                        continue
-                if best:
-                    hook_sel=best
-                else:
-                    # Sintético centrado
-                    clip_dur=clip.end_time - clip.start_time
-                    if 15 <= clip_dur <=90:
-                        hook_dur=5.0
-                        center=(clip.start_time+clip.end_time)/2
-                        hs=center-hook_dur/2; he=hs+hook_dur
-                        if segments:
-                            try:
-                                closest=min(segments, key=lambda s: abs(float(s.get("start",0))-hs))
-                                cs=float(closest.get("start",hs))
-                                if clip.start_time <= cs <= clip.end_time-hook_dur:
-                                    hs=cs; he=hs+hook_dur
-                            except Exception:
-                                pass
-                        if hs<clip.start_time:
-                            hs=clip.start_time; he=hs+hook_dur
-                        if he>clip.end_time:
-                            he=clip.end_time; hs=he-hook_dur
-                        if he-hs>=3.0:
-                            hook_sel=(round(hs,2), round(he,2), None)
-            except Exception:
-                hook_sel=None
+        hook_sel = _elegir_hook_re_render(clip, hooks, segments) if enable_hook and segments else None
 
         # Desactivar flags según enable
         effective_hook = hook_sel if enable_hook else None
@@ -254,64 +372,9 @@ def _run_re_render(clip_id: uuid.UUID, enable_ass: bool, enable_hook: bool) -> N
                 0,
                 clip.title,
             )
-            clip.storage_path = out_path
-            # Actualizar tags — FIX: actualizar explícitamente has_ass/has_hook = enable_* antes del commit (auditoría Parte 1)
-            tags = clip.tags if isinstance(clip.tags, dict) else {}
-            if not isinstance(tags, dict):
-                tags={}
-            # FIX explícito requerido por auditoría: has_ass/has_hook reflejan el toggle solicitado
-            tags["has_ass"] = bool(enable_ass)
-            tags["has_hook"] = bool(enable_hook)
-            # Mantener estructura legacy "ass"/"hook" para compatibilidad con _clip_has_ass/_clip_has_hook
-            if enable_hook and meta.get("hook_applied"):
-                hs,he,_=effective_hook if effective_hook else (None,None,None)
-                tags["hook"]={"start":hs,"end":he,"applied":True, "source": "re-render"}
-                # has_hook ya True arriba
-            elif not enable_hook:
-                tags.pop("hook", None)
-                tags["has_hook"] = False
-            else:
-                # enable_hook True pero hook no aplicado (ej. duración <15s)
-                if meta.get("hook_applied") is False or not meta.get("hook_applied"):
-                    # Mantener has_hook True (usuario lo pidió) pero marcar detalle
-                    if "hook" not in tags:
-                        tags["hook"]={"applied": False, "reason": "hook no aplicable o fallo FFmpeg", "requested": True}
-            if enable_ass and meta.get("ass_applied"):
-                tags["ass"]={"applied": True, "segments": len(segments) if segments else 0}
-                tags["has_ass"] = True
-            elif enable_ass and not meta.get("ass_applied"):
-                # enable_ass True pero ASS falló: mantener has_ass True y registrar error
-                tags["ass"]={"applied": False, "reason": "ASS fallo, fallback sin subtítulos", "requested": True}
-                tags["has_ass"] = True
-            elif not enable_ass:
-                tags.pop("ass", None)
-                tags["has_ass"] = False
-            tags["_render"]=meta.get("render","re-render")
-            tags["_re_render"]= {"enable_ass": enable_ass, "enable_hook": enable_hook, "at": __import__("datetime").datetime.utcnow().isoformat(), "out_path": out_path}
-            clip.tags=tags
-            clip.status="ready"
-            clip.error_log=None
-            # FIX: storage_path ya actualizado arriba; updated_at se actualiza por trigger set_updated_at(), pero forzamos toque para cache busting
-            try:
-                from sqlalchemy import func as _func
-                clip.updated_at = _func.now()  # noqa: trigger también lo hará
-            except Exception:
-                pass
-            db.commit()
-            logger.info(f"[re-render] clip {clip_id} ok -> {out_path} meta={meta} has_ass={tags['has_ass']} has_hook={tags['has_hook']}")
+            _re_render_exitoso(db, clip, clip_id, out_path, meta, enable_ass, enable_hook, segments, effective_hook)
         except Exception as e:
-            import traceback
-
-            clip.status="FAILED"
-            clip.error_log=str(e)[:2000] + "\n" + traceback.format_exc()[:2000]
-            # tags error
-            tags = clip.tags if isinstance(clip.tags, dict) else {}
-            if not isinstance(tags, dict):
-                tags={}
-            tags["_render_error"]=str(e)[:500]
-            clip.tags=tags
-            db.commit()
-            logger.exception(f"[re-render] fallo clip {clip_id}")
+            _re_render_fallido(db, clip, clip_id, e)
     except Exception as e:
         logger.exception(f"[re-render] error inesperado {clip_id}: {e}")
     finally:
@@ -319,6 +382,7 @@ def _run_re_render(clip_id: uuid.UUID, enable_ass: bool, enable_hook: bool) -> N
             db.close()
         except Exception:
             pass
+
 
 # Auditoría 2026-09-21: pipeline real 100% — sin fallback de prueba. El worker escribe MP4 físico en /app/storage/clips.
 

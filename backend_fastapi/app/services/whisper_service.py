@@ -174,6 +174,93 @@ _MODEL_MAP: dict[str, str] = {
 }
 
 
+def _cargar_modelo_whisper(resolved_model: str, device: str, compute_type: str) -> Any:
+    """Importa faster-whisper y carga el modelo. RuntimeError con detalle si falla."""
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError as exc:
+        raise RuntimeError(
+            "faster-whisper no instalado. Instalar con: pip install faster-whisper"
+        ) from exc
+    try:
+        return WhisperModel(resolved_model, device=device, compute_type=compute_type, local_files_only=False)
+    except Exception as exc:
+        raise RuntimeError(f"No se pudo cargar modelo Whisper '{resolved_model}' ({device}/{compute_type}): {exc}") from exc
+
+
+def _verificar_wav_extraido(wav: Path) -> None:
+    """Diagnóstico y verificación de audio antes de Whisper (requerido por prompt)."""
+    try:
+        import os
+        import logging
+
+        wav_size = os.path.getsize(str(wav))
+        logging.getLogger(__name__).info(f"Archivo WAV extraído correctamente: {wav} ({wav_size} bytes)")
+        if wav_size < 10000:
+            raise RuntimeError(f"El archivo WAV extraído está casi vacío o corrupto ({wav_size} bytes). Revisa la fuente del video.")
+    except RuntimeError:
+        raise
+    except Exception:
+        pass
+
+
+def _palabras_de_segmento(seg: Any) -> list[TranscriptionWord]:
+    """Convierte las words de un segmento Whisper en TranscriptionWord válidas."""
+    word_timings: list[TranscriptionWord] = []
+    for word in getattr(seg, "words", None) or []:
+        try:
+            word_start = float(word.start)
+            word_end = float(word.end)
+            word_text = str(word.word).strip()
+            if word_text and word_end >= word_start:
+                word_timings.append(
+                    TranscriptionWord(start=word_start, end=word_end, text=word_text)
+                )
+        except (AttributeError, TypeError, ValueError):
+            continue
+    return word_timings
+
+
+def _colectar_segmentos(segments_gen: Any) -> list[TranscriptionSegment]:
+    """Itera el generador de Whisper y colecta segmentos con texto y words."""
+    segments: list[TranscriptionSegment] = []
+    for seg in segments_gen:
+        text = str(seg.text).strip()
+        if not text:
+            continue
+        start = float(seg.start)
+        end = float(seg.end)
+        if end < start:
+            end = start + 0.5
+        segments.append(
+            TranscriptionSegment(start=start, end=end, text=text, words=_palabras_de_segmento(seg))
+        )
+    # Log de texto crudo retornado por Whisper para auditoría
+    try:
+        import logging
+        raw_text = " ".join([s.get("text","") if isinstance(s, dict) else str(getattr(s, "text", "")) for s in segments])
+        logging.getLogger(__name__).info(f"Texto detectado por Whisper: '{raw_text[:800]}'")
+    except Exception:
+        pass
+    return segments
+
+
+def _exigir_segmentos(segments: list[TranscriptionSegment], segments_gen: Any, wav: Path) -> None:
+    """Si Whisper no devolvió palabras, inspeccionar antes de error (requerido por prompt)."""
+    if segments:
+        return
+    try:
+        import os
+        wav_size2 = os.path.getsize(str(wav))
+    except Exception:
+        wav_size2 = 0
+    try:
+        raw = " ".join([str(getattr(s, "text", "")) for s in segments_gen]) if "segments_gen" in locals() else ""
+    except Exception:
+        raw = ""
+    raise RuntimeError(f"Whisper procesó el audio ({wav_size2} bytes) pero devolvió 0 segmentos. Texto crudo: '{raw[:500]}'")
+
+
 def transcribe_wav(
     wav_path: str,
     language: str = "es",
@@ -188,28 +275,8 @@ def transcribe_wav(
     model_id = cfg.model_name or model_name
     resolved_model = _MODEL_MAP.get(model_id, model_id)
     device, compute_type = _detect_device_and_compute(cfg.device, cfg.compute_type)
-    try:
-        from faster_whisper import WhisperModel
-    except ImportError as exc:
-        raise RuntimeError(
-            "faster-whisper no instalado. Instalar con: pip install faster-whisper"
-        ) from exc
-    try:
-        model = WhisperModel(resolved_model, device=device, compute_type=compute_type, local_files_only=False)
-    except Exception as exc:
-        raise RuntimeError(f"No se pudo cargar modelo Whisper '{resolved_model}' ({device}/{compute_type}): {exc}") from exc
-    # Diagnóstico y verificación de audio antes de Whisper (requerido por prompt)
-    try:
-        import os
-        wav_size = os.path.getsize(str(wav))
-        import logging
-        logging.getLogger(__name__).info(f"Archivo WAV extraído correctamente: {wav} ({wav_size} bytes)")
-        if wav_size < 10000:
-            raise RuntimeError(f"El archivo WAV extraído está casi vacío o corrupto ({wav_size} bytes). Revisa la fuente del video.")
-    except RuntimeError:
-        raise
-    except Exception:
-        pass
+    model = _cargar_modelo_whisper(resolved_model, device, compute_type)
+    _verificar_wav_extraido(wav)
     try:
         segments_gen, _info = model.transcribe(
             str(wav),
@@ -219,49 +286,8 @@ def transcribe_wav(
             beam_size=5,
             temperature=0.0,
         )
-        segments: list[TranscriptionSegment] = []
-        for seg in segments_gen:
-            text = str(seg.text).strip()
-            if not text:
-                continue
-            start = float(seg.start)
-            end = float(seg.end)
-            if end < start:
-                end = start + 0.5
-            word_timings: list[TranscriptionWord] = []
-            for word in getattr(seg, "words", None) or []:
-                try:
-                    word_start = float(word.start)
-                    word_end = float(word.end)
-                    word_text = str(word.word).strip()
-                    if word_text and word_end >= word_start:
-                        word_timings.append(
-                            TranscriptionWord(start=word_start, end=word_end, text=word_text)
-                        )
-                except (AttributeError, TypeError, ValueError):
-                    continue
-            segments.append(
-                TranscriptionSegment(start=start, end=end, text=text, words=word_timings)
-            )
-        # Log de texto crudo retornado por Whisper para auditoría
-        try:
-            import logging
-            raw_text = " ".join([s.get("text","") if isinstance(s, dict) else str(getattr(s, "text", "")) for s in segments])
-            logging.getLogger(__name__).info(f"Texto detectado por Whisper: '{raw_text[:800]}'")
-        except Exception:
-            pass
-        # Si Whisper no devolvió palabras, inspeccionar antes de error (requerido por prompt)
-        if not segments:
-            try:
-                import os
-                wav_size2 = os.path.getsize(str(wav))
-            except Exception:
-                wav_size2 = 0
-            try:
-                raw = " ".join([str(getattr(s, "text", "")) for s in segments_gen]) if "segments_gen" in locals() else ""
-            except Exception:
-                raw = ""
-            raise RuntimeError(f"Whisper procesó el audio ({wav_size2} bytes) pero devolvió 0 segmentos. Texto crudo: '{raw[:500]}'")
+        segments = _colectar_segmentos(segments_gen)
+        _exigir_segmentos(segments, segments_gen, wav)
         return segments
     except ValueError:
         raise
