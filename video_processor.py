@@ -41,7 +41,8 @@ def generate_ass_from_segments(
     Returns:
         Ruta del archivo ASS generado
     """
-    # Filtrar segmentos dentro del clip y shiftear tiempos a 0
+def _recortar_segmentos_ass(segments: List[Dict[str, Any]], clip_start: float, clip_end: float) -> list[dict]:
+    """Filtra segmentos dentro del clip y shiftea tiempos a 0."""
     clipped = []
     for s in segments:
         try:
@@ -62,55 +63,41 @@ def generate_ass_from_segments(
                 })
         except Exception:
             continue
-    
-    # Generar contenido ASS
-    ass_content = f"""[Script Info]
-Title: {title}
-ScriptType: v4.00+
-WrapStyle: 0
-ScaledBorderAndShadow: yes
-PlayResX: 1080
-PlayResY: 1920
+    return clipped
 
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,DejaVu Sans,70,&H00FFFFFF,&H00000000,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,4,2,2,40,40,280,1
-Style: Hook,DejaVu Sans,80,&H00FFFFFF,&H00000000,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,6,3,8,40,40,120,1
 
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-"""
+def _evento_hook_ass(hook_text: str, clip_start: float, clip_end: float) -> str:
+    """Hook como PRIMER evento (0-3s, estilo grande arriba). drawtext no: ffmpeg
+    estático de RunPod carece de libfreetype."""
+    hook_clean = " ".join(str(hook_text).upper().split())
+    hook_clean = hook_clean.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
+    hook_clean = hook_clean[:100]
+    if not hook_clean:
+        return ""
+    hook_dur = min(3.0, max(0.5, clip_end - clip_start))
+    eh = int(hook_dur // 3600)
+    em = int((hook_dur % 3600) // 60)
+    es = hook_dur % 60
+    return f"Dialogue: 0,0:00:00.00,{eh}:{em:02d}:{es:05.2f},Hook,,0,0,0,,{hook_clean}\n"
 
-    # 1) Hook como PRIMER evento (0-3s, estilo grande arriba). drawtext no: ffmpeg
-    # estático de RunPod carece de libfreetype.
-    if hook_text:
-        hook_clean = " ".join(str(hook_text).upper().split())
-        hook_clean = hook_clean.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
-        hook_clean = hook_clean[:100]
-        if hook_clean:
-            hook_dur = min(3.0, max(0.5, clip_end - clip_start))
-            eh = int(hook_dur // 3600)
-            em = int((hook_dur % 3600) // 60)
-            es = hook_dur % 60
-            ass_content += f"Dialogue: 0,0:00:00.00,{eh}:{em:02d}:{es:05.2f},Hook,,0,0,0,,{hook_clean}\n"
 
-    # 2) Subtítulos normales después, con su estilo Default (abajo, más chico)
-    for seg in clipped:
-        start_h = int(seg["start"] // 3600)
-        start_m = int((seg["start"] % 3600) // 60)
-        start_s = seg["start"] % 60
-        end_h = int(seg["end"] // 3600)
-        end_m = int((seg["end"] % 3600) // 60)
-        end_s = seg["end"] % 60
-        
-        text = seg["text"].upper().replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
-        text = " ".join(text.split())
-        
-        ass_content += f"Dialogue: 0,{start_h}:{start_m:02d}:{start_s:05.2f},{end_h}:{end_m:02d}:{end_s:05.2f},Default,,0,0,0,,{text}\n"
-    
-    Path(output_path).write_text(ass_content, encoding="utf-8")
+def _evento_dialogue_ass(seg: dict) -> str:
+    """Evento Dialogue de un segmento (escape ffmpeg + uppercase)."""
+    start_h = int(seg["start"] // 3600)
+    start_m = int((seg["start"] % 3600) // 60)
+    start_s = seg["start"] % 60
+    end_h = int(seg["end"] // 3600)
+    end_m = int((seg["end"] % 3600) // 60)
+    end_s = seg["end"] % 60
 
-    # --- Diagnóstico ASS: validar estructura y volcar contenido (debug subs ausentes) ---
+    text = seg["text"].upper().replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
+    text = " ".join(text.split())
+
+    return f"Dialogue: 0,{start_h}:{start_m:02d}:{start_s:05.2f},{end_h}:{end_m:02d}:{end_s:05.2f},Default,,0,0,0,,{text}\n"
+
+
+def _diagnosticar_ass(output_path: str, ass_content: str, hook_text: str | None) -> None:
+    """Diagnóstico ASS: validar estructura y volcar contenido (debug subs ausentes)."""
     written = Path(output_path)
     try:
         size = written.stat().st_size if written.exists() else 0
@@ -142,6 +129,38 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     for line in lines[:20]:
         logger.info("[video_processor] ASS| %s", line)
     logger.info("[video_processor] ---- FIN ASS ----")
+
+
+def _recortar_segmentos_ass(segments: List[Dict[str, Any]], clip_start: float, clip_end: float) -> list[dict]:
+
+    # Generar contenido ASS
+    ass_content = f"""[Script Info]
+Title: {title}
+ScriptType: v4.00+
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+PlayResX: 1080
+PlayResY: 1920
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,DejaVu Sans,70,&H00FFFFFF,&H00000000,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,4,2,2,40,40,280,1
+Style: Hook,DejaVu Sans,80,&H00FFFFFF,&H00000000,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,6,3,8,40,40,120,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+
+    # 1) Hook como PRIMER evento (0-3s, estilo grande arriba)
+    if hook_text:
+        ass_content += _evento_hook_ass(hook_text, clip_start, clip_end)
+
+    # 2) Subtítulos normales después, con su estilo Default (abajo, más chico)
+    for seg in clipped:
+        ass_content += _evento_dialogue_ass(seg)
+
+    Path(output_path).write_text(ass_content, encoding="utf-8")
+    _diagnosticar_ass(output_path, ass_content, hook_text)
     return output_path
 
 
@@ -214,8 +233,8 @@ def reframe_and_burn_subtitles(
         output_video
     ]
     
-    print(f"[video_processor] Reframe vertical + subs + hook...")
-    print(f"[video_processor] Filtros: {vf[:200]}...")
+    logger.info("[video_processor] Reframe vertical + subs + hook...")
+    logger.info("[video_processor] Filtros: %s...", vf[:200])
     logger.info("[video_processor] Comando ffmpeg COMPLETO: %s", " ".join(command))
     if "ass=" not in vf:
         logger.warning("[video_processor] ERROR: Filtergraph SIN filtro ass — el clip saldrá SIN subtítulos")
@@ -235,22 +254,22 @@ def reframe_and_burn_subtitles(
         logger.info("[video_processor] ffmpeg stderr (rc=%s):\n%s", result.returncode, stderr_tail if stderr_tail.strip() else "<vacío>")
 
         if result.returncode != 0:
-            print(f"[video_processor] ffmpeg FAILED rc={result.returncode}")
-            print(f"[video_processor] stderr: {result.stderr[-1000:]}")
+            logger.error("[video_processor] ffmpeg FAILED rc=%s", result.returncode)
+            logger.error("[video_processor] stderr: %s", result.stderr[-1000:])
             return False
         
         if not os.path.exists(output_video) or os.path.getsize(output_video) == 0:
-            print(f"[video_processor] Output no generado o vacío")
+            logger.error("[video_processor] Output no generado o vacío")
             return False
         
-        print(f"[video_processor] ✓ Vertical generado: {output_video} ({os.path.getsize(output_video)} bytes)")
+        logger.info("[video_processor] ✓ Vertical generado: %s (%s bytes)", output_video, os.path.getsize(output_video))
         return True
         
     except subprocess.TimeoutExpired:
-        print(f"[video_processor] Timeout después de {timeout_seconds}s")
+        logger.error("[video_processor] Timeout después de %ss", timeout_seconds)
         return False
     except Exception as e:
-        print(f"[video_processor] Excepción: {e}")
+        logger.error("[video_processor] Excepción: %s", e)
         return False
 
 
@@ -296,11 +315,11 @@ def process_clip_vertical(
             horizontal_clip
         ]
         
-        print(f"[video_processor] Cortando clip {clip_start:.1f}s - {clip_end:.1f}s...")
+        logger.info("[video_processor] Cortando clip %.1fs - %.1fs...", clip_start, clip_end)
         result = subprocess.run(cut_cmd, capture_output=True, text=True, timeout=120)
         
         if result.returncode != 0 or not os.path.exists(horizontal_clip):
-            print(f"[video_processor] Corte FAILED")
+            logger.error("[video_processor] Corte FAILED")
             return False
         
         # 2. Generar ASS (incluye el hook como primer evento estilo Hook 0-3s)

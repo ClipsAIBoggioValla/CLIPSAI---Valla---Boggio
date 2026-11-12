@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { pool } from '../db/index.js'
 import { authMiddleware, type AuthRequest } from '../middleware/auth.js'
+import { logger } from '../lib/logger.js'
 
 export const jobsRouter = Router()
 
@@ -56,14 +57,14 @@ async function runClipEngine(videoPath: string, transcriptionPath: string): Prom
   }
   if (!transcriptionPath || !transcriptionPath.trim()) {
     // Transcripción puede venir de transcript BD pero Express la requiere como archivo — validar
-    console.warn(`[engine:express] transcriptionPath vacío — verificar video.transcription_filepath`)
+    logger.warn(`[engine:express] transcriptionPath vacío — verificar video.transcription_filepath`)
     throw new Error(`Transcripción no encontrada: transcriptionPath vacío para video ${videoPath}`)
   }
   if (!fs.existsSync(transcriptionPath)) {
     throw new Error(`Transcripción no encontrada en disco: ${transcriptionPath}`)
   }
   const provider = getProvider()
-  console.info(`[engine:express] provider=${provider} ANTHROPIC=${!!process.env.ANTHROPIC_API_KEY} OPENAI=${!!process.env.OPENAI_API_KEY} OPENROUTER=${!!process.env.OPENROUTER_API_KEY}`)
+  logger.info(`[engine:express] provider=${provider} ANTHROPIC=${!!process.env.ANTHROPIC_API_KEY} OPENAI=${!!process.env.OPENAI_API_KEY} OPENROUTER=${!!process.env.OPENROUTER_API_KEY}`)
   // Try real Python engine via child_process (soporta ANTHROPIC_API_KEY/OPENAI_API_KEY/OPENROUTER_API_KEY/DEEPSEEK)
   try {
     const { spawnSync } = await import('child_process')
@@ -77,21 +78,21 @@ async function runClipEngine(videoPath: string, transcriptionPath: string): Prom
         try {
           const parsed = JSON.parse(res.stdout)
           if (parsed?.exito === false) {
-            console.error(`[engine:express] engine exito=false tipo=${parsed.error_tipo} err=${parsed.error}`)
+            logger.error(`[engine:express] engine exito=false tipo=${parsed.error_tipo} err=${parsed.error}`)
             throw new Error(parsed.error || 'engine falló')
           }
           if (parsed?.clips && Array.isArray(parsed.clips) && parsed.clips.length > 0) {
-            console.info(`[engine:express] engine real OK ${parsed.clips.length} clips`)
+            logger.info(`[engine:express] engine real OK ${parsed.clips.length} clips`)
             return { clips: parsed.clips, engine: 'real', provider }
           }
           if (parsed?.clips) return { clips: parsed.clips, engine: 'real', provider }
         } catch (e) {
-          console.error('[engine:express] parse engine JSON fallo', e)
+          logger.error('[engine:express] parse engine JSON fallo', e)
         }
       } else {
         const stderr = (res.stderr as unknown as string) || String(res.error || '') || ''
         const stdout = (res.stdout as unknown as string) || ''
-        console.error(`[engine:express] spawn fallo status=${res.status} stderr=${String(stderr).slice(0, 800)} stdout=${String(stdout).slice(0,500)}`)
+        logger.error(`[engine:express] spawn fallo status=${res.status} stderr=${String(stderr).slice(0, 800)} stdout=${String(stdout).slice(0,500)}`)
         // Propagar error descriptivo en lugar de solo código "4"
         const detail = stderr.trim() ? stderr.trim().slice(0, 800) : stdout.trim() ? stdout.trim().slice(0,800) : `exit code ${res.status}`
         throw new Error(`FFmpeg/engine spawn falló (code=${res.status}): ${detail}`)
@@ -100,13 +101,13 @@ async function runClipEngine(videoPath: string, transcriptionPath: string): Prom
       throw new Error(`engine.py no encontrado en ${enginePath} — verificar despliegue`)
     }
   } catch (e) {
-    console.error('[engine:express] spawn exception', e, e instanceof Error ? e.stack : '')
+    logger.error('[engine:express] spawn exception', e, e instanceof Error ? e.stack : '')
     if (e instanceof Error && (e.message.includes('spawn falló') || e.message.includes('engine.py no encontrado'))) throw e
   }
   // Intento directo Anthropic/OpenRouter si python falló y hay key: todavia no esta
   // implementado; se deja constancia y se propaga el error descriptivo mas abajo.
   if (provider !== 'none') {
-    console.warn(`[engine:express] fallback LLM directo no implementado (provider=${provider})`)
+    logger.warn(`[engine:express] fallback LLM directo no implementado (provider=${provider})`)
   }
   // Modo 100% real — sin fallback de prueba. Error descriptivo con causa raíz
   throw new Error(`Engine real no disponible o falló — verificar ANTHROPIC_API_KEY, engine.py y que video/transcripción existan (provider=${provider}). Revisar logs spawn previos para código de salida.`)
@@ -173,11 +174,11 @@ export async function runJob(jobId: string): Promise<void> {
         [videoId, jobId, String(title).slice(0, 255), start, end, score, tags ? JSON.stringify(tags) : null, storage, 'ready']
       )
     }
-    console.info(`[jobs:express] job ${jobId} completado 100% real ${clipsPayload.length} clips`)
+    logger.info(`[jobs:express] job ${jobId} completado 100% real ${clipsPayload.length} clips`)
   } catch (err: unknown) {
     // FIX: Capturar e imprimir Traceback completo en lugar de solo str(err) == "4"
     const stack = err instanceof Error ? err.stack ?? '' : ''
-    console.error(`[jobs:express] fallo irrecuperable job=${jobId} — modo 100% real sin fallback`, err, stack ? `\nStack: ${stack}` : '')
+    logger.error(`[jobs:express] fallo irrecuperable job=${jobId} — modo 100% real sin fallback`, err, stack ? `\nStack: ${stack}` : '')
     let rawMsg = err instanceof Error ? String(err.message).trim() : String(err).trim()
     let descriptive = rawMsg
     if (!rawMsg || rawMsg === '4' || rawMsg.length <= 4) {
@@ -195,9 +196,9 @@ export async function runJob(jobId: string): Promise<void> {
     try {
       const tbMeta = JSON.stringify({ error: descriptive.slice(0,2000), error_type: err instanceof Error ? err.name : 'Unknown', traceback: stack.slice(0,3000), engine: 'real', failed: true })
       await pool.query("UPDATE jobs SET status = 'failed', error_message = $1, result_metadata = $2::jsonb, updated_at = NOW() WHERE id = $3", [descriptive.slice(0, 2000), tbMeta, jobId])
-      console.info(`[jobs:express] job ${jobId} marcado FAILED con mensaje descriptivo`)
+      logger.info(`[jobs:express] job ${jobId} marcado FAILED con mensaje descriptivo`)
     } catch (dbErr) {
-      console.error(`[jobs:express] error al marcar FAILED job=${jobId}`, dbErr)
+      logger.error(`[jobs:express] error al marcar FAILED job=${jobId}`, dbErr)
     }
   } finally {
     client.release()
@@ -220,7 +221,7 @@ jobsRouter.post('/videos/:videoId/jobs', authMiddleware, async (req: AuthRequest
     const job = jRes.rows[0] as Record<string, unknown>
     const jobId = String(job.id)
     setImmediate(() => {
-      runJob(jobId).catch((e) => console.error('runJob error', e))
+      runJob(jobId).catch((e) => logger.error('runJob error', e))
     })
     return res.status(202).json({
       id: job.id,
@@ -232,7 +233,7 @@ jobsRouter.post('/videos/:videoId/jobs', authMiddleware, async (req: AuthRequest
       updated_at: new Date(job.updated_at as string).toISOString(),
     })
   } catch (err) {
-    console.error('POST /videos/:videoId/jobs error', err)
+    logger.error('POST /videos/:videoId/jobs error', err)
     return res.status(500).json({ detail: 'Error interno' })
   } finally {
     client.release()
@@ -258,7 +259,7 @@ jobsRouter.get('/jobs/:jobId', authMiddleware, async (req: AuthRequest, res) => 
       updated_at: new Date(row.updated_at as string).toISOString(),
     })
   } catch (err) {
-    console.error('GET /jobs/:jobId error', err)
+    logger.error('GET /jobs/:jobId error', err)
     return res.status(500).json({ detail: 'Error interno' })
   }
 })
@@ -312,7 +313,7 @@ jobsRouter.get('/jobs/:jobId/stream', authMiddleware, async (req: AuthRequest, r
         res.end()
       }
     } catch (e) {
-      console.error('SSE stream error', e)
+      logger.error('SSE stream error', e)
       clearInterval(interval)
       res.end()
     }

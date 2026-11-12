@@ -555,13 +555,12 @@ def llamar_openai_compatible(prompt: str) -> str:
         raise ValueError(f"Respuesta inválida de la API: {e}")
 
 
-def obtener_clips_ia(transcripcion: str, datos_audio: List[Dict], datos_enriquecidos: Dict = None) -> List[Dict]:
-    """Envía datos a la IA y retorna los clips detectados. Fallback robusto con logger."""
+def _verificar_claves_ia() -> None:
+    """Valida que haya al menos una clave de API de IA configurada."""
     has_anthropic = bool(ANTHROPIC_API_KEY)
     has_openai = bool(os.getenv("OPENAI_API_KEY", ""))
     has_openrouter = bool(os.getenv("OPENROUTER_API_KEY", ""))
     has_deepseek = bool(os.getenv("DEEPSEEK_API_KEY", ""))
-
     if not has_anthropic and not has_openai and not has_openrouter and not has_deepseek:
         raise ValueError(
             "Falta la clave de API para la inteligencia artificial. "
@@ -572,25 +571,29 @@ def obtener_clips_ia(transcripcion: str, datos_audio: List[Dict], datos_enriquec
             "- DEEPSEEK_API_KEY (para DeepSeek)"
         )
 
+
+def _elegir_proveedor() -> str:
     if ANTHROPIC_API_KEY:
-        proveedor = "Claude (Anthropic)"
-    elif OPENROUTER_API_KEY:
-        proveedor = "OpenRouter"
-    elif OPENAI_API_KEY:
-        proveedor = "OpenAI"
-    else:
-        proveedor = "DeepSeek"
-    print(f"[4/6] Analizando con IA ({proveedor})...")
+        return "Claude (Anthropic)"
+    if OPENROUTER_API_KEY:
+        return "OpenRouter"
+    if OPENAI_API_KEY:
+        return "OpenAI"
+    return "DeepSeek"
 
-    print(f"[DEBUG CLAUDE] Transcripción enviada ({len(transcripcion)} chars): {transcripcion[:300]}...")
-    
-    prompt = construir_prompt(transcripcion, datos_audio, datos_enriquecidos)
 
+def _llamar_proveedor_primario(prompt: str) -> str:
+    """Llamada al proveedor primario según las claves disponibles."""
+    if ANTHROPIC_API_KEY:
+        return llamar_claude(prompt)
+    return llamar_openai_compatible(prompt)
+
+
+def _llamar_con_fallback(prompt: str, proveedor: str) -> str:
+    """Llamada LLM con fallback robusto: reintenta alternativos si el primario falla."""
+    has_deepseek = bool(os.getenv("DEEPSEEK_API_KEY", ""))
     try:
-        if ANTHROPIC_API_KEY:
-            contenido = llamar_claude(prompt)
-        else:
-            contenido = llamar_openai_compatible(prompt)
+        return _llamar_proveedor_primario(prompt)
     except Exception:
         logger.exception("Fallo llamada LLM proveedor=%s, intentando fallback alternativo", proveedor)
         fallback = None
@@ -601,69 +604,102 @@ def obtener_clips_ia(transcripcion: str, datos_audio: List[Dict], datos_enriquec
                 logger.exception("Fallback Anthropic también falló")
         if fallback is None and (OPENROUTER_API_KEY or OPENAI_API_KEY or has_deepseek):
             try:
-                contenido = llamar_openai_compatible(prompt)
-                fallback = contenido
+                fallback = llamar_openai_compatible(prompt)
             except Exception:
                 logger.exception("Fallback OpenAI/OpenRouter/DeepSeek falló")
-        if fallback is not None:
-            contenido = fallback
-        else:
+        if fallback is None:
             raise
+        return fallback
 
-    print(f"      Respuesta IA ({len(contenido)} chars)")
-    print(f"      === RESPUESTA COMPLETA ===")
-    print(contenido[:2000])
-    print(f"      === FIN RESPUESTA ===")
-    
-    # Loggear respuesta cruda completa para debug
-    logger.info("Respuesta Claude raw (completa): %s", contenido)
-    print(f"[DEBUG CLAUDE] Respuesta cruda recibida ({len(contenido)} chars): {contenido[:500]}...")
-    
+
+def _extraer_clips_de_objeto(contenido: str) -> list | None:
+    """Fallback 1: objeto {"clips": [...]}. None si no aplica."""
+    try:
+        raw = contenido.strip()
+        if raw.startswith("{") and raw.endswith("}"):
+            data = json.loads(raw)
+            if "clips" in data and isinstance(data["clips"], list):
+                clips = data["clips"]
+                print(f"      Extraidos {len(clips)} clips desde objeto con clave 'clips'")
+                return clips
+    except Exception:
+        pass
+    return None
+
+
+def _extraer_clips_de_objetos_sueltos(contenido: str) -> list | None:
+    """Fallback 2: parsear objetos JSON sueltos con inicio/fin."""
+    objetos = []
+    for m in re.finditer(r'\{[^{}]*\}', contenido):
+        try:
+            obj = json.loads(m.group())
+            if "inicio" in obj and "fin" in obj:
+                objetos.append(obj)
+        except json.JSONDecodeError:
+            continue
+    if objetos:
+        print(f"      Extraidos {len(objetos)} clips desde objetos sueltos")
+        return objetos
+    return None
+
+
+def _extraer_json_respuesta(contenido: str) -> List[Dict]:
+    """Extrae la lista de clips del texto crudo de la IA (fences, array, objetos)."""
     # 1. Si viene envuelto en markdown fences ```json ... ```, extraerlo primero
     md_match = re.search(r'```(?:json)?\s*([\s\S]*?)```', contenido)
     if md_match:
         print(f"      Detectado JSON dentro de markdown fences")
         contenido = md_match.group(1).strip()
-    
+
     # 2. Buscar el array JSON más largo posible (puede haber texto antes/después)
     json_match = re.search(r'\[[\s\S]*\]', contenido)
     if not json_match:
         # 3. Fallback: buscar objetos individuales { ... }
         print(f"      No se encontró array JSON. Buscando objetos individuales...")
         print(f"      Preview crudo: {contenido[:500]}...")
-        try:
-            raw = contenido.strip()
-            if raw.startswith("{") and raw.endswith("}"):
-                data = json.loads(raw)
-                if "clips" in data and isinstance(data["clips"], list):
-                    clips = data["clips"]
-                    print(f"      Extraidos {len(clips)} clips desde objeto con clave 'clips'")
-                    return clips
-            # Último intento: parsear objetos sueltos
-            objetos = []
-            for m in re.finditer(r'\{[^{}]*\}', contenido):
-                try:
-                    obj = json.loads(m.group())
-                    if "inicio" in obj and "fin" in obj:
-                        objetos.append(obj)
-                except json.JSONDecodeError:
-                    continue
-            if objetos:
-                print(f"      Extraidos {len(objetos)} clips desde objetos sueltos")
-                return objetos
-        except Exception as ex:
-            logger.warning("Fallback parse failed: %s", ex)
-        raise ValueError("No se encontró JSON válido en la respuesta de la IA")
-    
+        clips = _extraer_clips_de_objeto(contenido)
+        if clips is None:
+            try:
+                clips = _extraer_clips_de_objetos_sueltos(contenido)
+            except Exception as ex:
+                logger.warning("Fallback parse failed: %s", ex)
+                clips = None
+        if clips is None:
+            raise ValueError("No se encontró JSON válido en la respuesta de la IA")
+        return clips
+
     json_str = json_match.group(0)
     clips = parsear_json_tolerante(json_str)
     if not clips:
         print(f"      JSON parse devolvió 0 clips. Respuesta raw:")
         print(contenido[:2000])
         raise ValueError("No se pudo parsear la respuesta como JSON")
-    
+
     print(f"      IA detectó {len(clips)} momentos")
     return clips
+
+
+def obtener_clips_ia(transcripcion: str, datos_audio: List[Dict], datos_enriquecidos: Dict = None) -> List[Dict]:
+    """Envía datos a la IA y retorna los clips detectados. Fallback robusto con logger."""
+    _verificar_claves_ia()
+    proveedor = _elegir_proveedor()
+    print(f"[4/6] Analizando con IA ({proveedor})...")
+
+    print(f"[DEBUG CLAUDE] Transcripción enviada ({len(transcripcion)} chars): {transcripcion[:300]}...")
+
+    prompt = construir_prompt(transcripcion, datos_audio, datos_enriquecidos)
+    contenido = _llamar_con_fallback(prompt, proveedor)
+
+    print(f"      Respuesta IA ({len(contenido)} chars)")
+    print(f"      === RESPUESTA COMPLETA ===")
+    print(contenido[:2000])
+    print(f"      === FIN RESPUESTA ===")
+
+    # Loggear respuesta cruda completa para debug
+    logger.info("Respuesta Claude raw (completa): %s", contenido)
+    print(f"[DEBUG CLAUDE] Respuesta cruda recibida ({len(contenido)} chars): {contenido[:500]}...")
+
+    return _extraer_json_respuesta(contenido)
 
 
 def timestamp_a_segundos(timestamp: str) -> float:

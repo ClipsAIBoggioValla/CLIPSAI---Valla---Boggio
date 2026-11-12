@@ -263,74 +263,109 @@ def _is_model_not_found_error(exc: Exception) -> bool:
     return False
 
 
-def _call_anthropic_with_model(prompt: str, sentence_ids: list[str], model: str) -> str:
-    key = _get_key()
-    if not key:
-        logger.error("Error en API de Claude: ANTHROPIC_API_KEY no configurada (revisar .env y docker-compose.yml ANTHROPIC_API_KEY)")
-        raise RuntimeError("Error en API de Claude: ANTHROPIC_API_KEY no configurada (revisar .env y docker-compose.yml ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY})")
-    tool = _build_export_viral_clips_tool(sentence_ids)
-    tool_choice = {"type": "tool", "name": "export_viral_clips"}
-    # Intentar SDK anthropic si está instalado — con timeout explícito 60-90s
-    try:
-        import anthropic  # type: ignore
+def _crear_cliente_anthropic(key: str) -> Any:
+    """Cliente del SDK anthropic con timeout y workspace opcional."""
+    import anthropic  # type: ignore
 
-        sdk_kwargs: dict[str, Any] = {"api_key": key, "timeout": TIMEOUT}
-        if ANTHROPIC_WORKSPACE_ID:
-            sdk_kwargs["default_headers"] = {"anthropic-workspace-id": ANTHROPIC_WORKSPACE_ID}
-        client = anthropic.Anthropic(**sdk_kwargs)
-        # anthropic SDK usa max_tokens y messages — envuelto en try/except con timeout
-        try:
-            msg = client.messages.create(
-                model=model,
-                max_tokens=4096,
-                messages=[{"role": "user", "content": prompt}],
-                tools=[tool],
-                tool_choice=tool_choice,
-            )
-        except Exception as sdk_e:
-            err_msg = str(sdk_e)
-            # Detectar timeout / API key / rate limit
-            if "timeout" in err_msg.lower() or "timed out" in err_msg.lower():
-                logger.error(f"Error en API de Claude: timeout {TIMEOUT}s — {err_msg}")
-                raise RuntimeError(f"Error en Claude: timeout {TIMEOUT}s — {err_msg}") from sdk_e
-            raise
-        # Extraer texto
-        txt = ""
-        try:
-            for blk in getattr(msg, "content", []):
-                if (
-                    getattr(blk, "type", "") == "tool_use"
-                    and getattr(blk, "name", "") == "export_viral_clips"
-                ):
-                    tool_input = getattr(blk, "input", None)
-                    if isinstance(tool_input, dict):
-                        logger.info("Claude devolvió resultado mediante export_viral_clips (SDK)")
-                        return json.dumps(tool_input, ensure_ascii=False)
-                if getattr(blk, "type", "") == "text":
-                    txt += getattr(blk, "text", "")
-        except Exception:
-            txt = str(msg)
-        if not txt:
-            raise RuntimeError("Error en API de Claude: no se recibió tool_use de export_viral_clips")
-        raise RuntimeError("Error en API de Claude: Claude devolvió texto libre en vez de export_viral_clips")
-    except ImportError:
-        pass
-    except Exception as e:
-        # Captura explícita de APIConnectionError y APITimeoutError (spec: timeout 60.0, max_retries 2)
+    sdk_kwargs: dict[str, Any] = {"api_key": key, "timeout": TIMEOUT}
+    if ANTHROPIC_WORKSPACE_ID:
+        sdk_kwargs["default_headers"] = {"anthropic-workspace-id": ANTHROPIC_WORKSPACE_ID}
+    return anthropic.Anthropic(**sdk_kwargs)
+
+
+def _llamar_sdk_anthropic(client: Any, prompt: str, tool: dict, tool_choice: dict, model: str) -> str | None:
+    """Llama al SDK y extrae el tool_use. Devuelve None si la respuesta fue texto libre (se propagará)."""
+    try:
+        msg = client.messages.create(
+            model=model,
+            max_tokens=4096,
+            messages=[{"role": "user", "content": prompt}],
+            tools=[tool],
+            tool_choice=tool_choice,
+        )
+    except Exception as sdk_e:
+        err_msg = str(sdk_e)
+        # Detectar timeout / API key / rate limit
+        if "timeout" in err_msg.lower() or "timed out" in err_msg.lower():
+            logger.error(f"Error en API de Claude: timeout {TIMEOUT}s — {err_msg}")
+            raise RuntimeError(f"Error en Claude: timeout {TIMEOUT}s — {err_msg}") from sdk_e
+        raise
+    return _extraer_tool_use_sdk(msg)
+
+
+def _extraer_tool_use_sdk(msg: Any) -> str | None:
+    """Extrae el input de export_viral_clips desde la respuesta del SDK. None si no vino."""
+    txt = ""
+    try:
+        for blk in getattr(msg, "content", []):
+            if (
+                getattr(blk, "type", "") == "tool_use"
+                and getattr(blk, "name", "") == "export_viral_clips"
+            ):
+                tool_input = getattr(blk, "input", None)
+                if isinstance(tool_input, dict):
+                    logger.info("Claude devolvió resultado mediante export_viral_clips (SDK)")
+                    return json.dumps(tool_input, ensure_ascii=False)
+            if getattr(blk, "type", "") == "text":
+                txt += getattr(blk, "text", "")
+    except Exception:
+        txt = str(msg)
+    if not txt:
+        # no se recibió tool_use
+        raise RuntimeError("Error en API de Claude: no se recibió tool_use de export_viral_clips")
+    # Claude devolvió texto libre en vez de export_viral_clips
+    raise RuntimeError("Error en API de Claude: Claude devolvió texto libre en vez de export_viral_clips")
+
+
+def _es_error_de_timeout_sdk(exc: Exception) -> bool:
+    err_type = type(exc).__name__
+    err_msg = str(exc)
+    return (
+        err_type in ("APIConnectionError", "APITimeoutError")
+        or "APIConnectionError" in err_type
+        or "APITimeoutError" in err_type
+        or "timeout" in err_msg.lower()
+        or "timed out" in err_msg.lower()
+    )
+
+
+def _tratar_error_sdk(e: Exception) -> None:
+    """Clasifica el error del SDK: timeout (relanza), auth/cuota (relanza) o fallback a requests."""
+    # Captura explícita de APIConnectionError y APITimeoutError (spec: timeout 60.0, max_retries 2)
+    if _es_error_de_timeout_sdk(e):
         err_type = type(e).__name__
         err_msg = str(e)
-        if err_type in ("APIConnectionError", "APITimeoutError") or "APIConnectionError" in err_type or "APITimeoutError" in err_type or "timeout" in err_msg.lower() or "timed out" in err_msg.lower():
-            logger.error(f"Error en API de Claude: {err_type} timeout {TIMEOUT}s — {err_msg}")
-            raise RuntimeError(f"Error en Claude: {err_type} timeout {TIMEOUT}s — {err_msg}") from e
-        # Si SDK falla con 401/cuota, propagar como Error en la API de Claude
-        if "401" in err_msg or "authentication" in err_msg.lower() or "invalid" in err_msg.lower():
-            raise RuntimeError(f"Error en API de Claude: {err_msg}") from e
-        if "quota" in err_msg.lower() or "rate" in err_msg.lower() or "429" in err_msg:
-            raise RuntimeError(f"Error en API de Claude: {err_msg}") from e
-        # Para otros errores, intentar fallback a requests
-        logger.warning("Claude SDK fallo (%s), intentando requests", e)
+        logger.error(f"Error en API de Claude: {err_type} timeout {TIMEOUT}s — {err_msg}")
+        raise RuntimeError(f"Error en Claude: {err_type} timeout {TIMEOUT}s — {err_msg}") from e
+    # Si SDK falla con 401/cuota, propagar como Error en la API de Claude
+    err_msg = str(e)
+    lowered = err_msg.lower()
+    if "401" in err_msg or "authentication" in lowered or "invalid" in lowered:
+        raise RuntimeError(f"Error en API de Claude: {err_msg}") from e
+    if "quota" in lowered or "rate" in lowered or "429" in err_msg:
+        raise RuntimeError(f"Error en API de Claude: {err_msg}") from e
+    # Para otros errores, intentar fallback a requests
+    logger.warning("Claude SDK fallo (%s), intentando requests", e)
 
-    # Fallback requests directo
+
+def _extraer_tool_use_requests(data: dict) -> str:
+    """Extrae el tool_use desde la respuesta JSON de la API HTTP. RuntimeError si no vino."""
+    txt = ""
+    for blk in data.get("content", []):
+        if blk.get("type") == "tool_use" and blk.get("name") == "export_viral_clips":
+            tool_input = blk.get("input")
+            if isinstance(tool_input, dict):
+                logger.info("Claude devolvió resultado mediante export_viral_clips (requests)")
+                return json.dumps(tool_input, ensure_ascii=False)
+        if blk.get("type") == "text" and blk.get("text"):
+            txt += blk["text"]
+    if txt:
+        raise RuntimeError("Error en API de Claude: Claude devolvió texto libre en vez de export_viral_clips")
+    raise RuntimeError("Error en API de Claude: no se recibió tool_use de export_viral_clips")
+
+
+def _pedir_con_requests(key: str, tool: dict, tool_choice: dict, model: str, prompt: str) -> str:
+    """Fallback requests directo con reintentos (429 → Retry-After; timeout → reintento)."""
     headers = {"x-api-key": key, "anthropic-version": ANTHROPIC_VERSION, "content-type": "application/json"}
     if ANTHROPIC_WORKSPACE_ID:
         headers["anthropic-workspace-id"] = ANTHROPIC_WORKSPACE_ID
@@ -351,19 +386,7 @@ def _call_anthropic_with_model(prompt: str, sentence_ids: list[str], model: str)
                 continue
             if resp.status_code != 200:
                 raise RuntimeError(f"Error en API de Claude: {resp.status_code} {resp.text[:800]}")
-            data = resp.json()
-            txt = ""
-            for blk in data.get("content", []):
-                if blk.get("type") == "tool_use" and blk.get("name") == "export_viral_clips":
-                    tool_input = blk.get("input")
-                    if isinstance(tool_input, dict):
-                        logger.info("Claude devolvió resultado mediante export_viral_clips (requests)")
-                        return json.dumps(tool_input, ensure_ascii=False)
-                if blk.get("type") == "text" and blk.get("text"):
-                    txt += blk["text"]
-            if txt:
-                raise RuntimeError("Error en API de Claude: Claude devolvió texto libre en vez de export_viral_clips")
-            raise RuntimeError("Error en API de Claude: no se recibió tool_use de export_viral_clips")
+            return _extraer_tool_use_requests(resp.json())
         except requests.exceptions.Timeout as exc:
             last_err = exc
             logger.error(f"Error en API de Claude: timeout {TIMEOUT}s (intento {attempt}/{MAX_RETRIES}) — {exc}")
@@ -383,6 +406,28 @@ def _call_anthropic_with_model(prompt: str, sentence_ids: list[str], model: str)
     raise RuntimeError(f"Error en Claude: fallo tras reintentos {last_err}")
 
 
+def _call_anthropic_with_model(prompt: str, sentence_ids: list[str], model: str) -> str:
+    key = _get_key()
+    if not key:
+        logger.error("Error en API de Claude: ANTHROPIC_API_KEY no configurada (revisar .env y docker-compose.yml ANTHROPIC_API_KEY)")
+        raise RuntimeError("Error en API de Claude: ANTHROPIC_API_KEY no configurada (revisar .env y docker-compose.yml ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY})")
+    tool = _build_export_viral_clips_tool(sentence_ids)
+    tool_choice = {"type": "tool", "name": "export_viral_clips"}
+    # Intentar SDK anthropic si está instalado — con timeout explícito 60-90s
+    try:
+        client = _crear_cliente_anthropic(key)
+        resultado = _llamar_sdk_anthropic(client, prompt, tool, tool_choice, model)
+        if resultado is not None:
+            return resultado
+    except ImportError:
+        pass
+    except Exception as e:
+        _tratar_error_sdk(e)
+
+    # Fallback requests directo
+    return _pedir_con_requests(key, tool, tool_choice, model, prompt)
+
+
 def _call_anthropic(prompt: str, sentence_ids: list[str]) -> str:
     """Intenta con CLAUDE_MODEL y, si el modelo no existe (404), reintenta con haiku."""
     try:
@@ -397,7 +442,8 @@ def _call_anthropic(prompt: str, sentence_ids: list[str]) -> str:
         return _call_anthropic_with_model(prompt, sentence_ids, CLAUDE_FALLBACK_MODEL)
 
 
-def _parse_and_validate(raw: str) -> list[dict[str, Any]]:
+def _reparar_json_raw(raw: str) -> dict:
+    """Repara y parsea la respuesta cruda como objeto JSON."""
     try:
         repaired_string = repair_json(raw, return_objects=False)
         data = json.loads(repaired_string)
@@ -409,6 +455,11 @@ def _parse_and_validate(raw: str) -> list[dict[str, Any]]:
         raise RuntimeError(
             f"Error en API de Claude: la respuesta reparada debe ser un objeto JSON, got {type(data)}"
         )
+    return data
+
+
+def _reparar_clips_raw(data: dict) -> list:
+    """Extrae 'clips' reparando el string anidado si hace falta."""
     clips_raw = data.get("clips", [])
     if isinstance(clips_raw, str):
         try:
@@ -422,70 +473,87 @@ def _parse_and_validate(raw: str) -> list[dict[str, Any]]:
         raise RuntimeError(
             f"Error en API de Claude: JSON 'clips' debe ser una lista tras el reparseo, got {type(clips_raw)}"
         )
+    return clips_raw
+
+
+def _validar_clip_candidato(c: dict) -> dict | None:
+    """Valida un clip crudo de Claude. None si no cumple el esquema."""
+    if any(key in c for key in ("start", "end", "start_time", "end_time")):
+        return None
+    start_sentence_id = str(c.get("start_sentence_id", "")).strip()
+    end_sentence_id = str(c.get("end_sentence_id", "")).strip()
+    score = float(c.get("score", c.get("viral_score", 0)))
+    title = str(c.get("title", "")).strip()[:60]
+    raw_hook_candidates = c.get("hook_candidates", [])
+    raw_has_hook = c.get("has_hook")
+    if (
+        not re.fullmatch(r"S_\d+", start_sentence_id)
+        or not re.fullmatch(r"S_\d+", end_sentence_id)
+        or not title
+        or not isinstance(raw_hook_candidates, list)
+        or not isinstance(raw_has_hook, bool)
+    ):
+        return None
+    if not (1 <= score <= 10):
+        # Normalizar si vino 0-100
+        if 10 < score <= 100:
+            score = score / 10
+        else:
+            return None
+    hook_candidates = _validar_hook_candidates(raw_hook_candidates)
+    has_hook = raw_has_hook and any(
+        candidate["curiosity_score"] >= 8 and candidate["makes_sense_standalone"]
+        for candidate in hook_candidates
+    )
+    return {
+        "start_sentence_id": start_sentence_id,
+        "end_sentence_id": end_sentence_id,
+        "score": score,
+        "title": title,
+        "hook_candidates": hook_candidates,
+        "has_hook": has_hook,
+    }
+
+
+def _validar_hook_candidates(raw_hook_candidates: list) -> list[dict[str, Any]]:
+    """Valida los primeros 5 hook candidates (IDs S_n, curiosity 1-10, standalone bool)."""
+    hook_candidates: list[dict[str, Any]] = []
+    for candidate in raw_hook_candidates[:5]:
+        if not isinstance(candidate, dict):
+            continue
+        hook_start_id = str(candidate.get("start_sentence_id", "")).strip()
+        hook_end_id = str(candidate.get("end_sentence_id", "")).strip()
+        standalone = candidate.get("makes_sense_standalone")
+        try:
+            curiosity_score = int(candidate.get("curiosity_score", 0))
+        except (TypeError, ValueError):
+            continue
+        if (
+            re.fullmatch(r"S_\d+", hook_start_id)
+            and re.fullmatch(r"S_\d+", hook_end_id)
+            and 1 <= curiosity_score <= 10
+            and isinstance(standalone, bool)
+        ):
+            hook_candidates.append(
+                {
+                    "start_sentence_id": hook_start_id,
+                    "end_sentence_id": hook_end_id,
+                    "curiosity_score": curiosity_score,
+                    "makes_sense_standalone": standalone,
+                }
+            )
+    return hook_candidates
+
+
+def _parse_and_validate(raw: str) -> list[dict[str, Any]]:
+    data = _reparar_json_raw(raw)
+    clips_raw = _reparar_clips_raw(data)
     validated: list[dict[str, Any]] = []
     for c in clips_raw:
         try:
-            if any(key in c for key in ("start", "end", "start_time", "end_time")):
-                continue
-            start_sentence_id = str(c.get("start_sentence_id", "")).strip()
-            end_sentence_id = str(c.get("end_sentence_id", "")).strip()
-            score = float(c.get("score", c.get("viral_score", 0)))
-            title = str(c.get("title", "")).strip()[:60]
-            raw_hook_candidates = c.get("hook_candidates", [])
-            raw_has_hook = c.get("has_hook")
-            if (
-                not re.fullmatch(r"S_\d+", start_sentence_id)
-                or not re.fullmatch(r"S_\d+", end_sentence_id)
-                or not title
-                or not isinstance(raw_hook_candidates, list)
-                or not isinstance(raw_has_hook, bool)
-            ):
-                continue
-            if not (1 <= score <= 10):
-                # Normalizar si vino 0-100
-                if 10 < score <= 100:
-                    score = score / 10
-                else:
-                    continue
-            hook_candidates: list[dict[str, Any]] = []
-            for candidate in raw_hook_candidates[:5]:
-                if not isinstance(candidate, dict):
-                    continue
-                hook_start_id = str(candidate.get("start_sentence_id", "")).strip()
-                hook_end_id = str(candidate.get("end_sentence_id", "")).strip()
-                standalone = candidate.get("makes_sense_standalone")
-                try:
-                    curiosity_score = int(candidate.get("curiosity_score", 0))
-                except (TypeError, ValueError):
-                    continue
-                if (
-                    re.fullmatch(r"S_\d+", hook_start_id)
-                    and re.fullmatch(r"S_\d+", hook_end_id)
-                    and 1 <= curiosity_score <= 10
-                    and isinstance(standalone, bool)
-                ):
-                    hook_candidates.append(
-                        {
-                            "start_sentence_id": hook_start_id,
-                            "end_sentence_id": hook_end_id,
-                            "curiosity_score": curiosity_score,
-                            "makes_sense_standalone": standalone,
-                        }
-                    )
-            has_hook = raw_has_hook and any(
-                candidate["curiosity_score"] >= 8 and candidate["makes_sense_standalone"]
-                for candidate in hook_candidates
-            )
-            validated.append(
-                {
-                    "start_sentence_id": start_sentence_id,
-                    "end_sentence_id": end_sentence_id,
-                    "score": score,
-                    "title": title,
-                    "hook_candidates": hook_candidates,
-                    "has_hook": has_hook,
-                }
-            )
+            validado = _validar_clip_candidato(c)
+            if validado is not None:
+                validated.append(validado)
         except Exception:
             continue
     # Ordenar por score descendente, max 3

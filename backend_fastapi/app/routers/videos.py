@@ -171,6 +171,76 @@ async def _save_upload_file(upload: UploadFile, dest: Path) -> None:
             out.write(chunk)
 
 
+def _limpiar_archivos_subida(*destinos: Path | None) -> None:
+    """Borra los archivos parciales si el guardado falló a mitad de camino."""
+    for p in destinos:
+        if p is None:
+            continue
+        try:
+            if p.exists():
+                p.unlink()
+        except Exception:
+            pass
+
+
+def _garantizar_espacio(upload_dir: Path) -> None:
+    # Garantizar espacio antes de escribir en disco (evita [Errno 28] en Render)
+    try:
+        from ..services.storage_cleanup import ensure_disk_space
+        ensure_disk_space(upload_dir, min_free_mb=500)
+    except Exception as disk_err:
+        logger.warning("[upload] ensure_disk_space falló (non-fatal): %s", disk_err)
+
+
+async def _guardar_archivos(video: UploadFile, video_dest: Path, transcription: UploadFile | None, transcript_dest: Path | None) -> None:
+    """Guarda video (+ transcripción) en disco y limpia los parciales si falla."""
+    _garantizar_espacio(video_dest.parent)
+    try:
+        await _save_upload_file(video, video_dest)
+        if transcription is not None and transcript_dest is not None:
+            await _save_upload_file(transcription, transcript_dest)
+    except HTTPException:
+        _limpiar_archivos_subida(video_dest, transcript_dest)
+        raise
+    except Exception as exc:
+        _limpiar_archivos_subida(video_dest, transcript_dest)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Error al guardar archivos: {exc}") from exc
+    finally:
+        try:
+            await video.close()
+        except Exception:
+            pass
+        if transcription is not None:
+            try:
+                await transcription.close()
+            except Exception:
+                pass
+
+
+def _leer_transcript(transcript_dest: Path | None) -> str | None:
+    """Lee el texto de la transcripción guardada (50k chars máx). None si falla."""
+    if transcript_dest is None:
+        return None
+    try:
+        return transcript_dest.read_text(encoding="utf-8")[:50000]
+    except Exception:
+        return None
+
+
+def _borrar_transcript_local(transcript_dest: Path | None) -> None:
+    """Borrar transcripción local: ya está en el campo `transcript` de la BD.
+
+    El video se conserva (filepath) hasta que el job lo procese; se limpia luego
+    por cleanup_storage cuando supere la antigüedad.
+    """
+    try:
+        from ..services.storage_cleanup import delete_file_safe  # type: ignore
+        if transcript_dest and transcript_dest.exists():
+            delete_file_safe(transcript_dest, "transcript")
+    except Exception:
+        pass
+
+
 @router.post(
     "",
     response_model=VideoResponse,
@@ -197,74 +267,20 @@ async def upload_video(
     if transcription is not None and transcript_ext is not None:
         transcript_dest = upload_dir / f"{uuid.uuid4().hex}{transcript_ext}"
 
-    try:
-        # Garantizar espacio antes de escribir en disco (evita [Errno 28] en Render)
-        try:
-            from ..services.storage_cleanup import ensure_disk_space
-            ensure_disk_space(upload_dir, min_free_mb=500)
-        except Exception as disk_err:
-            logger.warning("[upload] ensure_disk_space falló (non-fatal): %s", disk_err)
-        await _save_upload_file(video, video_dest)
-        if transcription is not None and transcript_dest is not None:
-            await _save_upload_file(transcription, transcript_dest)
-    except HTTPException:
-        for p in (video_dest, transcript_dest) if transcript_dest else (video_dest,):
-            if p is None:
-                continue
-            try:
-                if p.exists():
-                    p.unlink()
-            except Exception:
-                pass
-        raise
-    except Exception as exc:
-        for p in (video_dest, transcript_dest) if transcript_dest else (video_dest,):
-            if p is None:
-                continue
-            try:
-                if p.exists():
-                    p.unlink()
-            except Exception:
-                pass
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Error al guardar archivos: {exc}") from exc
-    finally:
-        try:
-            await video.close()
-        except Exception:
-            pass
-        if transcription is not None:
-            try:
-                await transcription.close()
-            except Exception:
-                pass
-
-    transcript_text: str | None = None
-    if transcript_dest is not None:
-        try:
-            transcript_text = transcript_dest.read_text(encoding="utf-8")[:50000]
-        except Exception:
-            transcript_text = None
+    await _guardar_archivos(video, video_dest, transcription, transcript_dest)
 
     entity = Video(
         user_id=current_user.id,
         filename=video.filename or video_dest.name,
         filepath=str(video_dest),
         transcription_filepath=str(transcript_dest) if transcript_dest else None,
-        transcript=transcript_text,
+        transcript=_leer_transcript(transcript_dest),
     )
     db.add(entity)
     db.commit()
     db.refresh(entity)
 
-    # Borrar transcripción local: ya está en el campo `transcript` de la BD.
-    # El video se conserva (filepath) hasta que el job lo procese; se limpia luego
-    # por cleanup_storage cuando supere la antigüedad.
-    try:
-        from ..services.storage_cleanup import delete_file_safe  # type: ignore
-        if transcript_dest and transcript_dest.exists():
-            delete_file_safe(transcript_dest, "transcript")
-    except Exception:
-        pass
+    _borrar_transcript_local(transcript_dest)
 
     return entity
 

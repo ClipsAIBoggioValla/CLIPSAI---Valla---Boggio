@@ -83,6 +83,99 @@ def _update_clip_status(
             pass
 
 
+def _marcar_clip_procesando(db: Session, clip: Any) -> None:
+    """PROCESSING + limpia error_log previo."""
+    clip.status = "PROCESSING"
+    if hasattr(clip, "error_log"):
+        try:
+            setattr(clip, "error_log", None)
+        except Exception:
+            pass
+    db.commit()
+
+
+def _transcribir_clip(video_path: str) -> tuple[list[dict], str | None]:
+    """Transcripción: RunPod directo si está configurado, si no Whisper local con WAV.
+
+    Devuelve (segmentos, wav_path) — wav_path solo si se creó un WAV temporal.
+    """
+    from ..services.runpod_service import is_runpod_configured
+    from ..services.whisper_service import extract_audio_wav, transcribe_video, transcribe_wav
+
+    if is_runpod_configured():
+        return transcribe_video(video_path, language="es"), None
+
+    tmp_wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    tmp_wav.close()
+    extract_audio_wav(video_path, tmp_wav.name)
+    return transcribe_wav(tmp_wav.name, language="es"), tmp_wav.name
+
+
+def _recortar_segmentos(segments: list[dict], clip: Any) -> list[dict]:
+    """Recorta los segmentos a la ventana del clip y los shiftea a 0."""
+    inicio = float(clip.start_time)
+    fin = float(clip.end_time)
+    clipped: list[dict] = []
+    for seg in segments:
+        s = float(seg["start"])
+        e = float(seg["end"])
+        if e <= s:
+            continue
+        if e < inicio or s > fin:
+            continue
+        cs = max(s, inicio)
+        ce = min(e, fin)
+        if ce > cs:
+            clipped.append({"start": cs - inicio, "end": ce - inicio, "text": str(seg["text"])})
+    if clipped:
+        return clipped
+    # Sin recortes dentro de la ventana: usar todos los segmentos tal cual
+    return [{"start": float(s["start"]), "end": float(s["end"]), "text": str(s["text"])} for s in segments]
+
+
+def _resolver_salida(video_path: str, clip: Any) -> str:
+    """Ruta de salida del clip subtitulado (evita sobrescribir el original)."""
+    suffix = Path(video_path).suffix or ".mp4"
+    out_name = f"{clip.id}_subtitled{suffix}"
+    storage_dir = Path(video_path).parent
+    if not storage_dir.is_dir():
+        storage_dir = Path.cwd() / "storage" / "clips"
+        storage_dir.mkdir(parents=True, exist_ok=True)
+    output_path = str(storage_dir / out_name)
+    if Path(output_path).resolve() == Path(video_path).resolve():
+        output_path = str(storage_dir / f"{clip.id}_subtitled_burned{suffix}")
+    return output_path
+
+
+def _marcar_fallo(db: Session, cid: uuid.UUID, exc: Exception) -> None:
+    """Rollback + marca el clip FAILED con el traceback completo."""
+    tb = traceback.format_exc()
+    error_log = f"{type(exc).__name__}: {exc}\n{tb}"
+    try:
+        db.rollback()
+    except Exception:
+        pass
+    try:
+        failed = _get_clip_or_none(db, cid)
+        if failed is not None:
+            _update_clip_status(db, failed, "FAILED", error_log=error_log)
+            db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
+
+def _limpiar_temporales(wav_path: str | None, ass_path: str | None, tmp_wav_created: bool, tmp_ass_created: bool) -> None:
+    for p, created in ((wav_path, tmp_wav_created), (ass_path, tmp_ass_created)):
+        if p and created:
+            try:
+                Path(p).unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
 def run_subtitle_pipeline(clip_id: uuid.UUID | str) -> None:
     try:
         cid = uuid.UUID(str(clip_id))
@@ -99,13 +192,7 @@ def run_subtitle_pipeline(clip_id: uuid.UUID | str) -> None:
         clip = _get_clip_or_none(db, cid)
         if clip is None:
             return
-        clip.status = "PROCESSING"
-        if hasattr(clip, "error_log"):
-            try:
-                setattr(clip, "error_log", None)
-            except Exception:
-                pass
-        db.commit()
+        _marcar_clip_procesando(db, clip)
 
         video_path = _resolve_video_path(clip, db)
         if video_path is None or not Path(video_path).is_file():
@@ -134,33 +221,10 @@ def run_subtitle_pipeline(clip_id: uuid.UUID | str) -> None:
         if not segments:
             raise RuntimeError("Transcripcion vacia: no se generaron segmentos")
 
-        clipped: list[dict] = []
-        for seg in segments:
-            s = float(seg["start"])
-            e = float(seg["end"])
-            if e <= s:
-                continue
-            if e < clip.start_time or s > clip.end_time:
-                continue
-            cs = max(s, float(clip.start_time))
-            ce = min(e, float(clip.end_time))
-            if ce > cs:
-                clipped.append({"start": cs - float(clip.start_time), "end": ce - float(clip.start_time), "text": str(seg["text"])})
-        target_segments = clipped if clipped else [{"start": float(s["start"]), "end": float(s["end"]), "text": str(s["text"])} for s in segments]
-
+        target_segments = _recortar_segmentos(segments, clip)
         write_ass_file(target_segments, ass_path, title=clip.title or str(clip.id))
 
-        suffix = Path(video_path).suffix or ".mp4"
-        out_name = f"{clip.id}_subtitled{suffix}"
-        storage_dir = Path(video_path).parent
-        if not storage_dir.is_dir():
-            storage_dir = Path.cwd() / "storage" / "clips"
-            storage_dir.mkdir(parents=True, exist_ok=True)
-        output_path = str(storage_dir / out_name)
-
-        if Path(output_path).resolve() == Path(video_path).resolve():
-            output_path = str(storage_dir / f"{clip.id}_subtitled_burned{suffix}")
-
+        output_path = _resolver_salida(video_path, clip)
         burn_subtitles(video_path, ass_path, output_path)
 
         refreshed = _get_clip_or_none(db, cid)
@@ -170,30 +234,6 @@ def run_subtitle_pipeline(clip_id: uuid.UUID | str) -> None:
         db.commit()
 
     except Exception as exc:
-        tb = traceback.format_exc()
-        error_log = f"{type(exc).__name__}: {exc}\n{tb}"
-        try:
-            db.rollback()
-        except Exception:
-            pass
-        try:
-            failed = _get_clip_or_none(db, cid)
-            if failed is not None:
-                _update_clip_status(db, failed, "FAILED", error_log=error_log)
-                db.commit()
-        except Exception:
-            try:
-                db.rollback()
-            except Exception:
-                pass
+        _marcar_fallo(db, cid, exc)
     finally:
-        for p, created in ((wav_path, tmp_wav_created), (ass_path, tmp_ass_created)):
-            if p and created:
-                try:
-                    Path(p).unlink(missing_ok=True)
-                except Exception:
-                    pass
-        try:
-            db.close()
-        except Exception:
-            pass
+        _limpiar_temporales(wav_path, ass_path, tmp_wav_created, tmp_ass_created)

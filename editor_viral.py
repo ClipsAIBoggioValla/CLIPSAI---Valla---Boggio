@@ -7,9 +7,10 @@ Solo usa FFmpeg (sin OpenCV).
 Cada unidad cambia por un unico motivo (Single Responsibility):
 
   - `calcular_filtro_vertical()` -> geometria del recorte: logica pura, sin efectos.
-  - `RenderizadorVertical`       -> dependencias y ejecucion de ffprobe/ffmpeg.
+  - `verificar_ffmpeg()` / `sondear_dimensiones()` -> utilidades de modulo sin estado.
+  - `RenderizadorVertical`       -> dependencias (dimensiones de salida/fps) y ejecucion de ffmpeg.
   - `CatalogoClips`              -> archivos del proyecto (donde estan, donde escribir, metadatos).
-  - `VideoEditor`                -> orquesta las tres; es la API publica estable del modulo.
+  - `VideoEditor`                -> fachada CLI: orquesta catalogo + renderizador por clip.
 """
 
 import json
@@ -82,8 +83,34 @@ def calcular_filtro_vertical(
     return f"{crop},scale={ancho_final}:{alto_final}"
 
 
+def verificar_ffmpeg() -> None:
+    """Comprueba que el binario ffmpeg este disponible; relanza el error si no lo esta."""
+    try:
+        subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True)
+        log.info("  FFmpeg: OK")
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        log.error("  FFmpeg no encontrado. Instalalo: apt install ffmpeg / brew install ffmpeg")
+        raise
+
+
+def sondear_dimensiones(video_path: str) -> Tuple[int, int]:
+    """Obtiene (ancho, alto) del primer stream de video via ffprobe."""
+    probe = subprocess.run(
+        [
+            "ffprobe", "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height",
+            "-of", "csv=s=x:p=0",
+            video_path,
+        ],
+        capture_output=True, text=True, check=True,
+    )
+    ancho, alto = probe.stdout.strip().split("x")
+    return int(ancho), int(alto)
+
+
 class RenderizadorVertical:
-    """Unica responsabilidad: hablar con FFmpeg (verificacion, sondeo y render)."""
+    """Unica responsabilidad: ejecutar el render ffmpeg con su configuracion (salida/fps)."""
 
     def __init__(
         self,
@@ -95,34 +122,10 @@ class RenderizadorVertical:
         self.alto_final = alto_final
         self.fps = fps
 
-    def verificar_ffmpeg(self) -> None:
-        """Comprueba que el binario este disponible; relanza el error si no lo esta."""
-        try:
-            subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True)
-            log.info("  FFmpeg: OK")
-        except (FileNotFoundError, subprocess.CalledProcessError):
-            log.error("  FFmpeg no encontrado. Instalalo: apt install ffmpeg / brew install ffmpeg")
-            raise
-
-    def dimensiones(self, video_path: str) -> Tuple[int, int]:
-        """Obtiene (ancho, alto) del primer stream de video via ffprobe."""
-        probe = subprocess.run(
-            [
-                "ffprobe", "-v", "error",
-                "-select_streams", "v:0",
-                "-show_entries", "stream=width,height",
-                "-of", "csv=s=x:p=0",
-                video_path,
-            ],
-            capture_output=True, text=True, check=True,
-        )
-        ancho, alto = probe.stdout.strip().split("x")
-        return int(ancho), int(alto)
-
     def render(self, video_path: str, salida: str) -> bool:
         """Renderiza `video_path` en 9:16 dentro de `salida`. True si tuvo exito."""
         try:
-            ancho, alto = self.dimensiones(video_path)
+            ancho, alto = sondear_dimensiones(video_path)
             log.info(f"      Video original: {ancho}x{alto}")
 
             filtro = calcular_filtro_vertical(ancho, alto, self.ancho_final, self.alto_final)
@@ -188,7 +191,7 @@ class CatalogoClips:
 
 
 class VideoEditor:
-    """Fachada del editor: conserva la API publica y delega en el renderizador y el catalogo.
+    """Fachada del editor: orquesta catalogo + renderizador por clip.
 
     Uso:
         editor = VideoEditor("clips", "clips_editados")
@@ -199,26 +202,13 @@ class VideoEditor:
     def __init__(self, clips_dir: str = "clips", salida_dir: str = "clips_editados"):
         self.catalogo = CatalogoClips(clips_dir, salida_dir)
         self.renderizador = RenderizadorVertical()
-
-        # Atributos historicos de la clase: se conservan por compatibilidad.
-        self.clips_dir = self.catalogo.clips_dir
-        self.salida_dir = self.catalogo.salida_dir
-        self.ancho_final = self.renderizador.ancho_final
-        self.alto_final = self.renderizador.alto_final
-        self.fps = self.renderizador.fps
-
-        self.renderizador.verificar_ffmpeg()
+        verificar_ffmpeg()
 
     def cargar_clips(self) -> List[Path]:
         log.info("[1/2] Cargando clips...")
         clips = self.catalogo.listar()
         log.info(f"      Clips encontrados: {len(clips)}")
         return clips
-
-    def aplicar_formato_vertical(self, video_path: str, salida: str) -> bool:
-        """Crop centrado 9:16 con FFmpeg. Sin OpenCV."""
-        log.info("[2/2] Aplicando formato vertical 1080x1920...")
-        return self.renderizador.render(video_path, salida)
 
     def procesar_clip(self, clip_path: Path, index: int) -> Optional[str]:
         """Procesa un clip individual: crop vertical 9:16."""
@@ -236,7 +226,7 @@ class VideoEditor:
         if metadatos.criterio:
             log.info(f"      Tipo: {metadatos.criterio}")
 
-        if self.aplicar_formato_vertical(str(clip_path), str(salida_final)):
+        if self.renderizador.render(str(clip_path), str(salida_final)):
             log.info(f"      ✓ {os.path.basename(salida_final)}")
             return str(salida_final)
         else:
@@ -250,7 +240,7 @@ class VideoEditor:
 
         clips = self.cargar_clips()
         if not clips:
-            log.warning("No se encontraron clips en " + str(self.clips_dir))
+            log.warning("No se encontraron clips en " + str(self.catalogo.clips_dir))
             return []
 
         resultados = []
@@ -261,7 +251,7 @@ class VideoEditor:
 
         log.info("\n" + "=" * 50)
         log.info(f"  COMPLETADO: {len(resultados)}/{len(clips)} clips")
-        log.info(f"  Salida: {self.salida_dir}")
+        log.info(f"  Salida: {self.catalogo.salida_dir}")
         log.info("=" * 50)
 
         return resultados
