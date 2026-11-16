@@ -3,7 +3,7 @@
 
 > Documento **generado automáticamente** por la cátedra de Programación III (RepoSense + análisis de calidad + constancia). **No editar a mano**: se regenera en cada evaluación.
 > Rama evaluada: `main`. Análisis **heurístico** (regex + métricas): es una criba para orientar la revisión, **no una nota**.
-> Generado: 2026-11-14.
+> Generado: 2026-11-16.
 
 ## 1. Veredicto
 
@@ -41,8 +41,8 @@
 
 | Alumno | Sesiones | Cumplimiento | Pausa | Recencia | IC | Nivel | Para subir de nivel |
 |---|--:|--:|--:|--:|--:|--|--|
-| mateo | 38 | 100% | 12 d | 93% | **78** | Aprueba | Pausa 12 d (máx. 5 d) |
-| SantiValla | 17 | 65% | 19 d | 86% | **54** | Aprueba | Cumplimiento 65% (mín. 100%); Pausa 19 d (máx. 5 d) |
+| mateo | 38 | 100% | 12 d | 71% | **75** | Aprueba | Pausa 12 d (máx. 5 d); Recencia 71% (mín. 75%) |
+| SantiValla | 17 | 63% | 19 d | 64% | **50** | Aprueba | Cumplimiento 63% (mín. 100%); Pausa 19 d (máx. 5 d); Recencia 64% (mín. 75%) |
 
 > Para aprobar el IC: **2 sesiones por semana** sostenidas, sin pausas mayores a **10 días** y con actividad en las **últimas 2 semanas**. Se excluyen merges, bots y al docente. Zona horaria UTC-3.
 
