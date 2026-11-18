@@ -3,7 +3,7 @@
 
 > Documento **generado automáticamente** por la cátedra de Programación III (RepoSense + análisis de calidad + constancia). **No editar a mano**: se regenera en cada evaluación.
 > Rama evaluada: `main`. Análisis **heurístico** (regex + métricas): es una criba para orientar la revisión, **no una nota**.
-> Generado: 2026-11-17.
+> Generado: 2026-11-18.
 
 ## 1. Veredicto
 
@@ -41,8 +41,8 @@
 
 | Alumno | Sesiones | Cumplimiento | Pausa | Recencia | IC | Nivel | Para subir de nivel |
 |---|--:|--:|--:|--:|--:|--|--|
-| mateo | 38 | 100% | 12 d | 71% | **75** | Aprueba | Pausa 12 d (máx. 5 d); Recencia 71% (mín. 75%) |
-| SantiValla | 17 | 63% | 19 d | 64% | **50** | Aprueba | Cumplimiento 63% (mín. 100%); Pausa 19 d (máx. 5 d); Recencia 64% (mín. 75%) |
+| mateo | 38 | 100% | 12 d | 57% | **73** | Aprueba | Pausa 12 d (máx. 5 d); Recencia 57% (mín. 75%) |
+| SantiValla | 17 | 61% | 19 d | 50% | **47** | Aprueba | Cumplimiento 61% (mín. 100%); Pausa 19 d (máx. 5 d); Recencia 50% (mín. 75%) |
 
 > Para aprobar el IC: **2 sesiones por semana** sostenidas, sin pausas mayores a **10 días** y con actividad en las **últimas 2 semanas**. Se excluyen merges, bots y al docente. Zona horaria UTC-3.
 
@@ -172,11 +172,11 @@ Criterios que hoy están en rojo y, para cada uno, una explicación breve de **c
 
 ## 6. Actividad en clase y fuera de clase
 
-> Se consideran las **27 clases** del período (miércoles y viernes, según `config/constancia.json`; feriados y semanas sin clase descontados). Para cada alumno se muestra la actividad **en cada clase** y también la actividad **fuera de los días de clase** (fines de semana u otros días). `Commits` = commits de trabajo (no-merge); `Merges` = merges de PR (también son push). Los días sin actividad dicen **sin actividad**.
+> Se consideran las **28 clases** del período (miércoles y viernes, según `config/constancia.json`; feriados y semanas sin clase descontados). Para cada alumno se muestra la actividad **en cada clase** y también la actividad **fuera de los días de clase** (fines de semana u otros días). `Commits` = commits de trabajo (no-merge); `Merges` = merges de PR (también son push). Los días sin actividad dicen **sin actividad**.
 
 ### mateo
 
-**18/27 clases con actividad** · total del período: 77 commits · 25 merges
+**18/28 clases con actividad** · total del período: 77 commits · 25 merges
 
 | Fecha | Actividad | Repositorios | Commits / merges |
 |---|:--:|---|--:|
@@ -207,6 +207,7 @@ Criterios que hoy están en rojo y, para cada uno, una explicación breve de **c
 | 2026-11-06 | **Sí** | CLIPSAI---Valla---Boggio | 0 / 2 |
 | 2026-11-11 | **Sí** | CLIPSAI---Valla---Boggio | 2 / 2 |
 | 2026-11-13 | No | sin actividad | 0 / 0 |
+| 2026-11-18 | No | sin actividad | 0 / 0 |
 
 **Fuera de clase:** 29 fecha(s) con actividad · 59 commits · 26 merges
 
@@ -244,7 +245,7 @@ Criterios que hoy están en rojo y, para cada uno, una explicación breve de **c
 
 ### SantiValla
 
-**18/27 clases con actividad** · total del período: 45 commits · 10 merges
+**18/28 clases con actividad** · total del período: 45 commits · 10 merges
 
 | Fecha | Actividad | Repositorios | Commits / merges |
 |---|:--:|---|--:|
@@ -275,6 +276,7 @@ Criterios que hoy están en rojo y, para cada uno, una explicación breve de **c
 | 2026-11-06 | **Sí** | CLIPSAI---Valla---Boggio | 1 / 0 |
 | 2026-11-11 | **Sí** | CLIPSAI---Valla---Boggio | 1 / 0 |
 | 2026-11-13 | No | sin actividad | 0 / 0 |
+| 2026-11-18 | No | sin actividad | 0 / 0 |
 
 **Fuera de clase:** sin actividad registrada.
 
