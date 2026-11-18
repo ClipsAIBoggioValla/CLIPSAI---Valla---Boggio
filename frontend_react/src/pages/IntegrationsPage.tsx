@@ -2,18 +2,25 @@ import { useIntegrations } from '@/hooks/useIntegrations'
 import PlatformCard from '@/components/integrations/PlatformCard'
 
 type SocialEntryLike = { connected: boolean; username: string | null }
-type SocialStatusLike = { youtube: SocialEntryLike; instagram: SocialEntryLike }
+type SocialStatusLike = { youtube: SocialEntryLike; instagram: SocialEntryLike; tiktok: SocialEntryLike }
+type IntegrationPlatform = 'youtube' | 'instagram' | 'tiktok'
+
+const DISPLAY_NAMES: Record<IntegrationPlatform, string> = {
+  youtube: 'YouTube',
+  instagram: 'Instagram',
+  tiktok: 'TikTok',
+}
 
 function platformConnected(
   social: SocialStatusLike | null,
   integration: string | null,
   status: string | null,
-  platform: 'youtube' | 'instagram',
+  platform: IntegrationPlatform,
 ): boolean | undefined {
   return social?.[platform].connected || (integration === platform && status === 'success')
 }
 
-function platformUsername(social: SocialStatusLike | null, platform: 'youtube' | 'instagram'): string | null {
+function platformUsername(social: SocialStatusLike | null, platform: IntegrationPlatform): string | null {
   return social?.[platform].username ?? null
 }
 
@@ -35,21 +42,23 @@ function renderConnectErrorAlert(displayName: string, errorDetail: string | null
   )
 }
 
-function renderYouTubeAlert(status: string | null, errorDetail: string | null) {
-  if (status === 'success') return renderConnectedAlert('YouTube', 'youtube', 'Ya puedes publicar clips en YouTube.')
-  if (status === 'error') return renderConnectErrorAlert('YouTube', errorDetail)
-  return null
+const PUBLISH_TEXT: Record<IntegrationPlatform, string> = {
+  youtube: 'Ya puedes publicar clips en YouTube.',
+  instagram: 'Ya puedes publicar Reels en Instagram.',
+  tiktok: 'Ya puedes publicar clips en TikTok.',
 }
 
-function renderInstagramAlert(status: string | null, errorDetail: string | null) {
-  if (status === 'success') return renderConnectedAlert('Instagram', 'instagram', 'Ya puedes publicar Reels en Instagram.')
-  if (status === 'error') return renderConnectErrorAlert('Instagram', errorDetail)
+function renderPlatformAlert(platform: IntegrationPlatform, status: string | null, errorDetail: string | null) {
+  const name = DISPLAY_NAMES[platform]
+  if (status === 'success') return renderConnectedAlert(name, platform, PUBLISH_TEXT[platform])
+  if (status === 'error') return renderConnectErrorAlert(name, errorDetail)
   return null
 }
 
 function renderIntegrationAlert(integration: string | null, status: string | null, errorDetail: string | null) {
-  if (integration === 'youtube') return renderYouTubeAlert(status, errorDetail)
-  if (integration === 'instagram') return renderInstagramAlert(status, errorDetail)
+  if (integration === 'youtube') return renderPlatformAlert('youtube', status, errorDetail)
+  if (integration === 'instagram') return renderPlatformAlert('instagram', status, errorDetail)
+  if (integration === 'tiktok') return renderPlatformAlert('tiktok', status, errorDetail)
   return null
 }
 
@@ -63,14 +72,28 @@ function renderErrorAlert(error: string | null) {
   )
 }
 
+function renderDisconnectButton(loading: boolean, onDisconnect: () => void, testId: string) {
+  return (
+    <button
+      className="btn-custom w-full flex items-center justify-center gap-2 bg-transparent text-[#F87171] border border-[#F87171]/30 hover:bg-[#F87171]/10 mt-2"
+      disabled={loading}
+      data-testid={testId}
+      onClick={onDisconnect}
+    >
+      <i className="bi bi-box-arrow-right" /> Desconectar
+    </button>
+  )
+}
+
 export default function IntegrationsPage() {
   const {
     integration, status, errorDetail, loading, error, social,
-    handleConnectYoutube, handleConnectInstagram,
+    handleConnectYoutube, handleConnectInstagram, handleConnectTiktok, handleDisconnect,
   } = useIntegrations()
 
   const youtubeConnected = platformConnected(social, integration, status, 'youtube')
   const instagramConnected = platformConnected(social, integration, status, 'instagram')
+  const tiktokConnected = platformConnected(social, integration, status, 'tiktok')
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -104,7 +127,9 @@ export default function IntegrationsPage() {
           connectLabel="Conectar YouTube"
           connectIcon="bi bi-box-arrow-up-right"
           connectClass="btn-custom btn-custom-primary w-full flex items-center justify-center gap-2"
-        />
+        >
+          {youtubeConnected ? renderDisconnectButton(loading, () => handleDisconnect('youtube'), 'disconnect-youtube-btn') : null}
+        </PlatformCard>
 
         <PlatformCard
           name="Instagram"
@@ -120,17 +145,37 @@ export default function IntegrationsPage() {
           connectLabel="Conectar Instagram"
           connectIcon="bi bi-instagram"
           connectClass="btn-custom w-full flex items-center justify-center gap-2 bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#515BD4] text-white border-0 hover:opacity-90"
-        />
+        >
+          {instagramConnected ? renderDisconnectButton(loading, () => handleDisconnect('instagram'), 'disconnect-instagram-btn') : null}
+        </PlatformCard>
+
+        <PlatformCard
+          name="TikTok"
+          icon="bi bi-tiktok"
+          iconWrapClass="h-10 w-10 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center text-white text-xl"
+          connected={!!tiktokConnected}
+          username={platformUsername(social, 'tiktok')}
+          description="Content Posting API — FILE_UPLOAD + PKCE"
+          descriptionLong="Conecta tu cuenta de TikTok para publicar clips automáticamente. OAuth 2.0 con PKCE (S256); los clips se suben como borrador SELF_ONLY desde la Content Posting API."
+          endpointHint="GET /auth/social/tiktok/connect → redirect TikTok OAuth (PKCE S256)"
+          loading={loading}
+          onConnect={handleConnectTiktok}
+          connectLabel="Conectar TikTok"
+          connectIcon="bi bi-tiktok"
+          connectClass="btn-custom w-full flex items-center justify-center gap-2 bg-black text-white border border-white/20 hover:opacity-90"
+        >
+          {tiktokConnected ? renderDisconnectButton(loading, () => handleDisconnect('tiktok'), 'disconnect-tiktok-btn') : null}
+        </PlatformCard>
       </div>
 
       <div className="card-spark mt-4 bg-[#0B0F17]/50">
         <h4 className="text-sm font-bold text-white mb-2 flex items-center gap-2"><i className="bi bi-info-circle text-[#B4F105]" /> Cómo probar el flujo completo</h4>
         <ol className="list-decimal list-inside text-sm text-[#94A3B8] space-y-1">
-          <li>Asegúrate de tener <code>GOOGLE_CLIENT_ID</code> / <code>GOOGLE_CLIENT_SECRET</code> en <code>.env</code> y backend en <code>https://decorator-excretory-satin.ngrok-free.dev</code> o <code>http://localhost:8000</code></li>
-          <li>Haz clic en <strong>Conectar YouTube</strong> arriba (llama a <code>GET /auth/social/youtube/connect</code> con tu JWT)</li>
-          <li>Serás redirigido a <code>accounts.google.com</code> — acepta scopes <code>youtube.readonly</code> + <code>youtube.upload</code></li>
-          <li>Google redirige a <code>/auth/social/youtube/callback?code=...&amp;state=...</code> → backend intercambia tokens → guarda en <code>social_accounts</code> → redirige aquí a <code>?integration=youtube&amp;status=success</code></li>
-          <li>Verifica en DB: <code>SELECT platform, platform_account_id FROM social_accounts WHERE platform='youtube'</code></li>
+          <li>Asegúrate de tener <code>GOOGLE_CLIENT_ID</code> / <code>GOOGLE_CLIENT_SECRET</code> (YouTube), <code>FACEBOOK_CLIENT_ID</code> / <code>FACEBOOK_CLIENT_SECRET</code> (Instagram) o <code>TIKTOK_CLIENT_KEY</code> / <code>TIKTOK_CLIENT_SECRET</code> (TikTok) en <code>.env</code></li>
+          <li>Haz clic en <strong>Conectar</strong> en la tarjeta (llama a <code>GET /auth/social/&lt;plataforma&gt;/connect</code> con tu JWT)</li>
+          <li>Serás redirigido al proveedor — acepta los scopes de publicación</li>
+          <li>El proveedor redirige a <code>/auth/social/&lt;plataforma&gt;/callback?code=...&amp;state=...</code> → backend intercambia tokens → guarda en <code>social_accounts</code> → redirige aquí a <code>?integration=&lt;plataforma&gt;&amp;status=success</code></li>
+          <li>Verifica en DB: <code>SELECT platform, platform_account_id FROM social_accounts</code></li>
         </ol>
       </div>
     </div>

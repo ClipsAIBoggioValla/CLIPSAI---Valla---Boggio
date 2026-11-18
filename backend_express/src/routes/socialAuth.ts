@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express'
 import { pool } from '../db/index.js'
 import { authMiddleware, type AuthRequest } from '../middleware/auth.js'
+import { logger } from '../lib/logger.js'
 import crypto from 'crypto'
 
 export const socialAuthRouter = Router()
@@ -163,7 +164,7 @@ async function buildStatus(userId: string): Promise<Record<string, unknown>> {
       if (found) status[found.platform] = found.entry
     }
   } catch (err) {
-    console.error('[social/status] error:', err)
+    logger.error('[social/status] error:', err)
   }
   return status
 }
@@ -188,7 +189,7 @@ socialAuthRouter.delete('/:platform', authMiddleware, async (req: AuthRequest, r
       [userId, platformNorm]
     )
   } catch (err) {
-    console.error('[social/delete] error social_accounts:', err)
+    logger.error('[social/delete] error social_accounts:', err)
   }
   // Limpieza best-effort en tabla legacy
   try {
@@ -626,7 +627,7 @@ async function instagramCallbackOutcome(code: string, state: string | undefined)
     await saveInstagramTokens(String(userId), tokens)
     return { status: 'success' }
   } catch (exc: any) {
-    console.error('[instagram/callback] error:', exc?.message || exc)
+    logger.error('[instagram/callback] error:', exc?.message || exc)
     return { status: 'error', extra: 'Error al guardar token' }
   }
 }
@@ -652,7 +653,7 @@ async function tiktokCallbackOutcome(code: string, state: string | undefined): P
     await saveTiktokTokens(String(userId), tokens)
     return { status: 'success' }
   } catch (exc: any) {
-    console.error('[tiktok/callback] error:', exc?.message || exc)
+    logger.error('[tiktok/callback] error:', exc?.message || exc)
     return { status: 'error', extra: 'Error al guardar token' }
   }
 }
