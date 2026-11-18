@@ -94,6 +94,25 @@ def _estado_de_cuenta(acc, user_id) -> dict:
     }
 
 
+def _plataforma_configurada(platform: str) -> bool:
+    """True si las credenciales de OAuth de la plataforma están en el entorno."""
+    import os as _os
+
+    env = _os.getenv
+    if platform == "youtube":
+        return bool((env("GOOGLE_CLIENT_ID") or "").strip()) and bool((env("GOOGLE_CLIENT_SECRET") or "").strip())
+    if platform == "instagram":
+        return bool((env("INSTAGRAM_CLIENT_ID") or env("META_APP_ID") or env("FB_CLIENT_ID") or "").strip())
+    if platform == "tiktok":
+        return bool((env("TIKTOK_CLIENT_KEY") or "").strip()) and bool((env("TIKTOK_CLIENT_SECRET") or "").strip())
+    return False
+
+
+def _estado_default(platform: str) -> dict:
+    """Entrada base de la plataforma: desconectada + flag de configuración del servidor."""
+    return {"connected": False, "username": None, "expires_at": None, "configured": _plataforma_configurada(platform)}
+
+
 @router.get("/status", summary="Estado de integraciones conectadas")
 @router.get("/accounts", summary="Estado de integraciones conectadas (alias)", include_in_schema=False)
 async def get_social_status(
@@ -107,15 +126,17 @@ async def get_social_status(
     _logear_cuentas_encontradas(accounts, current_user.id)
 
     status = {
-        "instagram": {"connected": False, "username": None, "expires_at": None},
-        "youtube": {"connected": False, "username": None, "expires_at": None},
-        "tiktok": {"connected": False, "username": None, "expires_at": None},
+        "instagram": _estado_default("instagram"),
+        "youtube": _estado_default("youtube"),
+        "tiktok": _estado_default("tiktok"),
     }
 
     for acc in accounts:
         platform = (acc.platform or "").lower()
         if platform in status:
-            status[platform] = _estado_de_cuenta(acc, current_user.id)
+            entrada = _estado_de_cuenta(acc, current_user.id)
+            entrada["configured"] = status[platform]["configured"]
+            status[platform] = entrada
 
     return status
 
@@ -360,28 +381,53 @@ def instagram_callback(
         return _redirect_oauth(frontend_base, "instagram", "error", "Error al guardar token", con_message=True)
 
 
-@router.get("/tiktok/connect", summary="Obtener URL de autorización OAuth2 de TikTok")
-def tiktok_connect(current_user: CurrentUser):
-    if tt_get_tiktok_auth_url is None or tt_generate_pkce_pair is None:
-        from fastapi import HTTPException as _HTTPException
+def _tiktok_service_ok() -> None:
+    """HTTPException 503 con mensaje claro si el servicio o las credenciales faltan."""
+    from fastapi import HTTPException as _HTTPException
 
-        raise _HTTPException(status_code=500, detail="TikTok service no disponible")
-    import base64 as _b64
-    import json as _json
+    if tt_get_tiktok_auth_url is None or tt_generate_pkce_pair is None:
+        raise _HTTPException(status_code=503, detail="TikTok service no disponible en el backend")
+    if not _tiktok_configurado():
+        raise _HTTPException(
+            status_code=503,
+            detail="TikTok no está configurado en el servidor: define TIKTOK_CLIENT_KEY y TIKTOK_CLIENT_SECRET en el archivo .env del backend",
+        )
+
+
+def _tiktok_configurado() -> bool:
+    """True si TIKTOK_CLIENT_KEY/SECRET tienen valor (leído fresco del entorno)."""
     import os as _os
 
-    _cid = (_os.getenv("TIKTOK_CLIENT_KEY") or "").strip()
-    if not _cid:
-        from fastapi import HTTPException as _HTTPException
+    return bool((_os.getenv("TIKTOK_CLIENT_KEY") or "").strip()) and bool((_os.getenv("TIKTOK_CLIENT_SECRET") or "").strip())
 
-        raise _HTTPException(status_code=500, detail="TIKTOK_CLIENT_KEY no está configurado en el archivo .env del backend")
+
+@router.get("/tiktok/connect", summary="Obtener URL de autorización OAuth2 de TikTok")
+def tiktok_connect(current_user: CurrentUser):
+    from fastapi import HTTPException as _HTTPException
+
+    _tiktok_service_ok()
     logger.info("[OAUTH CONNECT] Generando URL TikTok para user_id: %s", current_user.id)
     verifier, challenge = tt_generate_pkce_pair()
+    # El state DEBE persistir user_id + code_verifier (el callback los usa para el
+    # exchange PKCE); social_common.encode_state solo guarda user_id, por eso se
+    # construye inline con base64url y se decodifica en _user_id_y_verifier_de_state.
     state_data = {"user_id": str(current_user.id), "code_verifier": verifier}
-    encoded_state = _b64.urlsafe_b64encode(_json.dumps(state_data, separators=(",", ":")).encode()).decode().rstrip("=")
-    auth_url = tt_get_tiktok_auth_url(state=encoded_state, code_challenge=challenge)
+    encoded_state = _encode_state_con_verifier(state_data)
+    try:
+        auth_url = tt_get_tiktok_auth_url(state=encoded_state, code_challenge=challenge)
+    except ValueError as ve:
+        # Config faltante detectada en el service → mensaje claro (no 500 genérico)
+        raise _HTTPException(status_code=503, detail=str(ve).replace("[TIKTOK ERROR] ", "")) from ve
     logger.info("[OAUTH CONNECT] TikTok URL generada: %s", auth_url)
     return {"auth_url": auth_url, "url": auth_url}
+
+
+def _encode_state_con_verifier(state_data: dict) -> str:
+    """base64url del JSON {user_id, code_verifier} — reversible por _user_id_y_verifier_de_state."""
+    import base64 as _b64
+    import json as _json
+
+    return _b64.urlsafe_b64encode(_json.dumps(state_data, separators=(",", ":")).encode()).decode().rstrip("=")
 
 
 def _decodificar_json_state_tiktok(state: str):

@@ -97,19 +97,20 @@ def generate_pkce_pair() -> tuple[str, str]:
 
 
 def get_tiktok_auth_url(state: str, code_challenge: str) -> str:
-    if not TIKTOK_CLIENT_KEY:
+    client_key, _client_secret, redirect_uri = _get_tiktok_config()
+    if not client_key:
         raise ValueError("[TIKTOK ERROR] TIKTOK_CLIENT_KEY no está configurada en las variables de entorno.")
     params = {
-        "client_key": TIKTOK_CLIENT_KEY,
+        "client_key": client_key,
         "scope": TIKTOK_SCOPES,
         "response_type": "code",
-        "redirect_uri": TIKTOK_REDIRECT_URI,
+        "redirect_uri": redirect_uri,
         "state": state,
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
     }
     auth_url = f"https://www.tiktok.com/v2/auth/authorize/?{urllib.parse.urlencode(params)}"
-    logger.info("[TIKTOK AUTH URL GENERATED]: %s", auth_url.replace(TIKTOK_CLIENT_KEY, "HIDDEN_KEY"))
+    logger.info("[TIKTOK AUTH URL GENERATED]: %s", auth_url.replace(client_key, "HIDDEN_KEY"))
     return auth_url
 
 

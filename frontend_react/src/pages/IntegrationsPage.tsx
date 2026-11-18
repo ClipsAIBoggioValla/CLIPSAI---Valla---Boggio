@@ -1,7 +1,7 @@
 import { useIntegrations } from '@/hooks/useIntegrations'
 import PlatformCard from '@/components/integrations/PlatformCard'
 
-type SocialEntryLike = { connected: boolean; username: string | null }
+type SocialEntryLike = { connected: boolean; username: string | null; configured?: boolean }
 type SocialStatusLike = { youtube: SocialEntryLike; instagram: SocialEntryLike; tiktok: SocialEntryLike }
 type IntegrationPlatform = 'youtube' | 'instagram' | 'tiktok'
 
@@ -85,6 +85,14 @@ function renderDisconnectButton(loading: boolean, onDisconnect: () => void, test
   )
 }
 
+function renderConfigPendiente(plataforma: string, vars: string) {
+  return (
+    <div role="alert" className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+      <strong>{plataforma} no está configurado en el servidor.</strong> Define <code>{vars}</code> en el archivo <code>.env</code> del backend para habilitar la conexión.
+    </div>
+  )
+}
+
 export default function IntegrationsPage() {
   const {
     integration, status, errorDetail, loading, error, social,
@@ -164,7 +172,8 @@ export default function IntegrationsPage() {
           connectIcon="bi bi-tiktok"
           connectClass="btn-custom w-full flex items-center justify-center gap-2 bg-black text-white border border-white/20 hover:opacity-90"
         >
-          {tiktokConnected ? renderDisconnectButton(loading, () => handleDisconnect('tiktok'), 'disconnect-tiktok-btn') : null}
+          {tiktokConnected && renderDisconnectButton(loading, () => handleDisconnect('tiktok'), 'disconnect-tiktok-btn')}
+          {social && social.tiktok.configured === false && renderConfigPendiente('TikTok', 'TIKTOK_CLIENT_KEY / TIKTOK_CLIENT_SECRET')}
         </PlatformCard>
       </div>
 

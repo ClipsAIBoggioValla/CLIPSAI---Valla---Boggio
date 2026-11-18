@@ -744,10 +744,12 @@ class TestSocialAuth:
         assert res.status_code == 302
         assert "status=error" in res.headers["location"]
 
-    def test_tiktok_connect_500_sin_client_key(self, client, monkeypatch) -> None:
+    def test_tiktok_connect_503_sin_client_key(self, client, monkeypatch) -> None:
         monkeypatch.delenv("TIKTOK_CLIENT_KEY", raising=False)
+        monkeypatch.delenv("TIKTOK_CLIENT_SECRET", raising=False)
         res = client.get("/auth/social/tiktok/connect")
-        assert res.status_code == 500
+        assert res.status_code == 503
+        assert "TIKTOK_CLIENT_KEY" in res.json()["detail"]
 
     def test_tiktok_connect_200_con_env(self, client, monkeypatch) -> None:
         from backend_fastapi.app.routers import social_auth as sa

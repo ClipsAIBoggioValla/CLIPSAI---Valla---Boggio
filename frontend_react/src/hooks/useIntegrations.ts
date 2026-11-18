@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { http } from '@/lib/apiClient'
 import { ApiError } from '@/types/api'
 
-type SocialEntry = { connected: boolean; username: string | null; expires_at: string | null }
+type SocialEntry = { connected: boolean; username: string | null; expires_at: string | null; configured: boolean }
 type SocialStatus = { youtube: SocialEntry; instagram: SocialEntry; tiktok: SocialEntry }
 
 function readToken(): string | null {
@@ -89,14 +89,11 @@ export function useIntegrations() {
   }, [status, searchParams, setSearchParams])
 
   async function handleConnectYoutube() {
-    setLoading(true); setError(null)
-    try {
-      const data = await http.get<{ auth_url: string }>('/auth/social/youtube/connect')
-      if (data.auth_url) window.location.href = data.auth_url
-      else setError('No se recibió auth_url del backend')
-    } catch (e: unknown) {
-      setError(connectErrorMessage(e, 'Error al conectar con YouTube'))
-    } finally { setLoading(false) }
+    await connectSocial('/auth/social/youtube/connect', 'https://accounts.google.com/', 'Error al conectar con YouTube', {
+      begin: () => { setLoading(true); setError(null) },
+      end: () => setLoading(false),
+      fail: setError,
+    })
   }
 
   async function handleConnectInstagram() {

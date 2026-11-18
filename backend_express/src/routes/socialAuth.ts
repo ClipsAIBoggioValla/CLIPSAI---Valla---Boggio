@@ -148,11 +148,29 @@ function statusEntryFor(acc: Record<string, unknown>): { platform: string; entry
   }
 }
 
+function plataformaConfigurada(platform: string): boolean {
+  const env = process.env
+  if (platform === 'youtube') {
+    return Boolean((env.GOOGLE_CLIENT_ID || '').trim()) && Boolean((env.GOOGLE_CLIENT_SECRET || '').trim())
+  }
+  if (platform === 'instagram') {
+    return Boolean((env.INSTAGRAM_CLIENT_ID || env.META_APP_ID || env.FB_CLIENT_ID || '').trim())
+  }
+  if (platform === 'tiktok') {
+    return Boolean((env.TIKTOK_CLIENT_KEY || '').trim()) && Boolean((env.TIKTOK_CLIENT_SECRET || '').trim())
+  }
+  return false
+}
+
+function estadoDefault(platform: string): Record<string, unknown> {
+  return { connected: false, username: null, expires_at: null, configured: plataformaConfigurada(platform) }
+}
+
 async function buildStatus(userId: string): Promise<Record<string, unknown>> {
   const status: Record<string, unknown> = {
-    instagram: { connected: false, username: null, expires_at: null },
-    youtube: { connected: false, username: null, expires_at: null },
-    tiktok: { connected: false, username: null, expires_at: null },
+    instagram: estadoDefault('instagram'),
+    youtube: estadoDefault('youtube'),
+    tiktok: estadoDefault('tiktok'),
   }
   try {
     const r = await pool.query(
@@ -161,7 +179,7 @@ async function buildStatus(userId: string): Promise<Record<string, unknown>> {
     )
     for (const acc of r.rows as Array<Record<string, unknown>>) {
       const found = statusEntryFor(acc)
-      if (found) status[found.platform] = found.entry
+      if (found) status[found.platform] = { ...found.entry, configured: plataformaConfigurada(found.platform) }
     }
   } catch (err) {
     logger.error('[social/status] error:', err)
