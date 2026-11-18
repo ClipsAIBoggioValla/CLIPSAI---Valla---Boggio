@@ -34,24 +34,44 @@ def get_me(current_user: CurrentUser) -> UserResponse:
     return _to_user_response(current_user)
 
 
-def _apply_update(current_user: Usuario, payload: dict, db: DbSession) -> UserResponse:
-    if not payload:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nada para actualizar")
+def _actualizar_email(current_user: Usuario, payload: dict, db: DbSession) -> None:
+    """Cambia el email si viene en el payload, validando disponibilidad."""
+    if "email" not in payload or payload["email"] is None:
+        return
+    new_email = payload["email"]
+    exists = db.execute(select(Usuario.id).where(Usuario.email == new_email).where(Usuario.id != current_user.id)).first()
+    if exists is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="El email ya está registrado")
+    current_user.email = new_email
 
-    if "email" in payload and payload["email"] is not None:
-        new_email = payload["email"]
-        exists = db.execute(select(Usuario.id).where(Usuario.email == new_email).where(Usuario.id != current_user.id)).first()
-        if exists is not None:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="El email ya está registrado")
-        current_user.email = new_email
 
+def _actualizar_nombre(current_user: Usuario, payload: dict) -> None:
+    """Cambia el nombre si viene por full_name o nombre."""
     if "full_name" in payload or ("nombre" in payload and payload["nombre"] is not None):
         current_user.full_name = payload.get("full_name", payload.get("nombre"))
 
+
+def _actualizar_avatar(current_user: Usuario, payload: dict) -> None:
+    """Cambia el avatar si el modelo lo soporta y viene en el payload."""
     if "avatar_url" in payload and hasattr(current_user, "avatar_url"):
         setattr(current_user, "avatar_url", payload["avatar_url"])
+
+
+def _actualizar_tema(current_user: Usuario, payload: dict) -> None:
+    """Cambia el tema si el modelo lo soporta y viene un valor no nulo."""
     if "theme_preference" in payload and hasattr(current_user, "theme_preference") and payload["theme_preference"] is not None:
         setattr(current_user, "theme_preference", payload["theme_preference"])
+
+
+def _apply_update(current_user: Usuario, payload: dict, db: DbSession) -> UserResponse:
+    """Aplica el payload al usuario y devuelve la respuesta actualizada."""
+    if not payload:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nada para actualizar")
+
+    _actualizar_email(current_user, payload, db)
+    _actualizar_nombre(current_user, payload)
+    _actualizar_avatar(current_user, payload)
+    _actualizar_tema(current_user, payload)
 
     db.add(current_user)
     db.commit()

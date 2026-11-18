@@ -52,6 +52,32 @@ def _check_ffmpeg() -> None:
         raise RuntimeError("FFmpeg timeout al verificar version") from exc
 
 
+def _ffprobe_codec_types(src: Path) -> str | None:
+    """stdout de ffprobe con codec_type por stream; None si falla; '' si ffprobe no está (asumir audio)."""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type", "-of", "default=noprint_wrappers=1:nokey=1", str(src)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except Exception:
+        # ffprobe no instalado o error al ejecutar -> asumir que sí tiene audio para no bloquear, Whisper lo detectará
+        return ""
+    if result.returncode != 0:
+        return None
+    return result.stdout
+
+
+def _stdout_tiene_audio(stdout: str | None) -> bool:
+    """True si el stdout de ffprobe lista algún stream de audio."""
+    if stdout is None:
+        return False
+    # stdout contiene líneas con codec_type, ej: "video\naudio" o "audio"
+    types = [t.strip().lower() for t in stdout.strip().splitlines() if t.strip()]
+    return "audio" in types
+
+
 def _has_audio_track(video_path: str) -> bool:
     """Verifica con FFprobe si el video contiene pista de audio válida.
 
@@ -61,23 +87,13 @@ def _has_audio_track(video_path: str) -> bool:
     src = Path(video_path)
     if not src.is_file():
         return False
-    try:
-        result = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type", "-of", "default=noprint_wrappers=1:nokey=1", str(src)],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if result.returncode != 0:
-            return False
-        # stdout contiene líneas con codec_type, ej: "video\naudio" o "audio"
-        types = [t.strip().lower() for t in result.stdout.strip().splitlines() if t.strip()]
-        return "audio" in types
-    except FileNotFoundError:
+    stdout = _ffprobe_codec_types(src)
+    if stdout is None:
+        return False
+    if stdout == "":
         # ffprobe no instalado -> asumir que sí tiene audio para no bloquear, Whisper lo detectará
         return True
-    except Exception:
-        return True
+    return _stdout_tiene_audio(stdout)
 
 
 def _validate_video_source(video_path: str) -> Path:
@@ -102,18 +118,29 @@ def _validate_video_source(video_path: str) -> Path:
     return src
 
 
-def extract_audio_wav(video_path: str, wav_path: str | None = None) -> str:
-    src = _validate_video_source(video_path)
-    # Verificación previa de pista de audio antes de extraer (requerido por prompt)
-    if not _has_audio_track(video_path):
-        raise ValueError("El video subido no contiene audio o no se detectó voz interpretable para generar subtítulos.")
-    _check_ffmpeg()
+def _wav_tmp_path() -> str:
+    """Ruta de un WAV temporal único (delete=False)."""
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    tmp.close()
+    return tmp.name
+
+
+def _wav_destino(wav_path: str | None) -> Path:
+    """Path de salida del WAV (temporal único si no se indica ruta)."""
     if wav_path is None:
-        tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-        tmp.close()
-        wav_path = tmp.name
+        wav_path = _wav_tmp_path()
     out = Path(wav_path)
     out.parent.mkdir(parents=True, exist_ok=True)
+    return out
+
+
+def _wav_generado(res, out: Path) -> bool:
+    """True si la extracción retornó 0 y produjo un WAV no vacío."""
+    return res.returncode == 0 and out.exists() and out.stat().st_size > 0
+
+
+def _extraer_wav_ffmpeg(src: Path, out: Path) -> None:
+    """Ejecuta la extracción WAV principal y, si falla, el fallback. RuntimeError si ambas fallan."""
     # Extraer WAV temporal a 16kHz mono PCM para Whisper (evita fallos de lectura directa MP4)
     cmd: list[str] = [
         "ffmpeg",
@@ -127,26 +154,59 @@ def extract_audio_wav(video_path: str, wav_path: str | None = None) -> str:
         "-ac", "1",
         str(out),
     ]
+    res = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+    if _wav_generado(res, out):
+        return
+    fallback_cmd: list[str] = ["ffmpeg", "-y", "-i", str(src), "-vn", "-ac", "1", "-ar", "16000", str(out)]
+    fb_res = subprocess.run(fallback_cmd, capture_output=True, text=True, timeout=180)
+    if not _wav_generado(fb_res, out):
+        raise RuntimeError(f"Fallo en FFmpeg al extraer audio WAV: {res.stderr} | Fallback: {fb_res.stderr} (WAV 0 bytes)")
+
+
+def _stderr_de_called_process_error(exc) -> str:
+    """stderr decodificado del error de subprocess (o str del error)."""
+    if exc.stderr:
+        return exc.stderr.decode(errors="ignore")[:1200]
+    return str(exc)
+
+
+def _error_de_extraccion_audio(exc: Exception) -> Exception:
+    """Traduce un error de FFmpeg/subprocess a RuntimeError; devuelve exc sin cambios si es desconocido."""
+    if isinstance(exc, FileNotFoundError):
+        return RuntimeError(f"FFmpeg no instalado: {exc}")
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return RuntimeError("Timeout 180s extrayendo audio")
+    if isinstance(exc, subprocess.CalledProcessError):
+        return RuntimeError(f"Extraccion de audio fallida: {_stderr_de_called_process_error(exc)}")
+    return exc
+
+
+def _ejecutar_extraccion(src: Path, out: Path) -> None:
+    """Extrae el WAV con FFmpeg; RuntimeError ante fallos de ffmpeg/subprocess."""
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
-        if res.returncode != 0 or not out.exists() or out.stat().st_size == 0:
-            fallback_cmd: list[str] = ["ffmpeg", "-y", "-i", str(src), "-vn", "-ac", "1", "-ar", "16000", str(out)]
-            fb_res = subprocess.run(fallback_cmd, capture_output=True, text=True, timeout=180)
-            if fb_res.returncode != 0 or not out.exists() or out.stat().st_size == 0:
-                raise RuntimeError(f"Fallo en FFmpeg al extraer audio WAV: {res.stderr} | Fallback: {fb_res.stderr} (WAV 0 bytes)")
-        if not out.exists() or out.stat().st_size == 0:
-            raise RuntimeError(f"Fallo en FFmpeg al extraer audio WAV: {res.stderr} (0 bytes)")
-    except RuntimeError:
-        raise
-    except FileNotFoundError as exc:
-        raise RuntimeError(f"FFmpeg no instalado: {exc}") from exc
-    except subprocess.CalledProcessError as exc:
-        err = exc.stderr.decode(errors="ignore")[:1200] if exc.stderr else str(exc)
-        raise RuntimeError(f"Extraccion de audio fallida: {err}") from exc
-    except subprocess.TimeoutExpired as exc:
-        raise RuntimeError("Timeout 180s extrayendo audio") from exc
+        _extraer_wav_ffmpeg(src, out)
+    except Exception as exc:
+        translated = _error_de_extraccion_audio(exc)
+        if translated is exc:
+            raise
+        raise translated from exc
+
+
+def _exigir_wav_valido(out: Path) -> None:
+    """RuntimeError si el WAV final no existe o está vacío."""
     if not out.is_file() or out.stat().st_size == 0:
         raise RuntimeError(f"No se genero WAV valido en {out}")
+
+
+def extract_audio_wav(video_path: str, wav_path: str | None = None) -> str:
+    src = _validate_video_source(video_path)
+    # Verificación previa de pista de audio antes de extraer (requerido por prompt)
+    if not _has_audio_track(video_path):
+        raise ValueError("El video subido no contiene audio o no se detectó voz interpretable para generar subtítulos.")
+    _check_ffmpeg()
+    out = _wav_destino(wav_path)
+    _ejecutar_extraccion(src, out)
+    _exigir_wav_valido(out)
     return str(out)
 
 
@@ -204,21 +264,47 @@ def _verificar_wav_extraido(wav: Path) -> None:
         pass
 
 
+def _words_de_segmento(seg: Any) -> list:
+    """Lista cruda de words del segmento Whisper (vacía si no hay)."""
+    return getattr(seg, "words", None) or []
+
+
+def _palabra_de_whisper(word) -> TranscriptionWord | None:
+    """TranscriptionWord válida de una word de Whisper; None si es inválida."""
+    try:
+        word_start = float(word.start)
+        word_end = float(word.end)
+        word_text = str(word.word).strip()
+    except (AttributeError, TypeError, ValueError):
+        return None
+    if word_text and word_end >= word_start:
+        return TranscriptionWord(start=word_start, end=word_end, text=word_text)
+    return None
+
+
 def _palabras_de_segmento(seg: Any) -> list[TranscriptionWord]:
     """Convierte las words de un segmento Whisper en TranscriptionWord válidas."""
     word_timings: list[TranscriptionWord] = []
-    for word in getattr(seg, "words", None) or []:
-        try:
-            word_start = float(word.start)
-            word_end = float(word.end)
-            word_text = str(word.word).strip()
-            if word_text and word_end >= word_start:
-                word_timings.append(
-                    TranscriptionWord(start=word_start, end=word_end, text=word_text)
-                )
-        except (AttributeError, TypeError, ValueError):
-            continue
+    for word in _words_de_segmento(seg):
+        palabra = _palabra_de_whisper(word)
+        if palabra is not None:
+            word_timings.append(palabra)
     return word_timings
+
+
+def _texto_crudo_de_segmentos(segments: list) -> str:
+    """Texto plano concatenado de los segmentos (para el log de auditoría)."""
+    return " ".join([s.get("text","") if isinstance(s, dict) else str(getattr(s, "text", "")) for s in segments])
+
+
+def _logear_texto_whisper(segments: list) -> None:
+    """Log de texto crudo retornado por Whisper para auditoría (silencioso si falla)."""
+    try:
+        import logging
+        raw_text = _texto_crudo_de_segmentos(segments)
+        logging.getLogger(__name__).info(f"Texto detectado por Whisper: '{raw_text[:800]}'")
+    except Exception:
+        pass
 
 
 def _colectar_segmentos(segments_gen: Any) -> list[TranscriptionSegment]:
@@ -236,13 +322,16 @@ def _colectar_segmentos(segments_gen: Any) -> list[TranscriptionSegment]:
             TranscriptionSegment(start=start, end=end, text=text, words=_palabras_de_segmento(seg))
         )
     # Log de texto crudo retornado por Whisper para auditoría
-    try:
-        import logging
-        raw_text = " ".join([s.get("text","") if isinstance(s, dict) else str(getattr(s, "text", "")) for s in segments])
-        logging.getLogger(__name__).info(f"Texto detectado por Whisper: '{raw_text[:800]}'")
-    except Exception:
-        pass
+    _logear_texto_whisper(segments)
     return segments
+
+
+def _texto_crudo_gen(segments_gen: Any) -> str:
+    """Texto crudo del generador de Whisper; vacío si falla la lectura."""
+    try:
+        return " ".join([str(getattr(s, "text", "")) for s in segments_gen])
+    except Exception:
+        return ""
 
 
 def _exigir_segmentos(segments: list[TranscriptionSegment], segments_gen: Any, wav: Path) -> None:
@@ -254,11 +343,37 @@ def _exigir_segmentos(segments: list[TranscriptionSegment], segments_gen: Any, w
         wav_size2 = os.path.getsize(str(wav))
     except Exception:
         wav_size2 = 0
-    try:
-        raw = " ".join([str(getattr(s, "text", "")) for s in segments_gen]) if "segments_gen" in locals() else ""
-    except Exception:
-        raw = ""
+    raw = _texto_crudo_gen(segments_gen)
     raise RuntimeError(f"Whisper procesó el audio ({wav_size2} bytes) pero devolvió 0 segmentos. Texto crudo: '{raw[:500]}'")
+
+
+def _config_whisper(config: WhisperConfig | None, language: str, model_name: str) -> WhisperConfig:
+    """Config efectiva de Whisper (la provista o una nueva con language/model)."""
+    return config or WhisperConfig(language=language, model_name=model_name)
+
+
+def _modelo_resuelto(cfg: WhisperConfig, language: str, model_name: str) -> tuple[str, str, str]:
+    """(resolved_model, device, compute_type) para cargar el modelo Whisper."""
+    lang = cfg.language or language
+    model_id = cfg.model_name or model_name
+    resolved_model = _MODEL_MAP.get(model_id, model_id)
+    device, compute_type = _detect_device_and_compute(cfg.device, cfg.compute_type)
+    return resolved_model, device, compute_type
+
+
+def _segmentos_de_modelo(model: Any, wav: Path, cfg: WhisperConfig) -> list[TranscriptionSegment]:
+    """Ejecuta model.transcribe y colecta/exige los segmentos resultantes."""
+    segments_gen, _info = model.transcribe(
+        str(wav),
+        language="es",
+        word_timestamps=True,
+        vad_filter=cfg.vad_filter,
+        beam_size=5,
+        temperature=0.0,
+    )
+    segments = _colectar_segmentos(segments_gen)
+    _exigir_segmentos(segments, segments_gen, wav)
+    return segments
 
 
 def transcribe_wav(
@@ -270,31 +385,87 @@ def transcribe_wav(
     wav = Path(wav_path)
     if not wav.is_file():
         raise FileNotFoundError(f"WAV no encontrado: {wav_path}")
-    cfg = config or WhisperConfig(language=language, model_name=model_name)
-    lang = cfg.language or language
-    model_id = cfg.model_name or model_name
-    resolved_model = _MODEL_MAP.get(model_id, model_id)
-    device, compute_type = _detect_device_and_compute(cfg.device, cfg.compute_type)
+    cfg = _config_whisper(config, language, model_name)
+    resolved_model, device, compute_type = _modelo_resuelto(cfg, language, model_name)
     model = _cargar_modelo_whisper(resolved_model, device, compute_type)
     _verificar_wav_extraido(wav)
     try:
-        segments_gen, _info = model.transcribe(
-            str(wav),
-            language="es",
-            word_timestamps=True,
-            vad_filter=cfg.vad_filter,
-            beam_size=5,
-            temperature=0.0,
-        )
-        segments = _colectar_segmentos(segments_gen)
-        _exigir_segmentos(segments, segments_gen, wav)
-        return segments
-    except ValueError:
-        raise
-    except RuntimeError:
+        return _segmentos_de_modelo(model, wav, cfg)
+    except (ValueError, RuntimeError):
         raise
     except Exception as exc:
         raise RuntimeError(f"Transcripcion fallida: {exc}") from exc
+
+
+def _exigir_segmentos_runpod(remote_segments) -> None:
+    """RuntimeError si RunPod no devolvió una lista no vacía de segmentos."""
+    if not isinstance(remote_segments, list) or not remote_segments:
+        raise RuntimeError(
+            "RunPod no devolvió segmentos de transcripción; actualiza el worker para evitar cargar Whisper localmente en Render."
+        )
+
+
+def _segmento_runpod_normalizado(segment) -> TranscriptionSegment | None:
+    """Segmento de RunPod normalizado a TranscriptionSegment; None si es inválido."""
+    if not isinstance(segment, dict):
+        return None
+    try:
+        start = float(segment["start"])
+        end = float(segment["end"])
+        text = str(segment.get("text", "")).strip()
+    except (KeyError, TypeError, ValueError):
+        return None
+    if text and end > start:
+        return {"start": start, "end": end, "text": text, "words": []}
+    return None
+
+
+def _segmentos_de_runpod(remote_segments) -> list[TranscriptionSegment]:
+    """Segmentos normalizados desde la respuesta de RunPod; RuntimeError si el formato es inválido."""
+    _exigir_segmentos_runpod(remote_segments)
+    normalized_segments: list[TranscriptionSegment] = []
+    for segment in remote_segments:
+        normalizado = _segmento_runpod_normalizado(segment)
+        if normalizado is not None:
+            normalized_segments.append(normalizado)
+    if not normalized_segments:
+        raise RuntimeError("RunPod devolvió segmentos de transcripción en un formato inválido")
+    return normalized_segments
+
+
+def _transcripcion_via_runpod(video_source: Path) -> list[TranscriptionSegment] | None:
+    """Transcripción vía RunPod si está configurado; None si no."""
+    from .runpod_service import is_runpod_configured, process_local_video_via_runpod
+
+    if not is_runpod_configured():
+        return None
+    result = process_local_video_via_runpod(video_source)
+    return _segmentos_de_runpod(result.get("transcription_segments"))
+
+
+def _borrar_wav_temporal(wav_path: str) -> None:
+    """Borra el WAV temporal ignorando errores."""
+    try:
+        Path(wav_path).unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def _transcripcion_local(video_source: Path, language: str, model_name: str, keep_wav: bool) -> list[TranscriptionSegment]:
+    """Transcripción local: WAV temporal + transcribe_wav (borra el WAV salvo keep_wav)."""
+    # Verificación previa de pista de audio antes de Whisper (FFprobe)
+    if not _has_audio_track(str(video_source)):
+        raise ValueError("El video subido no contiene audio o no se detectó voz interpretable para generar subtítulos.")
+    wav_path = extract_audio_wav(str(video_source))
+    try:
+        # Extrae WAV temporal a 16kHz mono antes de Whisper (evita fallos lectura directa MP4)
+        segments = transcribe_wav(wav_path, language=language, model_name=model_name)
+        if not segments:
+            raise ValueError("El video subido no contiene audio o no se detectó voz interpretable para generar subtítulos.")
+        return segments
+    finally:
+        if not keep_wav:
+            _borrar_wav_temporal(wav_path)
 
 
 def transcribe_video(
@@ -304,52 +475,10 @@ def transcribe_video(
     keep_wav: bool = False,
 ) -> list[TranscriptionSegment]:
     video_source = _validate_video_source(video_path)
-    from .runpod_service import is_runpod_configured, process_local_video_via_runpod
-
-    if is_runpod_configured():
-        result = process_local_video_via_runpod(video_source)
-        remote_segments = result.get("transcription_segments")
-        if not isinstance(remote_segments, list) or not remote_segments:
-            raise RuntimeError(
-                "RunPod no devolvió segmentos de transcripción; actualiza el worker para evitar cargar Whisper localmente en Render."
-            )
-        normalized_segments: list[TranscriptionSegment] = []
-        for segment in remote_segments:
-            if not isinstance(segment, dict):
-                continue
-            try:
-                start = float(segment["start"])
-                end = float(segment["end"])
-                text = str(segment.get("text", "")).strip()
-            except (KeyError, TypeError, ValueError):
-                continue
-            if text and end > start:
-                normalized_segments.append(
-                    {"start": start, "end": end, "text": text, "words": []}
-                )
-        if not normalized_segments:
-            raise RuntimeError("RunPod devolvió segmentos de transcripción en un formato inválido")
-        return normalized_segments
-
-    # Verificación previa de pista de audio antes de Whisper (FFprobe)
-    if not _has_audio_track(str(video_source)):
-        raise ValueError("El video subido no contiene audio o no se detectó voz interpretable para generar subtítulos.")
-    wav_path: str | None = None
-    try:
-        # Extrae WAV temporal a 16kHz mono antes de Whisper (evita fallos lectura directa MP4)
-        wav_path = extract_audio_wav(str(video_source))
-        segments = transcribe_wav(wav_path, language=language, model_name=model_name)
-        if not segments:
-            raise ValueError("El video subido no contiene audio o no se detectó voz interpretable para generar subtítulos.")
-        return segments
-    except ValueError:
-        raise
-    finally:
-        if wav_path and not keep_wav:
-            try:
-                Path(wav_path).unlink(missing_ok=True)
-            except Exception:
-                pass
+    via_runpod = _transcripcion_via_runpod(video_source)
+    if via_runpod is not None:
+        return via_runpod
+    return _transcripcion_local(video_source, language, model_name, keep_wav)
 
 
 def transcribe_audio(wav_path: str, language: str = "es", model_name: str = "large-v3-turbo") -> list[TranscriptionSegment]:

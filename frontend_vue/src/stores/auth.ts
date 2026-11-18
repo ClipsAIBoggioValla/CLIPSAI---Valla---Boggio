@@ -21,6 +21,27 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  function readStoredAuthToken(): string | null {
+    try {
+      return (
+        localStorage.getItem(TOKEN_KEY) ||
+        localStorage.getItem('token') ||
+        localStorage.getItem('access_token')
+      )
+    } catch (e) {
+      console.error('[InitAuth] Error al leer localStorage:', e)
+      return null
+    }
+  }
+
+  function clearStoredAuthTokens(): void {
+    try {
+      localStorage.removeItem(TOKEN_KEY)
+      localStorage.removeItem('token')
+      localStorage.removeItem('access_token')
+    } catch {}
+  }
+
   async function init() {
     isLoading.value = true
     // Timeout de rescate 1000ms — forzar isLoading a false si no cambia
@@ -31,22 +52,9 @@ export const useAuthStore = defineStore('auth', () => {
       }
     }, 1000)
     try {
-      let stored: string | null = null
-      try {
-        stored =
-          localStorage.getItem(TOKEN_KEY) ||
-          localStorage.getItem('token') ||
-          localStorage.getItem('access_token')
-      } catch (e) {
-        console.error('[InitAuth] Error al leer localStorage:', e)
-        stored = null
-      }
+      const stored = readStoredAuthToken()
       if (!stored || stored === 'null' || stored === 'undefined' || stored.trim() === '') {
-        try {
-          localStorage.removeItem(TOKEN_KEY)
-          localStorage.removeItem('token')
-          localStorage.removeItem('access_token')
-        } catch {}
+        clearStoredAuthTokens()
         isLoading.value = false
         window.clearTimeout(rescue)
         return
@@ -70,11 +78,7 @@ export const useAuthStore = defineStore('auth', () => {
     }
     } catch (err) {
       console.error('[InitAuth] Error durante inicialización:', err)
-      try {
-        localStorage.removeItem(TOKEN_KEY)
-        localStorage.removeItem('token')
-        localStorage.removeItem('access_token')
-      } catch {}
+      clearStoredAuthTokens()
       persist(null)
       user.value = null
     } finally {

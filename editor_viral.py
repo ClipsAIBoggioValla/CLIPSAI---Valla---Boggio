@@ -257,7 +257,7 @@ class VideoEditor:
         return resultados
 
 
-def main():
+def _consolas_utf8() -> None:
     # Las consolas de Windows con codepage legible (cp1252) revientan al imprimir
     # "✓"/"✗" (UnicodeEncodeError) justo despues de un render exitoso, devolviendo
     # exit 1 a los scripts que invocan el CLI. Se fuerza UTF-8 sin cambiar el texto.
@@ -267,35 +267,49 @@ def main():
         except (AttributeError, ValueError):  # streams sin reconfigure (p.ej. capturados)
             pass
 
+
+def _mostrar_uso() -> None:
+    print("\nEDITOR DE VIDEOS VIRALES")
+    print("=" * 50)
+    print("Uso:")
+    print("  Todos los clips: python editor_viral.py [carpeta_clips] [carpeta_salida]")
+    print("  Un clip:         python editor_viral.py clips/clip_1.mp4 [carpeta_salida]")
+    print("\nEjemplos:")
+    print("  python editor_viral.py clips clips_editados")
+    print("  python editor_viral.py clips/clip_1.mp4 clips_editados")
+    print("=" * 50)
+    sys.exit(1)
+
+
+def _procesar_clip_individual(clips_input: str, salida_dir: str) -> None:
+    print(f"\nProcesando clip individual: {clips_input}")
+    editor = VideoEditor(str(Path(clips_input).parent), salida_dir)
+    resultado = editor.procesar_clip(Path(clips_input), 0)
+    if resultado:
+        print(f"\n✓ Clip procesado: {resultado}")
+    else:
+        print("\n✗ Error al procesar clip")
+
+
+def _procesar_carpeta(clips_input: str, salida_dir: str) -> None:
+    editor = VideoEditor(clips_input, salida_dir)
+    for r in editor.procesar_todos():
+        print(f"  - {r}")
+
+
+def main():
+    _consolas_utf8()
+
     if len(sys.argv) < 2:
-        print("\nEDITOR DE VIDEOS VIRALES")
-        print("=" * 50)
-        print("Uso:")
-        print("  Todos los clips: python editor_viral.py [carpeta_clips] [carpeta_salida]")
-        print("  Un clip:         python editor_viral.py clips/clip_1.mp4 [carpeta_salida]")
-        print("\nEjemplos:")
-        print("  python editor_viral.py clips clips_editados")
-        print("  python editor_viral.py clips/clip_1.mp4 clips_editados")
-        print("=" * 50)
-        sys.exit(1)
+        _mostrar_uso()
 
     clips_input = sys.argv[1]
     salida_dir = sys.argv[2] if len(sys.argv) > 2 else "clips_editados"
 
-    input_path = Path(clips_input)
-    if input_path.is_file():
-        print(f"\nProcesando clip individual: {clips_input}")
-        editor = VideoEditor(str(input_path.parent), salida_dir)
-        resultado = editor.procesar_clip(input_path, 0)
-        if resultado:
-            print(f"\n✓ Clip procesado: {resultado}")
-        else:
-            print("\n✗ Error al procesar clip")
+    if Path(clips_input).is_file():
+        _procesar_clip_individual(clips_input, salida_dir)
     else:
-        editor = VideoEditor(clips_input, salida_dir)
-        resultados = editor.procesar_todos()
-        for r in resultados:
-            print(f"  - {r}")
+        _procesar_carpeta(clips_input, salida_dir)
 
 
 if __name__ == "__main__":

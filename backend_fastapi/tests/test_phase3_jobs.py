@@ -102,6 +102,83 @@ def _ejecutar(
         jobs_router._run_job(job.id)  # type: ignore[arg-type]
 
 
+# ------------------------------------------------------------------ helpers _aux_*
+
+def _fake_render_secuencial(dest: Path, metas: list, salidas: list):
+    def fake_render(*args: Any, **kw: Any) -> tuple[str, dict]:
+        idx = salidas.index(Path(args[5])) if False else len(list(dest.glob("clip_*.mp4")))
+        salida = salidas[idx]
+        salida.write_bytes(b"r")
+        return str(salida), metas[idx]
+    return fake_render
+
+
+def _fake_render_cut_secuencial(dest: Path):
+    def fake_render(*args: Any, **kw: Any) -> tuple[str, dict]:
+        n = len(list(dest.glob("clip_*.mp4")))
+        salida = dest / f"clip_{n}.mp4"
+        salida.write_bytes(b"r")
+        return str(salida), {"render": "cut"}
+    return fake_render
+
+
+def _aux_assert_teaser_meta(meta) -> None:
+    assert meta["render"] == "hook+ass"
+    assert meta["hook_mode"] == "teaser"
+    assert meta["aspect_ratio"] == "9:16"
+
+
+def _aux_assert_teaser_flags_y_archivo(salida, meta, mock) -> None:
+    assert meta["hook_applied"] and meta["ass_applied"]
+    assert Path(salida).is_file()
+    mock["ass"].generate_hooked_ass.assert_called_once()
+    mock["ffmpeg"].build_hook_clip.assert_called_once()
+    mock["ffmpeg"].burn_subtitles.assert_called_once()
+
+
+def _aux_assert_stats_render_tipos(stats) -> None:
+    assert stats["ass"] == 1
+    assert stats["hook"] == 1
+    assert stats["cut"] == 1
+
+
+def _aux_assert_stats_render_fallbacks(stats) -> None:
+    assert stats["fallback"] == 1
+    assert stats["hook+ass"] == 1
+
+
+def _aux_assert_items_raros_escalares(por_titulo) -> None:
+    assert por_titulo["corto"].end_time - por_titulo["corto"].start_time == pytest.approx(30.0)
+    assert por_titulo["score-malo"].score is None
+    # storage_path no-str se coerciona a str (línea 925) aunque el render lo reemplace
+    assert por_titulo["storage-raro"].storage_path.endswith("clip_4.mp4")
+
+
+def _aux_assert_items_raros_tags(por_titulo) -> None:
+    assert por_titulo["tags-raros"].tags["_raw_tags"] == ["una-tag"]
+    assert por_titulo["tags-lista"].tags["_raw_tags"] == ["t1", "t2"]
+
+
+def _aux_escenario_error_corto(tmp_path: Path, user: Any) -> None:
+    fake_db = FakeSession()
+    video = _video_tmp(tmp_path, user)
+    job = _job_de(video)
+    fake_db.seed(video, job)
+    _ejecutar(fake_db, job, Mock(side_effect=RuntimeError("4")))
+    assert job.status == "failed"
+    # el mensaje spec ("| Details:") se preserva; lo expandido queda en metadata
+    assert "Posibles causas" in (job.result_metadata["error"] or "")
+
+
+def _aux_escenario_indexerror(tmp_path: Path, user: Any) -> None:
+    fake_db = FakeSession()
+    video2 = _video_tmp(tmp_path, user)
+    job2 = _job_de(video2)
+    fake_db.seed(video2, job2)
+    _ejecutar(fake_db, job2, Mock(side_effect=IndexError("segments: list index out of range")))
+    assert "No se detectaron segmentos de audio" in (job2.result_metadata["error"] or "")
+
+
 class _patches_apiladas:
     """Context manager que apila varios patches."""
 
@@ -247,14 +324,8 @@ class TestRenderClipConAssYHook:
             hook_sel=(5.0, 8.0, {"mode": "teaser", "text": "hook"}),
             probe=_PROBE_OK,
         )
-        assert meta["render"] == "hook+ass"
-        assert meta["hook_applied"] and meta["ass_applied"]
-        assert meta["hook_mode"] == "teaser"
-        assert meta["aspect_ratio"] == "9:16"
-        assert Path(salida).is_file()
-        mock["ass"].generate_hooked_ass.assert_called_once()
-        mock["ffmpeg"].build_hook_clip.assert_called_once()
-        mock["ffmpeg"].burn_subtitles.assert_called_once()
+        _aux_assert_teaser_meta(meta)
+        _aux_assert_teaser_flags_y_archivo(salida, meta, mock)
 
     def test_sin_hook_ass_simple(self, tmp_path: Path) -> None:
         mock = _mocks_render(tmp_path)
@@ -732,23 +803,17 @@ class TestRunJobFase3:
         ]
         salidas = [dest / f"clip_{i}.mp4" for i in range(5)]
 
-        def fake_render(*args: Any, **kw: Any) -> tuple[str, dict]:
-            idx = salidas.index(Path(args[5])) if False else len(list(dest.glob("clip_*.mp4")))
-            salida = salidas[idx]
-            salida.write_bytes(b"r")
-            return str(salida), metas[idx]
-
         with (
             patch.object(jobs_router, "_set_progress", Mock(side_effect=RuntimeError("x"))),
             patch.object(jobs_router, "_select_hook_for_clip", Mock(return_value=None)),  # SIN hook → rama 917
         ):
-            _ejecutar(fake_db, job, _engine_ok({"clips": clips}), render=Mock(side_effect=fake_render))
+            _ejecutar(
+                fake_db, job, _engine_ok({"clips": clips}),
+                render=Mock(side_effect=_fake_render_secuencial(dest, metas, salidas)),
+            )
         stats = job.result_metadata["_render_stats"]
-        assert stats["ass"] == 1
-        assert stats["hook"] == 1
-        assert stats["cut"] == 1
-        assert stats["fallback"] == 1
-        assert stats["hook+ass"] == 1
+        _aux_assert_stats_render_tipos(stats)
+        _aux_assert_stats_render_fallbacks(stats)
 
     def test_items_raros_se_salten_o_clampean(self, tmp_path, user) -> None:
         fake_db = FakeSession()
@@ -765,26 +830,19 @@ class TestRunJobFase3:
             {"title": "storage-raro", "inicio": 0, "fin": 20, "score": 9, "storage_path": 123},
         ]
 
-        def fake_render(*args: Any, **kw: Any) -> tuple[str, dict]:
-            n = len(list(dest.glob("clip_*.mp4")))
-            salida = dest / f"clip_{n}.mp4"
-            salida.write_bytes(b"r")
-            return str(salida), {"render": "cut"}
-
         with (
             patch.object(jobs_router, "_set_progress", Mock(side_effect=RuntimeError("x"))),
             patch.object(sys, "stdout", SimpleNamespace(flush=Mock(side_effect=ValueError("no")))),
         ):
-            _ejecutar(fake_db, job, _engine_ok({"clips": clips}), render=Mock(side_effect=fake_render))
+            _ejecutar(
+                fake_db, job, _engine_ok({"clips": clips}),
+                render=Mock(side_effect=_fake_render_cut_secuencial(dest)),
+            )
         assert job.status == "completed"
         assert len(fake_db.added) == 5
         por_titulo = {c.title: c for c in fake_db.added}
-        assert por_titulo["corto"].end_time - por_titulo["corto"].start_time == pytest.approx(30.0)
-        assert por_titulo["score-malo"].score is None
-        assert por_titulo["tags-raros"].tags["_raw_tags"] == ["una-tag"]
-        assert por_titulo["tags-lista"].tags["_raw_tags"] == ["t1", "t2"]
-        # storage_path no-str se coerciona a str (línea 925) aunque el render lo reemplace
-        assert por_titulo["storage-raro"].storage_path.endswith("clip_4.mp4")
+        _aux_assert_items_raros_escalares(por_titulo)
+        _aux_assert_items_raros_tags(por_titulo)
 
     def test_hook_selector_explota_usa_fallback(self, tmp_path, user) -> None:
         fake_db = FakeSession()
@@ -837,21 +895,8 @@ class TestRunJobFase3:
         assert "no se puede renderizar" in (job.error_message or "")
 
     def test_error_corto_expandido_y_indexerror(self, tmp_path, user) -> None:
-        fake_db = FakeSession()
-        video = _video_tmp(tmp_path, user)
-        job = _job_de(video)
-        fake_db.seed(video, job)
-        _ejecutar(fake_db, job, Mock(side_effect=RuntimeError("4")))
-        assert job.status == "failed"
-        # el mensaje spec ("| Details:") se preserva; lo expandido queda en metadata
-        assert "Posibles causas" in (job.result_metadata["error"] or "")
-
-        fake_db2 = FakeSession()
-        video2 = _video_tmp(tmp_path, user)
-        job2 = _job_de(video2)
-        fake_db2.seed(video2, job2)
-        _ejecutar(fake_db2, job2, Mock(side_effect=IndexError("segments: list index out of range")))
-        assert "No se detectaron segmentos de audio" in (job2.result_metadata["error"] or "")
+        _aux_escenario_error_corto(tmp_path, user)
+        _aux_escenario_indexerror(tmp_path, user)
 
     def test_metadata_rota_falla_igual_a_failed(self, tmp_path, user) -> None:
         fake_db = FakeSession()

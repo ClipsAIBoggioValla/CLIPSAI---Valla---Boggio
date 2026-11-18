@@ -27,6 +27,62 @@ from backend_fastapi.app.routers import jobs as jobs_router
 ENGINE_PATH = "backend_fastapi.app.services.engine.run_clip_engine"
 
 
+# ------------------------------------------------------------------ helpers de aserción (_aux_*)
+
+def _aux_assert_score_threshold_casos_base() -> None:
+    assert jobs_router._meets_score_threshold(None) is True
+    assert jobs_router._meets_score_threshold(9) is True
+    assert jobs_router._meets_score_threshold(2) is False        # escala 0-10
+
+
+def _aux_assert_score_threshold_escalas_altas() -> None:
+    assert jobs_router._meets_score_threshold(70) is True        # escala 0-100
+    assert jobs_router._meets_score_threshold(30) is False
+    assert jobs_router._meets_score_threshold(0.8) is True       # escala 0-1
+
+
+def _aux_assert_parse_time_to_seconds_formatos() -> None:
+    assert jobs_router._parse_time_to_seconds(None) == 0.0
+    assert jobs_router._parse_time_to_seconds(12.5) == pytest.approx(12.5)
+    assert jobs_router._parse_time_to_seconds("00:01:10") == pytest.approx(70.0)
+
+
+def _aux_assert_parse_time_to_seconds_casos() -> None:
+    assert jobs_router._parse_time_to_seconds("02:30") == pytest.approx(150.0)
+    assert jobs_router._parse_time_to_seconds("15.5") == pytest.approx(15.5)
+    assert jobs_router._parse_time_to_seconds("basura") == 0.0
+
+
+def _aux_assert_runpod_r2_job(job) -> None:
+    assert job.status == "completed"
+    assert job.progress == 100
+    assert job.result_metadata["_source"] == "runpod_r2"
+
+
+def _aux_assert_runpod_r2_clip(clip_r2) -> None:
+    assert clip_r2.storage_path.startswith("https://")
+    assert clip_r2.tags["_render"] == "runpod_r2"
+    assert clip_r2.tags["has_ass"] is True
+
+
+def _aux_assert_render_local_job(job) -> None:
+    assert job.status == "completed"
+    assert job.progress == 100
+    assert job.result_metadata["_render_stats"]["total"] == 1  # score 2 quedó filtrado
+
+
+def _aux_assert_render_local_stats(job) -> None:
+    assert job.result_metadata["_render_stats"]["hook+ass"] == 1
+    assert job.result_metadata["_segments_count"] == 2
+    assert job.result_metadata["_hooks_count"] == 1
+
+
+def _aux_assert_render_local_clip(fake_db) -> None:
+    assert len(fake_db.added) == 1
+    assert fake_db.added[0].tags["_render"] == "hook+ass"
+    assert fake_db.added[0].tags["hook"]["applied"] is True
+
+
 # ------------------------------------------------------------------ fixtures
 
 def _video_tmp(tmp_path: Path, usuario: Any) -> Any:
@@ -85,21 +141,13 @@ class TestHelpersJobs:
         assert resuelto.is_dir()
 
     def test_meets_score_threshold_escalas(self) -> None:
-        assert jobs_router._meets_score_threshold(None) is True
-        assert jobs_router._meets_score_threshold(9) is True
-        assert jobs_router._meets_score_threshold(2) is False        # escala 0-10
-        assert jobs_router._meets_score_threshold(70) is True        # escala 0-100
-        assert jobs_router._meets_score_threshold(30) is False
-        assert jobs_router._meets_score_threshold(0.8) is True       # escala 0-1
+        _aux_assert_score_threshold_casos_base()
+        _aux_assert_score_threshold_escalas_altas()
         assert jobs_router._meets_score_threshold("texto-raro") is True
 
     def test_parse_time_to_seconds(self) -> None:
-        assert jobs_router._parse_time_to_seconds(None) == 0.0
-        assert jobs_router._parse_time_to_seconds(12.5) == pytest.approx(12.5)
-        assert jobs_router._parse_time_to_seconds("00:01:10") == pytest.approx(70.0)
-        assert jobs_router._parse_time_to_seconds("02:30") == pytest.approx(150.0)
-        assert jobs_router._parse_time_to_seconds("15.5") == pytest.approx(15.5)
-        assert jobs_router._parse_time_to_seconds("basura") == 0.0
+        _aux_assert_parse_time_to_seconds_formatos()
+        _aux_assert_parse_time_to_seconds_casos()
 
     def test_titulo_largo_se_trunca(self) -> None:
         largo = "palabras " * 20
@@ -237,15 +285,10 @@ class TestRunJobHeavy:
         ):
             jobs_router._run_job(job.id)  # type: ignore[arg-type]
 
-        assert job.status == "completed"
-        assert job.progress == 100
-        assert job.result_metadata["_source"] == "runpod_r2"
+        _aux_assert_runpod_r2_job(job)
         assert job.result_metadata["_r2_clip_count"] == 1
         assert len(db2.added) == 1
-        clip_r2 = db2.added[0]
-        assert clip_r2.storage_path.startswith("https://")
-        assert clip_r2.tags["_render"] == "runpod_r2"
-        assert clip_r2.tags["has_ass"] is True
+        _aux_assert_runpod_r2_clip(db2.added[0])
 
     def test_run_job_render_local_completa(self, tmp_path, user) -> None:
         fake_db = FakeSession()
@@ -273,15 +316,9 @@ class TestRunJobHeavy:
             fake_db, job, Mock(return_value=result), Mock(side_effect=fake_render)
         )
 
-        assert job.status == "completed"
-        assert job.progress == 100
-        assert job.result_metadata["_render_stats"]["total"] == 1  # score 2 quedó filtrado
-        assert job.result_metadata["_render_stats"]["hook+ass"] == 1
-        assert job.result_metadata["_segments_count"] == 2
-        assert job.result_metadata["_hooks_count"] == 1
-        assert len(fake_db.added) == 1
-        assert fake_db.added[0].tags["_render"] == "hook+ass"
-        assert fake_db.added[0].tags["hook"]["applied"] is True
+        _aux_assert_render_local_job(job)
+        _aux_assert_render_local_stats(job)
+        _aux_assert_render_local_clip(fake_db)
 
     def test_run_job_sin_clips_marca_failed(self, tmp_path, user) -> None:
         fake_db = FakeSession()

@@ -60,25 +60,41 @@ def _sanitize_text(text: str) -> str:
     return t
 
 
-def _wrap_text(text: str, max_chars: int = 28) -> str:
-    words = text.split()
-    if not words:
-        return text
+def _longitud_palabra(w: str, cur: list[str]) -> int:
+    """Largo de la palabra más el espacio si ya hay texto acumulado."""
+    return len(w) + (1 if cur else 0)
+
+
+def _cortar_linea(
+    lines: list[str], cur: list[str], cur_len: int, w: str, add: int, max_chars: int
+) -> tuple[list[str], int]:
+    """Corta la línea actual si excede el máximo. Devuelve (cur, cur_len)."""
+    if cur_len + add > max_chars and cur:
+        lines.append(" ".join(cur))
+        return [w], len(w)
+    cur.append(w)
+    return cur, cur_len + add
+
+
+def _lineas_de_palabras(words: list[str], max_chars: int) -> list[str]:
+    """Agrupa palabras en líneas de hasta max_chars."""
     lines: list[str] = []
     cur: list[str] = []
     cur_len = 0
     for w in words:
-        add = len(w) + (1 if cur else 0)
-        if cur_len + add > max_chars and cur:
-            lines.append(" ".join(cur))
-            cur = [w]
-            cur_len = len(w)
-        else:
-            cur.append(w)
-            cur_len += add
+        add = _longitud_palabra(w, cur)
+        cur, cur_len = _cortar_linea(lines, cur, cur_len, w, add, max_chars)
     if cur:
         lines.append(" ".join(cur))
-    return "\\N".join(lines)
+    return lines
+
+
+def _wrap_text(text: str, max_chars: int = 28) -> str:
+    """Envuelve el texto en líneas ASS ('\\N') de hasta max_chars."""
+    words = text.split()
+    if not words:
+        return text
+    return "\\N".join(_lineas_de_palabras(words, max_chars))
 
 
 def generate_ass_content(
@@ -99,22 +115,44 @@ def generate_ass_content(
     return header + "\n".join(lines)
 
 
-def _segment_to_dialogue(seg, *, min_duration, max_duration, max_chars_per_line):
+def _campos_segmento(seg) -> tuple[float, float, str] | None:
+    """(start, end, texto) del segmento; None si no son convertibles."""
     try:
         start = float(seg.get("start", 0))
         end = float(seg.get("end", 0))
         text_raw = str(seg.get("text", "") or "")
     except Exception:
         return None
+    return start, end, text_raw
+
+
+def _end_seguro(start: float, end: float, min_duration: float) -> float:
+    """End mínimo garantizado cuando el segmento queda invertido."""
     if end <= start:
-        end = start + min_duration
+        return start + min_duration
+    return end
+
+
+def _end_limitado(start: float, end: float, min_duration: float, max_duration: float) -> float:
+    """Ajusta end a los límites de duración mínima y máxima."""
     dur = end - start
-    if dur < 0.15:
-        return None
     if dur < min_duration:
-        end = start + min_duration
+        return start + min_duration
     if dur > max_duration:
-        end = start + max_duration
+        return start + max_duration
+    return end
+
+
+def _segment_to_dialogue(seg, *, min_duration, max_duration, max_chars_per_line):
+    """Línea 'Dialogue: ...' del segmento; None si se descarta."""
+    campos = _campos_segmento(seg)
+    if campos is None:
+        return None
+    start, end, text_raw = campos
+    end = _end_seguro(start, end, min_duration)
+    if end - start < 0.15:
+        return None
+    end = _end_limitado(start, end, min_duration, max_duration)
     text = _sanitize_text(text_raw)
     if not text:
         return None
@@ -161,6 +199,72 @@ def generate_ass_for_clip(
     return write_ass_file(segments, output_path, title=clip_title or "clipsai")
 
 
+def _validar_ventana_hook(hook_start: float, hook_end: float) -> None:
+    """Valida duración y rango del hook; ValueError si es inválido."""
+    hook_dur = hook_end - hook_start
+    if not (2.5 < hook_dur < 5.5):
+        raise ValueError(f"Hook duracion {hook_dur:.3f}s debe estar estrictamente entre 2.5 y 5.5s")
+    if not (0.0 <= hook_start < hook_end):
+        raise ValueError(f"Rango de hook invalido: [{hook_start},{hook_end}]")
+
+
+def _segmento_en_ventana(s, inicio: float, fin: float) -> bool:
+    """True si el segmento cruza la ventana [inicio, fin)."""
+    return float(s.get("start", 0)) < fin and float(s.get("end", 0)) > inicio
+
+
+def _segmentos_en_ventana(segments: list, inicio: float, fin: float) -> list:
+    """Segmentos que cruzan la ventana [inicio, fin)."""
+    return [s for s in segments if _segmento_en_ventana(s, inicio, fin)]
+
+
+def _ventana_de_trabajo(segments: list, clip_start: float, clip_end: float) -> tuple[float, float]:
+    """Ventana [start, end) del clip, ampliada ±2s si no hay segmentos."""
+    if _segmentos_en_ventana(segments, clip_start, clip_end):
+        return clip_start, clip_end
+    # Si no hay segmentos en la ventana, ampliar ±2 segundos
+    window_start = max(0.0, clip_start - 2.0)
+    window_end = clip_end + 2.0
+    logging.getLogger(__name__).warning(
+        "[ass] Sin segmentos en ventana [%.1f-%.1f], ampliando a [%.1f-%.1f]",
+        clip_start, clip_end, window_start, window_end
+    )
+    return window_start, window_end
+
+
+def _seg_del_rango(st: float, en: float, txt: str, rango_start: float, rango_end: float, base: float) -> SubtitleSegment | None:
+    """Segmento recortado al rango con base de desplazamiento; None si queda vacío."""
+    if en < rango_start or st > rango_end:
+        return None
+    cs = max(st, rango_start)
+    ce = min(en, rango_end)
+    if ce > cs:
+        return SubtitleSegment(start=cs - base, end=ce - base, text=txt)
+    return None
+
+
+def _segs_de_segmento(
+    s,
+    hook_start: float,
+    hook_end: float,
+    window_start: float,
+    window_end: float,
+    clip_start: float,
+    hook_dur: float,
+) -> tuple[SubtitleSegment | None, SubtitleSegment | None]:
+    """(hook_seg, clip_seg) recortados para el segmento s; None si quedan vacíos."""
+    st = float(s.get("start", 0))
+    en = float(s.get("end", 0))
+    txt = str(s.get("text", "")).strip()
+    if not txt or en <= st:
+        return None, None
+    # Segmentos para el hook
+    hook_seg = _seg_del_rango(st, en, txt, hook_start, hook_end, hook_start)
+    # Segmentos para el clip (usar ventana ampliada si es necesario)
+    clip_seg = _seg_del_rango(st, en, txt, window_start, window_end, clip_start - hook_dur)
+    return hook_seg, clip_seg
+
+
 def _generate_hooked_segments(
     segments: list[SubtitleSegment],
     clip_start: float,
@@ -169,54 +273,20 @@ def _generate_hooked_segments(
     hook_end: float,
 ) -> tuple[list[SubtitleSegment], list[SubtitleSegment]]:
     """Lógica compartida de segmentos hooked. Retorna (hook_segs, clip_segs)."""
+    _validar_ventana_hook(hook_start, hook_end)
+    window_start, window_end = _ventana_de_trabajo(segments, clip_start, clip_end)
     hook_dur = hook_end - hook_start
-    if not (2.5 < hook_dur < 5.5):
-        raise ValueError(f"Hook duracion {hook_dur:.3f}s debe estar estrictamente entre 2.5 y 5.5s")
-    if not (0.0 <= hook_start < hook_end):
-        raise ValueError(f"Rango de hook invalido: [{hook_start},{hook_end}]")
-    
-    # Verificar si hay segmentos dentro de la ventana del clip
-    segs_en_ventana = [
-        s for s in segments
-        if float(s.get("start", 0)) < clip_end and float(s.get("end", 0)) > clip_start
-    ]
-    
-    # Si no hay segmentos en la ventana, ampliar ±2 segundos
-    window_start = clip_start
-    window_end = clip_end
-    if not segs_en_ventana:
-        window_start = max(0.0, clip_start - 2.0)
-        window_end = clip_end + 2.0
-        logger = logging.getLogger(__name__)
-        logger.warning(
-            "[ass] Sin segmentos en ventana [%.1f-%.1f], ampliando a [%.1f-%.1f]",
-            clip_start, clip_end, window_start, window_end
-        )
-    
     hook_segs: list[SubtitleSegment] = []
     clip_segs: list[SubtitleSegment] = []
     for s in segments:
         try:
-            st = float(s.get("start", 0))
-            en = float(s.get("end", 0))
-            txt = str(s.get("text", "")).strip()
-            if not txt or en <= st:
-                continue
-            # Segmentos para el hook
-            if en < hook_start or st > hook_end:
-                pass
-            else:
-                cs = max(st, hook_start)
-                ce = min(en, hook_end)
-                if ce > cs:
-                    hook_segs.append(SubtitleSegment(start=cs - hook_start, end=ce - hook_start, text=txt))
-            # Segmentos para el clip (usar ventana ampliada si es necesario)
-            if en < window_start or st > window_end:
-                continue
-            cs = max(st, window_start)
-            ce = min(en, window_end)
-            if ce > cs:
-                clip_segs.append(SubtitleSegment(start=cs - clip_start + hook_dur, end=ce - clip_start + hook_dur, text=txt))
+            hook_seg, clip_seg = _segs_de_segmento(
+                s, hook_start, hook_end, window_start, window_end, clip_start, hook_dur
+            )
+            if hook_seg is not None:
+                hook_segs.append(hook_seg)
+            if clip_seg is not None:
+                clip_segs.append(clip_seg)
         except Exception:
             continue
     return hook_segs, clip_segs

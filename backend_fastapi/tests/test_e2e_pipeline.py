@@ -11,19 +11,83 @@ from backend_fastapi.app.routers import videos
 from backend_fastapi.app.services import runpod_service
 
 
+def _aux_assert_presigned_url_meta(ClientMethod, Params) -> None:
+    assert ClientMethod in {"put_object", "get_object"}
+    assert Params["Bucket"] == "clipsai-e2e"
+
+
+def _aux_assert_presigned_expiry(ClientMethod, ExpiresIn) -> None:
+    if ClientMethod == "put_object":
+        assert ExpiresIn == 900
+    else:
+        assert ExpiresIn == 3600
+
+
+def _aux_fake_presigned_url(ClientMethod, Params, ExpiresIn) -> str:
+    _aux_assert_presigned_url_meta(ClientMethod, Params)
+    _aux_assert_presigned_expiry(ClientMethod, ExpiresIn)
+    return f"http://testserver/mock-r2/{Params['Key']}"
+
+
+def _fake_runpod_descarga(client: TestClient, expected_video: bytes):
+    def fake_runpod(video_url: str, **_kwargs):
+        # Simulate RunPod downloading the one-hour presigned GET URL from R2.
+        downloaded = client.get(video_url)
+        assert downloaded.status_code == 200
+        assert downloaded.content == expected_video
+        return {
+            "status": "COMPLETED",
+            "engine": "native_claude",
+            "clip_count": 1,
+            "clips": [
+                {
+                    "title": "La revelación del partido",
+                    "start_time": 12.5,
+                    "end_time": 42.5,
+                    "score": 9,
+                }
+            ],
+        }
+
+    return fake_runpod
+
+
+def _aux_assert_upload_url_response(upload_url_response) -> None:
+    assert upload_url_response.status_code == 200
+    signed_upload = upload_url_response.json()
+    assert signed_upload["upload_url"].startswith("http://testserver/mock-r2/uploads/")
+    assert signed_upload["file_key"].startswith("uploads/")
+    return signed_upload
+
+
+def _aux_assert_put_stored(put_response, stored_objects, file_key, expected_video) -> None:
+    assert put_response.status_code == 200
+    assert stored_objects[file_key] == expected_video
+
+
+def _aux_assert_process_result_basico(result) -> None:
+    assert result["status"] == "COMPLETED"
+    assert result["clip_count"] == 1
+    assert isinstance(result["clips"], list)
+
+
+def _aux_assert_clip_basico(clip) -> None:
+    assert isinstance(clip["title"], str)
+    assert isinstance(clip["score"], (int, float))
+
+
+def _aux_assert_clip_rango(clip) -> None:
+    assert isinstance(clip["start_time"], (int, float))
+    assert isinstance(clip["end_time"], (int, float))
+
+
 @pytest.fixture
 def e2e_client(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[TestClient, dict[str, bytes]]]:
     stored_objects: dict[str, bytes] = {}
 
     class FakeS3Client:
         def generate_presigned_url(self, *, ClientMethod, Params, ExpiresIn):
-            assert ClientMethod in {"put_object", "get_object"}
-            assert Params["Bucket"] == "clipsai-e2e"
-            if ClientMethod == "put_object":
-                assert ExpiresIn == 900
-            else:
-                assert ExpiresIn == 3600
-            return f"http://testserver/mock-r2/{Params['Key']}"
+            return _aux_fake_presigned_url(ClientMethod, Params, ExpiresIn)
 
     app = FastAPI()
     app.include_router(videos.upload_url_router)
@@ -56,39 +120,16 @@ def test_direct_r2_upload_then_runpod_processing_returns_clip_metadata(
         "/api/videos/upload-url",
         json={"file_name": "podcast.mp4", "file_type": "video/mp4"},
     )
-    assert upload_url_response.status_code == 200
-    signed_upload = upload_url_response.json()
-    assert signed_upload["upload_url"].startswith("http://testserver/mock-r2/uploads/")
-    assert signed_upload["file_key"].startswith("uploads/")
+    signed_upload = _aux_assert_upload_url_response(upload_url_response)
 
     put_response = client.put(
         signed_upload["upload_url"],
         content=expected_video,
         headers={"Content-Type": "video/mp4"},
     )
-    assert put_response.status_code == 200
-    assert stored_objects[signed_upload["file_key"]] == expected_video
+    _aux_assert_put_stored(put_response, stored_objects, signed_upload["file_key"], expected_video)
 
-    def fake_runpod(video_url: str, **_kwargs):
-        # Simulate RunPod downloading the one-hour presigned GET URL from R2.
-        downloaded = client.get(video_url)
-        assert downloaded.status_code == 200
-        assert downloaded.content == expected_video
-        return {
-            "status": "COMPLETED",
-            "engine": "native_claude",
-            "clip_count": 1,
-            "clips": [
-                {
-                    "title": "La revelación del partido",
-                    "start_time": 12.5,
-                    "end_time": 42.5,
-                    "score": 9,
-                }
-            ],
-        }
-
-    monkeypatch.setattr(runpod_service, "process_video_via_runpod", fake_runpod)
+    monkeypatch.setattr(runpod_service, "process_video_via_runpod", _fake_runpod_descarga(client, expected_video))
     process_response = client.post(
         "/api/videos/process",
         json={"file_key": signed_upload["file_key"]},
@@ -96,14 +137,10 @@ def test_direct_r2_upload_then_runpod_processing_returns_clip_metadata(
 
     assert process_response.status_code == 200
     result = process_response.json()
-    assert result["status"] == "COMPLETED"
-    assert result["clip_count"] == 1
-    assert isinstance(result["clips"], list)
+    _aux_assert_process_result_basico(result)
     clip = result["clips"][0]
-    assert isinstance(clip["title"], str)
-    assert isinstance(clip["start_time"], (int, float))
-    assert isinstance(clip["end_time"], (int, float))
-    assert isinstance(clip["score"], (int, float))
+    _aux_assert_clip_basico(clip)
+    _aux_assert_clip_rango(clip)
 
 
 def test_processing_accepts_direct_video_url(e2e_client, monkeypatch: pytest.MonkeyPatch) -> None:

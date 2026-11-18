@@ -82,7 +82,8 @@ import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useJobPolling } from '@/composables/useJobPolling'
 import { clipService } from '@/api/services'
 import { ApiError } from '@/types/api'
-import type { ClipListItem } from '@/types/api'
+import type { ClipListItem, JobResponse } from '@/types/api'
+import type { PollingStatus } from '@/composables/useJobPolling'
 import StatusBadge from '@/components/job-status/StatusBadge.vue'
 import CompletedClips from '@/components/job-status/CompletedClips.vue'
 const route = useRoute()
@@ -97,15 +98,47 @@ const clipsError = ref<string | null>(null)
 const RAW = (import.meta.env.VITE_API_URL as string | undefined ?? '').trim()
 const API_BASE_URL = (RAW || 'http://localhost:8000').replace(/\/$/, '')
 
+function readActiveJobId(): string | null {
+  try { return localStorage.getItem(ACTIVE_JOB_KEY) } catch { return null }
+}
+
+function isActiveJobIdUsable(activeJobId: string): boolean {
+  return !!activeJobId.trim() && activeJobId !== 'null' && activeJobId !== 'undefined'
+}
+
+function persistActiveJobId(id: string): void {
+  try { localStorage.setItem(ACTIVE_JOB_KEY, id) } catch {}
+}
+
+function activeJobIdForRestore(jobId: string | undefined): string | null | undefined {
+  return readActiveJobId() || jobId
+}
+
+function isJobNotFoundError(errMsg: string): boolean {
+  return errMsg.includes('no encontrado') || errMsg.includes('inválido') || errMsg.includes('expirado') || errMsg.includes('Job no encontrado')
+}
+
+function pollingSettledStatus(pollingStatus: PollingStatus): boolean {
+  return pollingStatus === 'completed' || pollingStatus === 'failed' || pollingStatus === 'error'
+}
+
+function shouldStopInitialLoading(job: JobResponse | null, error: string | null, pollingStatus: PollingStatus): boolean {
+  return !!job || !!error || pollingSettledStatus(pollingStatus)
+}
+
+function clipsErrorMessage(e: unknown): string {
+  return e instanceof ApiError ? e.detail : e instanceof Error ? e.message : 'Error al cargar clips físicos'
+}
+
 onMounted(() => {
   const safety = window.setTimeout(() => { isInitialLoading.value = false }, 5000)
   const doHydrate = async () => {
     try {
-      const activeJobId = (() => { try { return localStorage.getItem(ACTIVE_JOB_KEY) } catch { return null } })() || jobId.value
+      const activeJobId = activeJobIdForRestore(jobId.value)
       if (activeJobId) {
-        if (!activeJobId.trim() || activeJobId === 'null' || activeJobId === 'undefined') throw new Error('jobId inválido')
-        if (!jobId.value && activeJobId) router.replace(`/jobs/${activeJobId}`)
-        else if (jobId.value) { try { localStorage.setItem(ACTIVE_JOB_KEY, jobId.value) } catch {} }
+        if (!isActiveJobIdUsable(activeJobId)) throw new Error('jobId inválido')
+        if (!jobId.value) router.replace(`/jobs/${activeJobId}`)
+        else persistActiveJobId(jobId.value)
       }
     } catch (err) {
       console.error('Error al restaurar la sesión del job:', err)
@@ -119,15 +152,15 @@ onMounted(() => {
 })
 
 watch(() => jobId.value, (id) => {
-  if (id) { try { localStorage.setItem(ACTIVE_JOB_KEY, id) } catch {} }
+  if (id) persistActiveJobId(id)
 })
 
 watch(() => [job.value, pollingStatus.value, error.value], () => {
-  if (job.value || error.value || pollingStatus.value === 'completed' || pollingStatus.value === 'failed' || pollingStatus.value === 'error') isInitialLoading.value = false
+  if (shouldStopInitialLoading(job.value, error.value, pollingStatus.value)) isInitialLoading.value = false
 })
 
 watch(() => error.value, (errMsg) => {
-  if (errMsg && (errMsg.includes('no encontrado') || errMsg.includes('inválido') || errMsg.includes('expirado') || errMsg.includes('Job no encontrado'))) {
+  if (errMsg && isJobNotFoundError(errMsg)) {
     try { localStorage.removeItem(ACTIVE_JOB_KEY) } catch {}
     window.setTimeout(() => router.replace('/upload'), 1200)
   }
@@ -140,7 +173,7 @@ watch(() => job.value?.status, async (s) => {
       const sorted = [...res.items].sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
       realClips.value = sorted
     } catch (e: unknown) {
-      clipsError.value = e instanceof ApiError ? e.detail : e instanceof Error ? e.message : 'Error al cargar clips físicos'
+      clipsError.value = clipsErrorMessage(e)
     }
   } else {
     realClips.value = null

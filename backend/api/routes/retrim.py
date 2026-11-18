@@ -37,6 +37,46 @@ class RetrimResponse(BaseModel):
     file_path: str | None = None
 
 
+def _candidato_storage(clip) -> list[Path]:
+    """storage_path del clip si existe en disco."""
+    if clip.storage_path and Path(clip.storage_path).exists():
+        return [Path(clip.storage_path)]
+    return []
+
+
+def _candidato_de_video(video) -> list[Path]:
+    """filepath del video si está seteado (no valida existencia)."""
+    if video and video.filepath:
+        return [Path(video.filepath)]
+    return []
+
+
+def _candidato_atributo_video(obj) -> list[Path]:
+    """filepath del objeto si expone el atributo (clip.video / job.video)."""
+    if obj and hasattr(obj, "filepath") and obj.filepath:
+        return [Path(obj.filepath)]
+    return []
+
+
+def _candidatos_origen(clip, job, video) -> list[Path]:
+    """Rutas candidatas del video original: storage → clip.video → video → job.video."""
+    candidatos = list(_candidato_storage(clip))
+    candidatos.extend(_candidato_atributo_video(clip.video))
+    candidatos.extend(_candidato_de_video(video))
+    candidatos.extend(_candidato_atributo_video(job.video) if job else [])
+    return candidatos
+
+
+def _elegir_origen(candidatos: list[Path]) -> Path | None:
+    """Primera ruta existente; si ninguna existe, la primera candidata (para el 404)."""
+    for p in candidatos:
+        if p and p.exists():
+            return p
+    if candidatos:
+        return candidatos[0]
+    return None
+
+
 def _assert_ownership_and_get_clip(db, clip_id: str, user_id: uuid.UUID) -> Clip:
     try:
         cid = uuid.UUID(clip_id)
@@ -45,13 +85,18 @@ def _assert_ownership_and_get_clip(db, clip_id: str, user_id: uuid.UUID) -> Clip
     clip = db.execute(select(Clip).where(Clip.id == cid)).scalar_one_or_none()
     if clip is None:
         raise HTTPException(status_code=404, detail="Clip no encontrado")
+    _verificar_job_y_video(db, clip, user_id)
+    return clip
+
+
+def _verificar_job_y_video(db, clip: Clip, user_id: uuid.UUID) -> None:
+    """Job y video del clip deben existir y pertenecer al usuario (404 si no)."""
     job = db.execute(select(Job).where(Job.id == clip.job_id)).scalar_one_or_none()
     if job is None:
         raise HTTPException(status_code=404, detail="Job no encontrado")
     video = db.execute(select(Video).where(Video.id == job.video_id)).scalar_one_or_none()
     if video is None or video.user_id != user_id:
         raise HTTPException(status_code=404, detail="Clip no encontrado")
-    return clip
 
 
 def _leer_metadata_retrim(body: RetrimRequest) -> float:
@@ -113,26 +158,15 @@ async def retrim_clip(
     job = db.execute(select(Job).where(Job.id == clip.job_id)).scalar_one_or_none()
     video = db.execute(select(Video).where(Video.id == job.video_id)).scalar_one_or_none() if job else None
 
-    src_candidates = []
-    if clip.storage_path and Path(clip.storage_path).exists():
-        src_candidates.append(Path(clip.storage_path))
-    if clip.video and hasattr(clip.video, "filepath") and clip.video.filepath:
-        src_candidates.append(Path(clip.video.filepath))
-    if video and video.filepath:
-        src_candidates.append(Path(video.filepath))
-    if job and job.video and hasattr(job.video, "filepath"):
-        src_candidates.append(Path(job.video.filepath))
-
-    src = None
-    for p in src_candidates:
-        if p and p.exists():
-            src = p
-            break
-    if src is None and src_candidates:
-        src = src_candidates[0]
+    src = _elegir_origen(_candidatos_origen(clip, job, video))
     if src is None or not src.exists():
         raise HTTPException(status_code=404, detail=f"Video origen no encontrado para re-trim: {src}")
 
+    return _ejecutar_retrim(db, clip, clip_id, body, src)
+
+
+def _ejecutar_retrim(db, clip: Clip, clip_id: str, body: RetrimRequest, src: Path) -> RetrimResponse:
+    """Corre FFmpeg, valida la salida y actualiza el clip."""
     duration = body.end_time - body.start_time
     out_dir = Path("storage/retrims")
     out_dir.mkdir(parents=True, exist_ok=True)

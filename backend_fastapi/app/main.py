@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 import os
 import re
+from typing import Any
 
 from .config import get_settings
 from .database import Base, engine
@@ -68,7 +69,26 @@ _CORS_HEADERS = [
 _CORS_ORIGIN_REGEX = r"https://.*\.(ngrok-free\.dev|clipsai\.xyz|vercel\.app)"
 
 
+def _extras_de_entorno() -> list[str]:
+    """Valores extra de CORS desde settings y CORS_EXTRA_ORIGINS (sin normalizar)."""
+    extras: list[str] = []
+    for value in (
+        _settings.frontend_url,
+        _settings.frontend_redirect_url,
+        os.getenv("CORS_EXTRA_ORIGINS", ""),
+    ):
+        if value:
+            extras.extend(str(value).split(","))
+    return extras
+
+
+def _normalizar_origen(extra: str) -> str:
+    """Origen normalizado (strip y sin barra final)."""
+    return extra.strip().rstrip("/")
+
+
 def _build_cors_origins() -> list[str]:
+    """Orígenes CORS: base local + FRONTEND_URL/REDIRECT/CORS_EXTRA_ORIGINS."""
     origins = [
         "https://api.clipsai.xyz",
         "http://localhost:3000",
@@ -78,16 +98,8 @@ def _build_cors_origins() -> list[str]:
         "http://localhost:3001",
         "http://127.0.0.1:3001",
     ]
-    extras: list[str] = []
-    for value in (
-        _settings.frontend_url,
-        _settings.frontend_redirect_url,
-        os.getenv("CORS_EXTRA_ORIGINS", ""),
-    ):
-        if value:
-            extras.extend(str(value).split(","))
-    for extra in extras:
-        origin = extra.strip().rstrip("/")
+    for extra in _extras_de_entorno():
+        origin = _normalizar_origen(extra)
         if origin and origin not in origins:
             origins.append(origin)
     return origins
@@ -104,120 +116,160 @@ def _origin_is_allowed(origin: str) -> bool:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from .database import DB_AVAILABLE, engine
-
-    if DB_AVAILABLE and engine:
-        Base.metadata.create_all(bind=engine)
-        from sqlalchemy import text
-
-        with engine.connect() as conn:
-            conn.execute(text("ALTER TABLE videos ADD COLUMN IF NOT EXISTS transcription_filepath VARCHAR;"))
-            conn.execute(text("ALTER TABLE videos ADD COLUMN IF NOT EXISTS transcript TEXT;"))
-            conn.execute(text("ALTER TABLE videos ADD COLUMN IF NOT EXISTS duration_seconds DOUBLE PRECISION;"))
-            conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS result_metadata JSONB;"))
-            conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS error_message TEXT;"))
-            conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS progress INTEGER DEFAULT 0;"))
-            # Asegurar CHECK progress 0-100 si no existe
-            conn.execute(text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='chk_jobs_progress') THEN ALTER TABLE jobs ADD CONSTRAINT chk_jobs_progress CHECK (progress >= 0 AND progress <= 100); END IF; END $$;"))
-            conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS video_id UUID;"))
-            conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS score DOUBLE PRECISION;"))
-            conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS tags JSONB;"))
-            conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'ready';"))
-            conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;"))
-            conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS error_log TEXT;"))
-            conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS published_platform VARCHAR(50);"))
-            conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS social_post_id VARCHAR(255);"))
-            conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS social_post_url TEXT;"))
-            conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ;"))
-            conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(500);"))
-            conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS theme_preference VARCHAR(20) DEFAULT 'dark';"))
-            conn.execute(text("ALTER TABLE social_accounts ADD COLUMN IF NOT EXISTS account_name VARCHAR(255);"))
-            try:
-                conn.execute(text("ALTER TABLE jobs DROP CONSTRAINT IF EXISTS chk_jobs_status;"))
-            except Exception:
-                pass
-            try:
-                conn.execute(text("ALTER TABLE jobs DROP CONSTRAINT IF EXISTS chk_jobs_stats;"))
-            except Exception:
-                pass
-            conn.execute(
-                text(
-                    "DO $$ BEGIN "
-                    "IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='chk_jobs_status') THEN "
-                    "ALTER TABLE jobs ADD CONSTRAINT chk_jobs_status "
-                    "CHECK (lower(status) IN ('pending','processing','completed','failed')); "
-                    "END IF; END $$;"
-                )
-            )
-            try:
-                conn.execute(text("ALTER TABLE clips DROP CONSTRAINT IF EXISTS chk_clips_publication_status;"))
-            except Exception:
-                pass
-            conn.execute(
-                text(
-                    "DO $$ BEGIN "
-                    "IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='chk_clips_publication_status') THEN "
-                    "ALTER TABLE clips ADD CONSTRAINT chk_clips_publication_status "
-                    "CHECK (lower(publication_status) IN ('draft','scheduled','published','failed','not_published','publishing')); "
-                    "END IF; END $$;"
-                )
-            )
-            try:
-                conn.execute(text("ALTER TABLE clips DROP CONSTRAINT IF EXISTS chk_clips_social_network;"))
-            except Exception:
-                pass
-            conn.execute(
-                text(
-                    "DO $$ BEGIN "
-                    "IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='chk_clips_social_network') THEN "
-                    "ALTER TABLE clips ADD CONSTRAINT chk_clips_social_network "
-                    "CHECK (social_network IS NULL OR lower(social_network) IN ('tiktok','youtube_shorts','instagram_reels','youtube','instagram')); "
-                    "END IF; END $$;"
-                )
-            )
-            conn.commit()
-        # --- Limpieza automática de Jobs huérfanos al iniciar (evita processing infinito tras reinicio) ---
-        try:
-            from .database import SessionLocal
-
-            db = SessionLocal()
-            try:
-                # Buscar jobs en processing (case-insensitive por si quedó PROCESSING)
-                interrupted_jobs = db.query(Job).filter(Job.status == "processing").all()
-                if not interrupted_jobs:
-                    from sqlalchemy import func
-
-                    interrupted_jobs = db.query(Job).filter(func.lower(Job.status) == "processing").all()
-                if interrupted_jobs:
-                    for job in interrupted_jobs:
-                        job.status = "failed"
-                        job.error_message = "Proceso interrumpido por reinicio del servidor."
-                    db.commit()
-                    logger.info("Se marcaron %s trabajos huérfanos como 'failed'.", len(interrupted_jobs))
-                else:
-                    logger.info("No hay trabajos huérfanos en 'processing'.")
-            except Exception as e:
-                logger.error("Error al limpiar jobs huérfanos: %s", e)
-                try:
-                    db.rollback()
-                except Exception:
-                    pass
-            finally:
-                db.close()
-        except Exception as e:
-            logger.error("Error al limpiar jobs huérfanos: %s", e)
-    else:
-        logger.warning("Database not available. Skipping migrations and running in API-only mode.")
+    """Arranque: migraciones idempotentes y limpieza de storage; luego sirve la app."""
+    _migrar_esquema()
 
     # Limpieza de emergencia al arrancar: evita [Errno 28] en Render si el disco quedó lleno.
+    _limpiar_storage_inicio()
+
+    yield
+
+
+def _ejecutar_con_error(conn: Any, sql: str) -> None:
+    """Ejecuta una sentencia SQL ignorando errores (best-effort)."""
+    from sqlalchemy import text
+
+    try:
+        conn.execute(text(sql))
+    except Exception:
+        pass
+
+
+def _agregar_columnas(conn: Any) -> None:
+    """Columnas faltantes en videos, jobs, clips, usuarios y social_accounts."""
+    from sqlalchemy import text
+
+    conn.execute(text("ALTER TABLE videos ADD COLUMN IF NOT EXISTS transcription_filepath VARCHAR;"))
+    conn.execute(text("ALTER TABLE videos ADD COLUMN IF NOT EXISTS transcript TEXT;"))
+    conn.execute(text("ALTER TABLE videos ADD COLUMN IF NOT EXISTS duration_seconds DOUBLE PRECISION;"))
+    conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS result_metadata JSONB;"))
+    conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS error_message TEXT;"))
+    conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS progress INTEGER DEFAULT 0;"))
+    # Asegurar CHECK progress 0-100 si no existe
+    conn.execute(text("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='chk_jobs_progress') THEN ALTER TABLE jobs ADD CONSTRAINT chk_jobs_progress CHECK (progress >= 0 AND progress <= 100); END IF; END $$;"))
+    conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS video_id UUID;"))
+    conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS score DOUBLE PRECISION;"))
+    conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS tags JSONB;"))
+    conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'ready';"))
+    conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;"))
+    conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS error_log TEXT;"))
+    conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS published_platform VARCHAR(50);"))
+    conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS social_post_id VARCHAR(255);"))
+    conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS social_post_url TEXT;"))
+    conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ;"))
+    conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(500);"))
+    conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS theme_preference VARCHAR(20) DEFAULT 'dark';"))
+    conn.execute(text("ALTER TABLE social_accounts ADD COLUMN IF NOT EXISTS account_name VARCHAR(255);"))
+
+
+def _preparar_restricciones(conn: Any) -> None:
+    """Recrea los CHECK de jobs y clips (drop best-effort + create)."""
+    from sqlalchemy import text
+
+    _ejecutar_con_error(conn, "ALTER TABLE jobs DROP CONSTRAINT IF EXISTS chk_jobs_status;")
+    _ejecutar_con_error(conn, "ALTER TABLE jobs DROP CONSTRAINT IF EXISTS chk_jobs_stats;")
+    conn.execute(
+        text(
+            "DO $$ BEGIN "
+            "IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='chk_jobs_status') THEN "
+            "ALTER TABLE jobs ADD CONSTRAINT chk_jobs_status "
+            "CHECK (lower(status) IN ('pending','processing','completed','failed')); "
+            "END IF; END $$;"
+        )
+    )
+    _ejecutar_con_error(conn, "ALTER TABLE clips DROP CONSTRAINT IF EXISTS chk_clips_publication_status;")
+    conn.execute(
+        text(
+            "DO $$ BEGIN "
+            "IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='chk_clips_publication_status') THEN "
+            "ALTER TABLE clips ADD CONSTRAINT chk_clips_publication_status "
+            "CHECK (lower(publication_status) IN ('draft','scheduled','published','failed','not_published','publishing')); "
+            "END IF; END $$;"
+        )
+    )
+    _ejecutar_con_error(conn, "ALTER TABLE clips DROP CONSTRAINT IF EXISTS chk_clips_social_network;")
+    conn.execute(
+        text(
+            "DO $$ BEGIN "
+            "IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='chk_clips_social_network') THEN "
+            "ALTER TABLE clips ADD CONSTRAINT chk_clips_social_network "
+            "CHECK (social_network IS NULL OR lower(social_network) IN ('tiktok','youtube_shorts','instagram_reels','youtube','instagram')); "
+            "END IF; END $$;"
+        )
+    )
+    conn.commit()
+
+
+def _jobs_en_processing(db: Any) -> list[Any]:
+    """Jobs en 'processing', con búsqueda case-insensitive de respaldo."""
+    # Buscar jobs en processing (case-insensitive por si quedó PROCESSING)
+    interrupted_jobs = db.query(Job).filter(Job.status == "processing").all()
+    if not interrupted_jobs:
+        from sqlalchemy import func
+
+        interrupted_jobs = db.query(Job).filter(func.lower(Job.status) == "processing").all()
+    return interrupted_jobs
+
+
+def _revertir_sesion(db: Any) -> None:
+    """Rollback best-effort de la sesión."""
+    try:
+        db.rollback()
+    except Exception:
+        pass
+
+
+def _marcar_jobs_huerfanos() -> None:
+    """Limpieza automática de Jobs huérfanos al iniciar (evita processing infinito tras reinicio)."""
+    from .database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        interrupted_jobs = _jobs_en_processing(db)
+        if interrupted_jobs:
+            for job in interrupted_jobs:
+                job.status = "failed"
+                job.error_message = "Proceso interrumpido por reinicio del servidor."
+            db.commit()
+            logger.info("Se marcaron %s trabajos huérfanos como 'failed'.", len(interrupted_jobs))
+        else:
+            logger.info("No hay trabajos huérfanos en 'processing'.")
+    except Exception as e:
+        logger.error("Error al limpiar jobs huérfanos: %s", e)
+        _revertir_sesion(db)
+    finally:
+        db.close()
+
+
+def _migrar_esquema() -> None:
+    """Migraciones idempotentes y limpieza de huérfanos si hay base de datos."""
+    from .database import DB_AVAILABLE, engine
+
+    if not (DB_AVAILABLE and engine):
+        logger.warning("Database not available. Skipping migrations and running in API-only mode.")
+        return
+
+    Base.metadata.create_all(bind=engine)
+
+    with engine.connect() as conn:
+        _agregar_columnas(conn)
+        _preparar_restricciones(conn)
+    # --- Limpieza automática de Jobs huérfanos al iniciar (evita processing infinito tras reinicio) ---
+    try:
+        _marcar_jobs_huerfanos()
+    except Exception as e:
+        logger.error("Error al limpiar jobs huérfanos: %s", e)
+
+
+def _limpiar_storage_inicio() -> None:
+    """Limpieza de emergencia de storage al arrancar (best-effort, no fatal)."""
     try:
         from .services.storage_cleanup import cleanup_storage
+
         freed_bytes = cleanup_storage()  # usa STORAGE_DIR/STORAGE_PATH o /var/data
         logger.info("[STARTUP] Storage cleanup: liberó %.2f MB", freed_bytes / (1024 * 1024))
     except Exception as cleanup_err:
         logger.warning("[STARTUP] Storage cleanup falló (non-fatal): %s", cleanup_err)
-
-    yield
 
 
 app = FastAPI(
