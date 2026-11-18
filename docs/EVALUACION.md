@@ -280,113 +280,75 @@ Criterios que hoy están en rojo y, para cada uno, una explicación breve de **c
 
 **Fuera de clase:** sin actividad registrada.
 
-## 7. Anexo: dónde mirar
+## 7. Anexo: archivos donde se originan los problemas
 
-Archivos donde el análisis encontró cada señal en rojo (sin número de línea, a propósito):
+Se listan los archivos y líneas que el análisis marca para cada criterio en rojo. Para **duplicación** se muestran los archivos con más líneas repetidas; para **cobertura**, las unidades por debajo del umbral.
 
-**Complejidad alta (Compl)** — 101 archivo(s):
-- `app/services/hook_service.py`
-- `audio_analyzer.py`
-- `backend/api/routes/retrim.py`
-- `backend/api/routes/stream.py`
-- `backend/core/security/ssrf_guard.py`
-- `backend/core/security/vault.py`
-- `backend/handler.py`
-- `backend/services/ai_viral/analyzer.py`
-- `backend/services/video_editor/renderer.py`
-- `backend/track_a/ingestion/service.py`
-- `backend/track_b/virality/engine.py`
-- `backend_express/src/db/index.ts`
-- `backend_express/src/routes/auth.ts`
-- `backend_express/src/routes/clips.ts`
-- `backend_express/src/routes/export.ts`
-- `backend_express/src/routes/jobs.ts`
-- `backend_express/src/routes/metrics.ts`
-- `backend_express/src/routes/publish.ts`
-- `backend_express/src/routes/socialAuth.ts`
-- `backend_express/src/routes/subtitles.ts`
-- `backend_express/src/routes/users.ts`
-- `backend_express/src/routes/videos.ts`
-- `backend_express/src/services/runpod.ts`
-- `backend_fastapi/app/cli.py`
-- `backend_fastapi/app/config.py`
-- `backend_fastapi/app/database.py`
-- `backend_fastapi/app/main.py`
-- `backend_fastapi/app/routers/clips.py`
-- `backend_fastapi/app/routers/export.py`
-- `backend_fastapi/app/routers/jobs.py`
-- `backend_fastapi/app/routers/metrics.py`
-- `backend_fastapi/app/routers/publish.py`
-- `backend_fastapi/app/routers/sample.py`
-- `backend_fastapi/app/routers/social_auth.py`
-- `backend_fastapi/app/routers/stats.py`
-- `backend_fastapi/app/routers/stream.py`
-- `backend_fastapi/app/routers/users.py`
-- `backend_fastapi/app/routers/videos.py`
-- `backend_fastapi/app/schemas/usuario.py`
-- `backend_fastapi/app/services/ass_generator.py`
-- `backend_fastapi/app/services/claude_service.py`
-- `backend_fastapi/app/services/editor.py`
-- `backend_fastapi/app/services/engine.py`
-- `backend_fastapi/app/services/ffmpeg_service.py`
-- `backend_fastapi/app/services/hook_service.py`
-- `backend_fastapi/app/services/instagram_service.py`
-- `backend_fastapi/app/services/publish_service.py`
-- `backend_fastapi/app/services/runpod_service.py`
-- `backend_fastapi/app/services/social_common.py`
-- `backend_fastapi/app/services/storage_cleanup.py`
-- `backend_fastapi/app/services/tiktok_service.py`
-- `backend_fastapi/app/services/transcript_utils.py`
-- `backend_fastapi/app/services/whisper_service.py`
-- `backend_fastapi/app/services/youtube_service.py`
-- `backend_fastapi/app/tasks/subtitle_pipeline.py`
-- `editor_viral.py`
-- `ejemplo_engine.py`
-- `engine.py`
-- `engine_subprocess.py`
-- `frontend_react/src/components/Avatar.tsx`
-- `frontend_react/src/components/Navbar.tsx`
-- `frontend_react/src/components/auth/AuthForm.tsx`
-- `frontend_react/src/components/auth/AuthProvider.tsx`
-- `frontend_react/src/components/clip-library/ClipCard.tsx`
-- `frontend_react/src/components/clip-library/ClipResults.tsx`
-- `frontend_react/src/components/dashboard/DashboardContent.tsx`
-- `frontend_react/src/components/dashboard/KpiGrid.tsx`
-- `frontend_react/src/components/job-status/CompletedClips.tsx`
-- `frontend_react/src/components/job-status/JobProgress.tsx`
-- `frontend_react/src/components/landing/LandingHowItWorks.tsx`
-- `frontend_react/src/components/upload/DirectUploadPanel.tsx`
-- `frontend_react/src/hooks/useIntegrations.ts`
-- `frontend_react/src/hooks/useJobPolling.ts`
-- `frontend_react/src/hooks/usePublishSSE.ts`
-- `frontend_react/src/hooks/useUploadAndProcess.ts`
-- `frontend_react/src/lib/apiClient.ts`
-- `frontend_react/src/pages/AuthPage.tsx`
-- `frontend_react/src/pages/ClipLibraryPage.tsx`
-- `frontend_react/src/pages/DashboardPage.tsx`
-- `frontend_react/src/pages/IntegrationsPage.tsx`
-- `frontend_react/src/pages/JobStatusPage.tsx`
-- `frontend_react/src/pages/SettingsPage.tsx`
-- `frontend_react/src/pages/UploadPage.tsx`
-- `frontend_react/src/services/api.ts`
-- `frontend_vue/src/api/services.ts`
-- `frontend_vue/src/components/Avatar.vue`
-- `frontend_vue/src/components/Navbar.vue`
-- `frontend_vue/src/components/landing/LandingHowItWorks.vue`
-- `frontend_vue/src/composables/useClipLibrary.ts`
-- `frontend_vue/src/composables/useIntegrations.ts`
-- `frontend_vue/src/composables/useJobPolling.ts`
-- `frontend_vue/src/composables/usePublishStream.ts`
-- `frontend_vue/src/stores/auth.ts`
-- `frontend_vue/src/views/JobStatusView.vue`
-- `frontend_vue/src/views/SettingsView.vue`
-- `frontend_vue/src/views/UploadView.vue`
-- `limpiar.py`
-- `main.py`
-- `scripts/make_og_image.py`
-- `video_processor.py`
-- `whisper_transcriber.py`
+**Índice (indice)** — señales que más pesan:
+
+- `editor_viral.py:112` — high_coupling: clase 'RenderizadorVertical' muy acoplada (CBO=11)
+- `editor_viral.py:193` — high_coupling: clase 'VideoEditor' muy acoplada (CBO=21)
+- `editor_viral.py:44` — long_function: función 'calcular_filtro_vertical' de 40 líneas
+- `editor_viral.py:260` — long_function: función 'main' de 39 líneas
+- `editor_viral.py:260` — high_complexity: función 'main' con complejidad 8
+- `main.py:35` — high_complexity: función 'cargar_env' con complejidad 9
+- `main.py:108` — long_function: función 'analizar_audio_video' de 36 líneas
+- `main.py:108` — high_complexity: función 'analizar_audio_video' con complejidad 8
+- `main.py:167` — long_function: función 'formatear_transcripcion' de 62 líneas
+- `main.py:167` — high_complexity: función 'formatear_transcripcion' con complejidad 13
+- `main.py:241` — long_function: función 'preparar_transcripcion_para_ia' de 50 líneas
+- `main.py:241` — high_complexity: función 'preparar_transcripcion_para_ia' con complejidad 11
+- `main.py:293` — long_function: función 'enriquecer_datos_para_ia' de 58 líneas
+- `main.py:293` — high_complexity: función 'enriquecer_datos_para_ia' con complejidad 12
+- `main.py:353` — long_function: función 'construir_prompt' de 116 líneas
+- `main.py:471` — long_params: función '_post_con_retry' con 5 parámetros
+- `main.py:471` — high_complexity: función '_post_con_retry' con complejidad 6
+- `main.py:486` — long_function: función 'llamar_claude' de 31 líneas
+- `main.py:486` — high_complexity: función 'llamar_claude' con complejidad 8
+- `main.py:519` — long_function: función 'llamar_openai_compatible' de 37 líneas
+- `main.py:519` — high_complexity: función 'llamar_openai_compatible' con complejidad 9
+- `main.py:592` — high_complexity: función '_llamar_con_fallback' con complejidad 11
+- `main.py:615` — high_complexity: función '_extraer_clips_de_objeto' con complejidad 6
+- `main.py:630` — high_complexity: función '_extraer_clips_de_objetos_sueltos' con complejidad 6
+- `main.py:646` — long_function: función '_extraer_json_respuesta' de 34 líneas
+- `main.py:646` — high_complexity: función '_extraer_json_respuesta' con complejidad 7
+- `main.py:739` — long_function: función 'parsear_json_tolerante' de 45 líneas
+- `main.py:739` — high_complexity: función 'parsear_json_tolerante' con complejidad 11
+- `main.py:786` — long_function: función 'validar_clips' de 73 líneas
+- `main.py:786` — high_complexity: función 'validar_clips' con complejidad 10
+- … y 579 hallazgo(s) más.
+
+**Complejidad alta (Compl)** — 352 hallazgo(s) en 101 archivo(s):
+
+| Archivo | Línea(s) | Señal |
+|---|---|---|
+| `app/services/hook_service.py` | 69, 158, 180, 198, 247, 285, 308, 335 | función '_get_provider' con complejidad 8 |
+| `audio_analyzer.py` | 40, 225 | función 'detectar_eventos' con complejidad 7 |
+| `backend/api/routes/retrim.py` | 40, 100 | función '_assert_ownership_and_get_clip' con complejidad 6 |
+| `backend/api/routes/stream.py` | 47 | función '_progress_gen' con complejidad 9 |
+| `backend/core/security/ssrf_guard.py` | 39, 49 | función 'is_ip_blocked' con complejidad 9 |
+| `backend/core/security/vault.py` | 15 | función '_get_key' con complejidad 6 |
+| `backend/handler.py` | 48, 104, 149 | función '_upload_to_r2' con complejidad 7 |
+| `backend/services/ai_viral/analyzer.py` | 75, 115 | función '_map_llm_to_candidates' con complejidad 20 |
+| `backend/services/video_editor/renderer.py` | 37, 46 | función '_brand_filter' con complejidad 6 |
+| `backend/track_a/ingestion/service.py` | 20 | método 'IngestionService.ingest' con complejidad 7 |
+| `backend/track_b/virality/engine.py` | 35 | método 'ViralityEngine.score' con complejidad 22 |
+| `backend_express/src/db/index.ts` | 29 | función 'buildConnectionString' con complejidad 8 |
+| `backend_express/src/routes/auth.ts` | 30, 72 | función 'handleRegistro' con complejidad 16 |
+| `backend_express/src/routes/clips.ts` | 321 | función 'runReRender' con complejidad 52 |
+| `backend_express/src/routes/export.ts` | 7, 49, 74 | función 'resolveTranscript' con complejidad 7 |
+| `backend_express/src/routes/jobs.ts` | 12, 29, 42, 126 | función 'parseTimeToSeconds' con complejidad 8 |
+| `backend_express/src/routes/metrics.ts` | 7 | función 'handleMetrics' con complejidad 22 |
+| `backend_express/src/routes/publish.ts` | 28, 70 | función 'runPublish' con complejidad 14 |
+| `backend_express/src/routes/socialAuth.ts` | 96, 251, 290, 374 | función 'buildStatus' con complejidad 8 |
+| `backend_express/src/routes/subtitles.ts` | 53, 74, 191, 233, 342 | función 'wrapText' con complejidad 6 |
+| … | … | y 81 archivo(s) más |
+
+**Cobertura (Cob)** — unidades por debajo del umbral:
+
+- `.` — 65.4% (6261/9578 líneas)
+- `backend_fastapi` — 77.0% (5244/6808 líneas)
 
 ---
-_Informe generado por la cátedra. Los umbrales corresponden al perfil `exigente`. Ante dudas, revisá el archivo señalado y el criterio en `CRITERIOS-CALIDAD.md`._
+_Informe generado por la cátedra. Los umbrales corresponden al perfil `exigente`. Ante dudas, revisá el archivo y la línea señalados y el criterio en `CRITERIOS-CALIDAD.md`._
 <!-- evaluacion:fin -->
