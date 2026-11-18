@@ -48,18 +48,44 @@ from .social_common import (
 
 
 
-def _get_tiktok_config() -> tuple[str, str, str]:
-    client_key = os.getenv("TIKTOK_CLIENT_KEY", "").strip() if os.getenv("TIKTOK_CLIENT_KEY") else ""
-    if not client_key:
-        client_key = (TIKTOK_CLIENT_KEY or "").strip() if TIKTOK_CLIENT_KEY else ""
-    client_secret = os.getenv("TIKTOK_CLIENT_SECRET", "").strip() if os.getenv("TIKTOK_CLIENT_SECRET") else ""
-    if not client_secret:
-        client_secret = (TIKTOK_CLIENT_SECRET or "").strip() if TIKTOK_CLIENT_SECRET else ""
+def _limpio_si_presente(valor: str) -> str:
+    """Cadena limpia del valor; '' si es falsy."""
+    return (valor or "").strip() if valor else ""
+
+
+def _env_o_global(env_name: str, global_value: str) -> str:
+    """Valor limpio de la variable de entorno o del global capturado al importar."""
+    valor = os.getenv(env_name, "").strip() if os.getenv(env_name) else ""
+    if not valor:
+        valor = _limpio_si_presente(global_value)
+    return valor
+
+
+def _redirect_uri_descartable(redirect_uri: str) -> bool:
+    """True si el URI apunta a un host de desarrollo no permitido."""
+    return (
+        "decorator" in redirect_uri
+        or "guns-camps" in redirect_uri
+        or "ngrok" in redirect_uri
+        or "trycloudflare" in redirect_uri
+    )
+
+
+def _redirect_uri_tiktok() -> str:
+    """URI de callback vigente (sin hosts de desarrollo)."""
     public_base = os.getenv("PUBLIC_BACKEND_URL", "https://api.clipsai.xyz").strip().rstrip("/")
     default_uri = f"{public_base}/auth/social/tiktok/callback"
     redirect_uri = os.getenv("TIKTOK_REDIRECT_URI", default_uri).strip() or default_uri
-    if "decorator" in redirect_uri or "guns-camps" in redirect_uri or "ngrok" in redirect_uri or "trycloudflare" in redirect_uri:
-        redirect_uri = default_uri
+    if _redirect_uri_descartable(redirect_uri):
+        return default_uri
+    return redirect_uri
+
+
+def _get_tiktok_config() -> tuple[str, str, str]:
+    """(client_key, client_secret, redirect_uri) de entorno o globals."""
+    client_key = _env_o_global("TIKTOK_CLIENT_KEY", TIKTOK_CLIENT_KEY)
+    client_secret = _env_o_global("TIKTOK_CLIENT_SECRET", TIKTOK_CLIENT_SECRET)
+    redirect_uri = _redirect_uri_tiktok()
     return client_key, client_secret, redirect_uri
 
 
@@ -115,6 +141,65 @@ def exchange_tiktok_code(code: str, code_verifier: str) -> dict[str, Any]:
     return token_data
 
 
+def _json_seguro(resp) -> Any:
+    """JSON de la respuesta; {} si no es parseable."""
+    try:
+        return resp.json()
+    except Exception:
+        return {}
+
+
+def _texto_no_vacio(valor: Any) -> bool:
+    """True si el valor tiene texto no vacío al limpiarlo."""
+    return bool(valor) and bool(str(valor).strip())
+
+
+def _user_de_data(data: dict) -> Any:
+    """Usuario dentro de data.data o data.user; data si no hay ninguno."""
+    if "data" in data and isinstance(data["data"], dict):
+        return data["data"].get("user")
+    if "user" in data:
+        return data.get("user")
+    return data
+
+
+def _user_de_respuesta(data: Any) -> Any:
+    """Extrae el dict de usuario de la respuesta de TikTok."""
+    if not isinstance(data, dict):
+        return None
+    return _user_de_data(data)
+
+
+def _identificador_de_user(user: Any) -> str | None:
+    """display_name u open_id del usuario, limpio; None si no hay."""
+    if not isinstance(user, dict):
+        return None
+    display_name = user.get("display_name")
+    if _texto_no_vacio(display_name):
+        return str(display_name).strip()
+    open_id = user.get("open_id")
+    if _texto_no_vacio(open_id):
+        return str(open_id).strip()
+    return None
+
+
+def _fallback_data(data: Any) -> Any:
+    """data.data.user como último recurso."""
+    d = data.get("data") or {}
+    return d.get("user") or {}
+
+
+def _identificador_de_data(data: Any) -> str | None:
+    """display_name u open_id desde data.data.user como último recurso."""
+    if not isinstance(data, dict):
+        return None
+    u = _fallback_data(data)
+    dn = u.get("display_name") or u.get("open_id")
+    if _texto_no_vacio(dn):
+        return str(dn).strip()
+    return None
+
+
 def _fetch_tiktok_user_info(access_token: str) -> str:
     try:
         url = f"{TIKTOK_USER_INFO_URL}?fields=open_id,union_id,avatar_url,display_name"
@@ -122,69 +207,77 @@ def _fetch_tiktok_user_info(access_token: str) -> str:
         resp = requests.get(url, headers=headers, timeout=10)
         logger.info("[TIKTOK USER INFO RAW RESPONSE]: %s", resp.text)
         if resp.status_code == 200:
-            try:
-                data = resp.json()
-            except Exception:
-                data = {}
-            user = None
-            if isinstance(data, dict):
-                if "data" in data and isinstance(data["data"], dict):
-                    user = data["data"].get("user")
-                elif "user" in data:
-                    user = data.get("user")
-                else:
-                    user = data
-            if isinstance(user, dict):
-                display_name = user.get("display_name")
-                if display_name and str(display_name).strip():
-                    return str(display_name).strip()
-                open_id = user.get("open_id")
-                if open_id and str(open_id).strip():
-                    return str(open_id).strip()
-            if isinstance(data, dict):
-                d = data.get("data") or {}
-                u = d.get("user") or {}
-                dn = u.get("display_name") or u.get("open_id")
-                if dn and str(dn).strip():
-                    return str(dn).strip()
+            data = _json_seguro(resp)
+            nombre = _identificador_de_user(_user_de_respuesta(data))
+            if nombre is None:
+                nombre = _identificador_de_data(data)
+            if nombre is not None:
+                return nombre
     except Exception as e:
         logger.error("[TIKTOK USER INFO ERROR]: %s", str(e), exc_info=True)
     return "TikTok User"
 
 
-def save_tiktok_tokens(db: Session, user_id: str, token_data: dict[str, Any]) -> SocialAccount:
-    uid = validate_user_id(user_id)
-
+def _access_token_de_tokens(token_data: dict[str, Any]) -> str:
+    """access_token como string; ValueError si falta."""
     access_token = token_data.get("access_token")
     if not access_token:
         raise ValueError("tokens sin access_token")
-    access_token = str(access_token)
+    return str(access_token)
 
-    refresh_token = token_data.get("refresh_token") or access_token
-    expires_in = token_data.get("expires_in")
-    open_id = token_data.get("open_id") or token_data.get("open_id,") or token_data.get("data", {}).get("open_id") if isinstance(token_data.get("data"), dict) else None
+
+def _open_id_directo(token_data: dict[str, Any]) -> str | None:
+    """open_id del formato condicional original (None si data no es dict)."""
+    if isinstance(token_data.get("data"), dict):
+        return (
+            token_data.get("open_id")
+            or token_data.get("open_id,")
+            or token_data["data"].get("open_id")
+        )
+    return None
+
+
+def _open_id_del_nested(token_data: dict[str, Any]) -> str | None:
+    """open_id del payload anidado (data o el propio token_data)."""
+    try:
+        d = token_data.get("data") if isinstance(token_data.get("data"), dict) else token_data
+        if isinstance(d, dict):
+            return d.get("open_id")
+    except Exception:
+        pass
+    return None
+
+
+def _open_id_de_tokens(token_data: dict[str, Any], uid: str) -> str:
+    """open_id resuelto; str(uid) como último recurso."""
+    open_id = _open_id_directo(token_data)
     if not open_id:
-        try:
-            d = token_data.get("data") if isinstance(token_data.get("data"), dict) else token_data
-            if isinstance(d, dict):
-                open_id = d.get("open_id")
-        except Exception:
-            pass
+        open_id = _open_id_del_nested(token_data)
     if not open_id:
         open_id = str(uid)
+    return open_id
 
-    expires_at: datetime | None = None
-    if expires_in is not None:
-        try:
-            expires_at = datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))
-        except Exception:
-            expires_at = None
 
+def _expires_at_de_tokens(expires_in: Any) -> datetime | None:
+    """Fecha de expiración del token; None si no se puede calcular."""
+    if expires_in is None:
+        return None
+    try:
+        return datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))
+    except Exception:
+        return None
+
+
+def _display_name_tiktok(access_token: str) -> str:
+    """Nombre visible del usuario TikTok, con fallback estándar."""
     display_name = _fetch_tiktok_user_info(access_token)
     if not display_name or not str(display_name).strip():
         display_name = "TikTok User"
-    display_name = str(display_name).strip()
+    return str(display_name).strip()
 
+
+def _cuenta_existente_tiktok(db: Session, uid: str) -> SocialAccount | None:
+    """Cuenta TikTok existente del usuario vía select o query."""
     existing: SocialAccount | None = db.execute(
         select(SocialAccount).where(SocialAccount.user_id == uid, func.lower(SocialAccount.platform) == "tiktok")
     ).scalar_one_or_none()
@@ -193,23 +286,45 @@ def save_tiktok_tokens(db: Session, user_id: str, token_data: dict[str, Any]) ->
             existing = db.query(SocialAccount).filter(SocialAccount.user_id == uid, func.lower(SocialAccount.platform) == "tiktok").first()
         except Exception:
             existing = None
+    return existing
 
-    if existing is not None:
-        existing.access_token = access_token
-        existing.refresh_token = refresh_token
-        existing.token_expires_at = expires_at
-        existing.platform_account_id = str(open_id)
-        existing.platform_username = display_name
-        try:
-            setattr(existing, "account_name", display_name)
-        except Exception:
-            pass
-        existing.updated_at = datetime.now(timezone.utc)
-        db.commit()
-        db.refresh(existing)
-        logger.info("[TIKTOK USER SAVED]: %s", display_name)
-        return existing
 
+def _actualizar_cuenta(
+    db: Session,
+    existing: SocialAccount,
+    access_token: str,
+    refresh_token: str,
+    expires_at: datetime | None,
+    open_id: str,
+    display_name: str,
+) -> SocialAccount:
+    """Actualiza la cuenta existente y persiste cambios."""
+    existing.access_token = access_token
+    existing.refresh_token = refresh_token
+    existing.token_expires_at = expires_at
+    existing.platform_account_id = str(open_id)
+    existing.platform_username = display_name
+    try:
+        setattr(existing, "account_name", display_name)
+    except Exception:
+        pass
+    existing.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(existing)
+    logger.info("[TIKTOK USER SAVED]: %s", display_name)
+    return existing
+
+
+def _crear_cuenta_tiktok(
+    db: Session,
+    uid: str,
+    access_token: str,
+    refresh_token: str,
+    expires_at: datetime | None,
+    open_id: str,
+    display_name: str,
+) -> SocialAccount:
+    """Crea y persiste una cuenta TikTok nueva."""
     account = SocialAccount(
         user_id=uid,
         platform="tiktok",
@@ -228,6 +343,25 @@ def save_tiktok_tokens(db: Session, user_id: str, token_data: dict[str, Any]) ->
     db.refresh(account)
     logger.info("[TIKTOK USER SAVED]: %s", display_name)
     return account
+
+
+def save_tiktok_tokens(db: Session, user_id: str, token_data: dict[str, Any]) -> SocialAccount:
+    uid = validate_user_id(user_id)
+
+    access_token = _access_token_de_tokens(token_data)
+    refresh_token = token_data.get("refresh_token") or access_token
+    open_id = _open_id_de_tokens(token_data, uid)
+    expires_at = _expires_at_de_tokens(token_data.get("expires_in"))
+    display_name = _display_name_tiktok(access_token)
+
+    existing = _cuenta_existente_tiktok(db, uid)
+    if existing is not None:
+        return _actualizar_cuenta(
+            db, existing, access_token, refresh_token, expires_at, open_id, display_name
+        )
+    return _crear_cuenta_tiktok(
+        db, uid, access_token, refresh_token, expires_at, open_id, display_name
+    )
 
 
 __all__ = [

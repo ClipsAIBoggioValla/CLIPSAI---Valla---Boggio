@@ -15,60 +15,95 @@ import { RunPodError, processVideoViaRunpod } from '../services/runpod.js'
  */
 export const apiVideosRouter = Router()
 
-apiVideosRouter.post('/upload-url', async (req, res) => {
-  const body = (req.body ?? {}) as Record<string, unknown>
-  const fileName = body.file_name
-  const fileType = body.file_type
+function bodyOf(req: import('express').Request): Record<string, unknown> {
+  return (req.body ?? {}) as Record<string, unknown>
+}
 
-  if (typeof fileName !== 'string' || !fileName || typeof fileType !== 'string' || !fileType) {
-    return res.status(422).json({
-      detail: [
-        ...(typeof fileName !== 'string' || !fileName ? [{ loc: ['body', 'file_name'], msg: 'field required', type: 'value_error.missing' }] : []),
-        ...(typeof fileType !== 'string' || !fileType ? [{ loc: ['body', 'file_type'], msg: 'field required', type: 'value_error.missing' }] : []),
-      ],
-    })
-  }
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+function missingFieldError(value: unknown, field: string): unknown[] {
+  return typeof value !== 'string' || !value
+    ? [{ loc: ['body', field], msg: 'field required', type: 'value_error.missing' }]
+    : []
+}
+
+function uploadUrlValidationError(body: Record<string, unknown>): unknown[] {
+  return [
+    ...missingFieldError(body.file_name, 'file_name'),
+    ...missingFieldError(body.file_type, 'file_type'),
+  ]
+}
+
+apiVideosRouter.post('/upload-url', async (req, res) => {
+  const body = bodyOf(req)
+  const validation = uploadUrlValidationError(body)
+  if (validation.length > 0) return res.status(422).json({ detail: validation })
 
   try {
-    const ext = path.extname(fileName)
+    const ext = path.extname(body.file_name as string)
     const fileKey = `uploads/${randomUUID()}${ext}`
     const uploadUrl = generatePresignedUrl({
       method: 'PUT',
       key: fileKey,
       expiresIn: 900,
-      contentType: fileType,
+      contentType: body.file_type as string,
     })
     return res.json({ upload_url: uploadUrl, file_key: fileKey })
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    return res.status(500).json({ detail: `Error al generar la presigned URL: ${message}` })
+    return res.status(500).json({ detail: `Error al generar la presigned URL: ${errorMessage(err)}` })
   }
 })
 
-apiVideosRouter.post('/process', async (req, res) => {
-  const body = (req.body ?? {}) as Record<string, unknown>
-  const fileKey = typeof body.file_key === 'string' ? body.file_key.trim() : ''
-  const rawVideoUrl = typeof body.video_url === 'string' ? body.video_url.trim() : ''
-  const transcriptionUrl = typeof body.transcription_url === 'string' ? body.transcription_url : null
-  const transcriptionText = typeof body.transcription_text === 'string' ? body.transcription_text : null
-  const videoId = typeof body.video_id === 'string' ? body.video_id : null
+function stringField(body: Record<string, unknown>, key: string): string {
+  const v = body[key]
+  return typeof v === 'string' ? v.trim() : ''
+}
 
-  const hasFileKey = Boolean(fileKey)
-  const hasVideoUrl = Boolean(rawVideoUrl)
-  if (hasFileKey === hasVideoUrl) {
-    return res.status(422).json({ detail: 'Envía exactamente uno de file_key o video_url' })
+function optionalStringField(body: Record<string, unknown>, key: string): string | null {
+  const v = body[key]
+  return typeof v === 'string' ? v : null
+}
+
+function processValidationError(fileKey: string, rawVideoUrl: string, transcriptionUrl: string | null, transcriptionText: string | null): string | null {
+  if (Boolean(fileKey) === Boolean(rawVideoUrl)) return 'Envía exactamente uno de file_key o video_url'
+  if (transcriptionUrl && transcriptionText !== null) return 'Envía transcription_url o transcription_text, no ambos'
+  return null
+}
+
+function presignReadUrl(fileKey: string): string {
+  return generatePresignedUrl({ method: 'GET', key: fileKey, expiresIn: 3600 })
+}
+
+function runpodStatusCode(message: string): number {
+  return /timeout|no terminó/i.test(message) ? 504 : 502
+}
+
+function processErrorResponse(res: import('express').Response, err: unknown): import('express').Response {
+  if (err instanceof RunPodError) {
+    return res.status(runpodStatusCode(err.message)).json({ detail: `Error al procesar con RunPod: ${err.message}` })
   }
-  if (transcriptionUrl && transcriptionText !== null) {
-    return res.status(422).json({ detail: 'Envía transcription_url o transcription_text, no ambos' })
-  }
+  return res.status(422).json({ detail: errorMessage(err) })
+}
+
+apiVideosRouter.post('/process', async (req, res) => {
+  const body = bodyOf(req)
+  const fileKey = stringField(body, 'file_key')
+  const rawVideoUrl = stringField(body, 'video_url')
+  const transcriptionUrl = optionalStringField(body, 'transcription_url')
+  const transcriptionText = optionalStringField(body, 'transcription_text')
+  const videoId = optionalStringField(body, 'video_id')
+
+  const validationError = processValidationError(fileKey, rawVideoUrl, transcriptionUrl, transcriptionText)
+  if (validationError) return res.status(422).json({ detail: validationError })
 
   let videoUrl = rawVideoUrl
-  if (hasFileKey) {
+  if (fileKey) {
     try {
-      videoUrl = generatePresignedUrl({ method: 'GET', key: fileKey, expiresIn: 3600 })
+      videoUrl = presignReadUrl(fileKey)
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      return res.status(500).json({ detail: `Error al generar la presigned URL de lectura: ${message}` })
+      return res.status(500).json({ detail: `Error al generar la presigned URL de lectura: ${errorMessage(err)}` })
     }
   }
 
@@ -80,12 +115,6 @@ apiVideosRouter.post('/process', async (req, res) => {
     })
     return res.json(result)
   } catch (err) {
-    if (err instanceof RunPodError) {
-      const message = err.message
-      const statusCode = /timeout|no terminó/i.test(message) ? 504 : 502
-      return res.status(statusCode).json({ detail: `Error al procesar con RunPod: ${message}` })
-    }
-    const message = err instanceof Error ? err.message : String(err)
-    return res.status(422).json({ detail: message })
+    return processErrorResponse(res, err)
   }
 })

@@ -15,46 +15,54 @@ OUTPUT_HEIGHT = 1920
 OUTPUT_ASPECT_RATIO = "9:16"
 
 
-def reframe_video(
-    input_video: str | Path,
-    output_video: str | Path,
-    aspect_ratio: Literal["9:16"] = "9:16",
-    timeout_seconds: int = 300,
-) -> str:
-    """Recorta al centro y escala el video a 1080x1920; nunca devuelve el original.
-
-    El crop es FFmpeg-only, por lo que no depende de OpenCV, PyTorch o MediaPipe.
-    Cualquier fallo se propaga como RuntimeError con el motivo concreto.
-    """
-    source = Path(input_video)
-    output = Path(output_video)
+def _validar_reframe_entrada(source: Path, aspect_ratio: str) -> None:
+    """Valida aspect ratio y existencia del video de entrada."""
     if aspect_ratio != OUTPUT_ASPECT_RATIO:
         raise RuntimeError(f"Aspect ratio no soportado: {aspect_ratio!r}; se requiere '9:16'")
     if not source.is_file():
         raise RuntimeError(f"No se puede aplicar crop 9:16: video de entrada no encontrado: {source}")
-    output.parent.mkdir(parents=True, exist_ok=True)
 
-    # Verificar dimensiones del video de entrada
+
+def _dimensiones_ffprobe(source: Path) -> str | None:
+    """Dimensiones 'WxH' del stream de video; None si no se pudo sondear."""
+    probe_cmd = [
+        "ffprobe", "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=width,height",
+        "-of", "csv=p=0:s=x",
+        str(source),
+    ]
+    probe = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=30)
+    if probe.returncode == 0 and probe.stdout.strip():
+        return probe.stdout.strip()
+    return None
+
+
+def _dimensiones_o_aviso(source: Path) -> str | None:
+    """Dimensiones del input; loguea aviso si ffprobe falla."""
     try:
-        probe_cmd = [
-            "ffprobe", "-v", "error",
-            "-select_streams", "v:0",
-            "-show_entries", "stream=width,height",
-            "-of", "csv=p=0:s=x",
-            str(source),
-        ]
-        probe = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=30)
-        if probe.returncode == 0 and probe.stdout.strip():
-            dims = probe.stdout.strip()
-            logger.info("[editor] reframe_video input dimensions: %s (%s)", source.name, dims)
-            if dims == f"{OUTPUT_WIDTH}x{OUTPUT_HEIGHT}":
-                logger.info("[editor] reframe_video: video ya es %dx%d, copiando tal cual", OUTPUT_WIDTH, OUTPUT_HEIGHT)
-                import shutil
-                shutil.copy2(str(source), str(output))
-                return str(output)
+        return _dimensiones_ffprobe(source)
     except Exception as probe_err:
         logger.warning("[editor] no se pudo verificar dimensiones del input: %s", probe_err)
+        return None
 
+
+def _copiar_si_ya_vertical(source: Path, output: Path) -> bool:
+    """Copia tal cual si el video ya es 1080x1920. False si no."""
+    dims = _dimensiones_o_aviso(source)
+    if dims is None:
+        return False
+    logger.info("[editor] reframe_video input dimensions: %s (%s)", source.name, dims)
+    if dims == f"{OUTPUT_WIDTH}x{OUTPUT_HEIGHT}":
+        logger.info("[editor] reframe_video: video ya es %dx%d, copiando tal cual", OUTPUT_WIDTH, OUTPUT_HEIGHT)
+        import shutil
+        shutil.copy2(str(source), str(output))
+        return True
+    return False
+
+
+def _comando_reframe(source: Path, output: Path) -> list[str]:
+    """Comando ffmpeg de crop-primero para 9:16."""
     # Crop-primero (evita frames intermedios gigantes de 3413px que causan OOM en Render)
     # Para input 1280x720 (16:9):
     #   1. crop calcula 405x720 (centrado, manteniendo aspect ratio 9:16)
@@ -64,7 +72,7 @@ def reframe_video(
         f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},setsar=1"
     )
     logger.info("[editor] reframe_video applying filter: %s", crop_filter)
-    command = [
+    return [
         "ffmpeg",
         "-y",
         "-i",
@@ -86,8 +94,13 @@ def reframe_video(
         str(output),
     ]
 
+
+def _ejecutar_ffmpeg_reframe(source: Path, output: Path, timeout_seconds: int):
+    """Corre ffmpeg para el reencuadre; RuntimeError ante arranque/timeout."""
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout_seconds)
+        return subprocess.run(
+            _comando_reframe(source, output), capture_output=True, text=True, timeout=timeout_seconds
+        )
     except FileNotFoundError as exc:
         raise RuntimeError("No se pudo reencuadrar a 9:16: FFmpeg no está instalado o no está en PATH") from exc
     except subprocess.TimeoutExpired as exc:
@@ -95,22 +108,31 @@ def reframe_video(
     except OSError as exc:
         raise RuntimeError(f"No se pudo iniciar FFmpeg para el reencuadre 9:16: {exc}") from exc
 
-    if result.returncode != 0:
-        output.unlink(missing_ok=True)
-        stderr = (result.stderr or "sin stderr")[-2500:]
-        logger.error("[editor] reframe FAILED rc=%s: %s", result.returncode, stderr)
-        if result.returncode == -9:
-            raise RuntimeError(
-                f"reframe vertical falló (memoria/ffmpeg): ffmpeg fue terminado por OOM (rc=-9). "
-                f"El video de entrada puede ser demasiado grande para los recursos disponibles."
-            )
+
+def _fallar_reframe(result, output: Path) -> None:
+    """Elimina la salida parcial y lanza el RuntimeError del fallo de ffmpeg."""
+    output.unlink(missing_ok=True)
+    stderr = (result.stderr or "sin stderr")[-2500:]
+    logger.error("[editor] reframe FAILED rc=%s: %s", result.returncode, stderr)
+    if result.returncode == -9:
         raise RuntimeError(
-            f"reframe vertical falló (ffmpeg rc={result.returncode}): {stderr}"
+            f"reframe vertical falló (memoria/ffmpeg): ffmpeg fue terminado por OOM (rc=-9). "
+            f"El video de entrada puede ser demasiado grande para los recursos disponibles."
         )
+    raise RuntimeError(
+        f"reframe vertical falló (ffmpeg rc={result.returncode}): {stderr}"
+    )
+
+
+def _validar_salida_reframe(output: Path) -> None:
+    """Lanza RuntimeError si ffmpeg no generó un video válido."""
     if not output.is_file() or output.stat().st_size == 0:
         output.unlink(missing_ok=True)
         raise RuntimeError(f"FFmpeg terminó el crop 9:16 sin generar un video válido: {output}")
 
+
+def _sondear_salida(output: Path):
+    """Sondeo ffprobe del output; RuntimeError ante fallo (borra salida)."""
     probe_command = [
         "ffprobe",
         "-v",
@@ -124,7 +146,7 @@ def reframe_video(
         str(output),
     ]
     try:
-        probe = subprocess.run(probe_command, capture_output=True, text=True, timeout=30)
+        return subprocess.run(probe_command, capture_output=True, text=True, timeout=30)
     except FileNotFoundError as exc:
         output.unlink(missing_ok=True)
         raise RuntimeError("No se pudo validar el crop 9:16: ffprobe no está instalado o no está en PATH") from exc
@@ -135,6 +157,9 @@ def reframe_video(
         output.unlink(missing_ok=True)
         raise RuntimeError(f"No se pudo validar el crop 9:16 con ffprobe: {exc}") from exc
 
+
+def _validar_dimensiones_salida(output: Path, probe) -> None:
+    """Borra la salida y lanza RuntimeError si las dimensiones no son 1080x1920."""
     dimensions = probe.stdout.strip() if probe.returncode == 0 else ""
     if dimensions != f"{OUTPUT_WIDTH}x{OUTPUT_HEIGHT}":
         output.unlink(missing_ok=True)
@@ -144,4 +169,32 @@ def reframe_video(
             f"esperadas {OUTPUT_WIDTH}x{OUTPUT_HEIGHT}. {stderr}"
         )
 
+
+def reframe_video(
+    input_video: str | Path,
+    output_video: str | Path,
+    aspect_ratio: Literal["9:16"] = "9:16",
+    timeout_seconds: int = 300,
+) -> str:
+    """Recorta al centro y escala el video a 1080x1920; nunca devuelve el original.
+
+    El crop es FFmpeg-only, por lo que no depende de OpenCV, PyTorch o MediaPipe.
+    Cualquier fallo se propaga como RuntimeError con el motivo concreto.
+    """
+    source = Path(input_video)
+    output = Path(output_video)
+    _validar_reframe_entrada(source, aspect_ratio)
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    # Verificar dimensiones del video de entrada
+    if _copiar_si_ya_vertical(source, output):
+        return str(output)
+
+    result = _ejecutar_ffmpeg_reframe(source, output, timeout_seconds)
+    if result.returncode != 0:
+        _fallar_reframe(result, output)
+    _validar_salida_reframe(output)
+
+    probe = _sondear_salida(output)
+    _validar_dimensiones_salida(output, probe)
     return str(output)

@@ -177,20 +177,67 @@ class TestRetrim:
         (tmp_path / "source.mp4").write_bytes(b"v")
         self._pushes_dueno(db, user, clip, job, video)
 
-        def _ffmpeg_falso(cmd: list[str], **kwargs: Any) -> Any:
-            out_path = cmd[-1]
-            (out_path[:1] if False else __import__("pathlib").Path(out_path)).write_bytes(b"retrim")
-            return SimpleNamespace(returncode=0, stderr=b"")
-
         with self._configurar(client, db, user):
-            with patch("backend.api.routes.retrim.subprocess.run", Mock(side_effect=_ffmpeg_falso)):
+            with patch("backend.api.routes.retrim.subprocess.run", Mock(side_effect=_ffmpeg_falso_retrim())):
                 r = client.post(f"/clips/{clip.id}/retrim", json={"start_time": 5.0, "end_time": 35.0})
         assert r.status_code == 200
-        data = r.json()
-        assert data["start_time"] == 5.0
-        assert data["duration"] == 30.0
-        assert data["status"] == "ready"
-        assert clip.storage_path.endswith(".mp4")
+        _aux_assert_retrim_respuesta(r.json())
+        _aux_assert_retrim_clip(clip)
+
+
+# ------------------------------------------------------------------- helpers
+
+def _ffmpeg_falso_retrim():
+    def _ffmpeg_falso(cmd: list[str], **kwargs: Any) -> Any:
+        out_path = cmd[-1]
+        (out_path[:1] if False else __import__("pathlib").Path(out_path)).write_bytes(b"retrim")
+        return SimpleNamespace(returncode=0, stderr=b"")
+
+    return _ffmpeg_falso
+
+
+def _aux_assert_retrim_respuesta(data) -> None:
+    assert data["start_time"] == 5.0
+    assert data["duration"] == 30.0
+    assert data["status"] == "ready"
+
+
+def _aux_assert_retrim_clip(clip) -> None:
+    assert clip.storage_path.endswith(".mp4")
+
+
+def _aux_assert_to_event_progreso() -> None:
+    assert _to_event("pending").progress == 0
+    assert _to_event("processing").progress == 55
+    assert _to_event("completed").progress == 100
+
+
+def _aux_assert_to_event_status() -> None:
+    assert _to_event("PROCESSING").status == stream_mod.AutopilotJobStatus.scoring.value
+    assert _to_event("failed").status == stream_mod.AutopilotJobStatus.failed.value
+
+
+def _aux_assert_to_event_extras() -> None:
+    # status conocido por el enum pero no en el mapa
+    intermedio = _to_event(stream_mod.AutopilotJobStatus.transcribing.value)
+    assert intermedio.progress == 50
+    # status completamente desconocido
+    desconocido = _to_event("WEIRD")
+    assert desconocido.progress == 0
+    assert desconocido.status == "weird"
+
+
+def _aux_assert_as_seconds_numericos() -> None:
+    assert cli_mod._as_seconds(12) == 12.0
+    assert cli_mod._as_seconds(1.5) == pytest.approx(1.5)
+    assert cli_mod._as_seconds("12.5") == pytest.approx(12.5)
+
+
+def _aux_assert_as_seconds_hms() -> None:
+    assert cli_mod._as_seconds("00:01:05") == pytest.approx(65.0)
+    assert cli_mod._as_seconds("2:30") == pytest.approx(150.0)
+    with pytest.raises(ValueError, match="Timestamp inválido"):
+        cli_mod._as_seconds("1:2:3:4")
 
 
 # ------------------------------------------------------------------- stream
@@ -246,18 +293,9 @@ class TestStreamJobs:
         assert "inv" in r.text  # job_id inválido (json.dumps con ensure_ascii)
 
     def test_to_event_mapeos(self) -> None:
-        assert _to_event("pending").progress == 0
-        assert _to_event("processing").progress == 55
-        assert _to_event("PROCESSING").status == stream_mod.AutopilotJobStatus.scoring.value
-        assert _to_event("completed").progress == 100
-        assert _to_event("failed").status == stream_mod.AutopilotJobStatus.failed.value
-        # status conocido por el enum pero no en el mapa
-        intermedio = _to_event(stream_mod.AutopilotJobStatus.transcribing.value)
-        assert intermedio.progress == 50
-        # status completamente desconocido
-        desconocido = _to_event("WEIRD")
-        assert desconocido.progress == 0
-        assert desconocido.status == "weird"
+        _aux_assert_to_event_progreso()
+        _aux_assert_to_event_status()
+        _aux_assert_to_event_extras()
 
 
 # ---------------------------------------------------------------------- CLI
@@ -265,13 +303,8 @@ class TestStreamJobs:
 
 class TestCliHelpers:
     def test_as_seconds(self) -> None:
-        assert cli_mod._as_seconds(12) == 12.0
-        assert cli_mod._as_seconds(1.5) == pytest.approx(1.5)
-        assert cli_mod._as_seconds("12.5") == pytest.approx(12.5)
-        assert cli_mod._as_seconds("00:01:05") == pytest.approx(65.0)
-        assert cli_mod._as_seconds("2:30") == pytest.approx(150.0)
-        with pytest.raises(ValueError, match="Timestamp inválido"):
-            cli_mod._as_seconds("1:2:3:4")
+        _aux_assert_as_seconds_numericos()
+        _aux_assert_as_seconds_hms()
 
     def test_build_parser(self) -> None:
         parser = cli_mod.build_parser()

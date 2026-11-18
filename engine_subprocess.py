@@ -51,6 +51,68 @@ class ProcesamientoResultado:
         )
 
 
+def _error_resultado(error: str, error_tipo: str, error_detalle: str = "") -> ProcesamientoResultado:
+    """Resultado de error tipado del wrapper subprocess."""
+    return ProcesamientoResultado(
+        exito=False, clips=[], carpeta_salida="",
+        error=error,
+        error_tipo=error_tipo,
+        error_detalle=error_detalle,
+    )
+
+
+def _validaciones_previas(video_path: str, transcripcion_path: str) -> tuple:
+    """Valida entradas y la existencia de engine.py. Devuelve (engine_path, error|None)."""
+    if not os.path.exists(video_path):
+        return None, _error_resultado(f"Video no encontrado: {video_path}", "ValidacionError")
+    if not os.path.exists(transcripcion_path):
+        return None, _error_resultado(f"Transcripción no encontrada: {transcripcion_path}", "ValidacionError")
+
+    # Resolver path absoluto de engine.py
+    engine_path = os.path.join(os.path.dirname(__file__), "engine.py")
+    if not os.path.exists(engine_path):
+        return None, _error_resultado(f"engine.py no encontrado en {engine_path}", "ConfiguracionError")
+    return engine_path, None
+
+
+def _ejecutar_engine_subprocess(cmd: list, timeout_segundos: int) -> tuple:
+    """Corre el subprocess con timeout. Devuelve (result|None, error|None)."""
+    try:
+        # Ejecutar subprocess con timeout
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout_segundos
+        )
+        return result, None
+    except subprocess.TimeoutExpired:
+        return None, _error_resultado(f"Timeout ({timeout_segundos}s) en procesamiento", "TimeoutError")
+    except Exception as e:
+        return None, _error_resultado(f"Error ejecutando subprocess: {e}", "SubprocessError")
+
+
+def _parsear_salida_subprocess(result) -> tuple:
+    """Parsea el stdout JSON del subprocess. Devuelve (data|None, error|None)."""
+    # Parsear salida JSON (stdout)
+    stdout = result.stdout.strip()
+    if not stdout:
+        return None, _error_resultado(
+            "Subprocess no produjo salida",
+            "SubprocessError",
+            error_detalle=f"stderr: {result.stderr[:500]}"
+        )
+
+    try:
+        return json.loads(stdout), None
+    except json.JSONDecodeError as e:
+        return None, _error_resultado(
+            f"Salida JSON inválida del subprocess: {e}",
+            "ParseError",
+            error_detalle=f"stdout: {stdout[:500]}\nstderr: {result.stderr[:500]}"
+        )
+
+
 def procesar_video_subprocess(
     video_path: str,
     transcripcion_path: str,
@@ -70,27 +132,9 @@ def procesar_video_subprocess(
         ProcesamientoResultado con el resultado estructurado
     """
     # Validaciones tempranas
-    if not os.path.exists(video_path):
-        return ProcesamientoResultado(
-            exito=False, clips=[], carpeta_salida="",
-            error=f"Video no encontrado: {video_path}",
-            error_tipo="ValidacionError"
-        )
-    if not os.path.exists(transcripcion_path):
-        return ProcesamientoResultado(
-            exito=False, clips=[], carpeta_salida="",
-            error=f"Transcripción no encontrada: {transcripcion_path}",
-            error_tipo="ValidacionError"
-        )
-
-    # Resolver path absoluto de engine.py
-    engine_path = os.path.join(os.path.dirname(__file__), "engine.py")
-    if not os.path.exists(engine_path):
-        return ProcesamientoResultado(
-            exito=False, clips=[], carpeta_salida="",
-            error=f"engine.py no encontrado en {engine_path}",
-            error_tipo="ConfiguracionError"
-        )
+    engine_path, error = _validaciones_previas(video_path, transcripcion_path)
+    if error is not None:
+        return error
 
     # Construir comando
     cmd = [
@@ -101,49 +145,15 @@ def procesar_video_subprocess(
         "--json"
     ]
 
-    try:
-        # Ejecutar subprocess con timeout
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout_segundos
-        )
+    result, error = _ejecutar_engine_subprocess(cmd, timeout_segundos)
+    if error is not None:
+        return error
 
-        # Parsear salida JSON (stdout)
-        stdout = result.stdout.strip()
-        if not stdout:
-            return ProcesamientoResultado(
-                exito=False, clips=[], carpeta_salida="",
-                error="Subprocess no produjo salida",
-                error_tipo="SubprocessError",
-                error_detalle=f"stderr: {result.stderr[:500]}"
-            )
+    data, error = _parsear_salida_subprocess(result)
+    if error is not None:
+        return error
 
-        try:
-            data = json.loads(stdout)
-        except json.JSONDecodeError as e:
-            return ProcesamientoResultado(
-                exito=False, clips=[], carpeta_salida="",
-                error=f"Salida JSON inválida del subprocess: {e}",
-                error_tipo="ParseError",
-                error_detalle=f"stdout: {stdout[:500]}\nstderr: {result.stderr[:500]}"
-            )
-
-        return ProcesamientoResultado.from_dict(data)
-
-    except subprocess.TimeoutExpired:
-        return ProcesamientoResultado(
-            exito=False, clips=[], carpeta_salida="",
-            error=f"Timeout ({timeout_segundos}s) en procesamiento",
-            error_tipo="TimeoutError"
-        )
-    except Exception as e:
-        return ProcesamientoResultado(
-            exito=False, clips=[], carpeta_salida="",
-            error=f"Error ejecutando subprocess: {e}",
-            error_tipo="SubprocessError"
-        )
+    return ProcesamientoResultado.from_dict(data)
 
 
 # ============================================================

@@ -15,19 +15,35 @@ from ..models import Clip, Job, Video
 router = APIRouter(tags=["export"])
 
 
-def _resolve_transcript(clip: Clip, video_transcript: str | None) -> str:
+def _transcript_de_atributos(clip: Clip) -> str | None:
+    """Primera transcripción presente entre los atributos del clip."""
     for attr in ("transcript", "transcript_text", "transcription", "text"):
         v = getattr(clip, attr, None)
         if v:
             return str(v)
+    return None
+
+
+def _transcript_de_tags(clip: Clip) -> str | None:
+    """Transcripción guardada en tags (transcript o text)."""
     tags = getattr(clip, "tags", None)
-    if isinstance(tags, dict) and tags.get("transcript"):
+    if not isinstance(tags, dict):
+        return None
+    if tags.get("transcript"):
         return str(tags["transcript"])
-    if isinstance(tags, dict) and tags.get("text"):
+    if tags.get("text"):
         return str(tags["text"])
-    if video_transcript:
-        return str(video_transcript)
-    return ""
+    return None
+
+
+def _resolve_transcript(clip: Clip, video_transcript: str | None) -> str:
+    """Transcripción del clip: atributos, tags o la del video."""
+    transcript = _transcript_de_atributos(clip)
+    if transcript is None:
+        transcript = _transcript_de_tags(clip)
+    if transcript is None and video_transcript:
+        transcript = str(video_transcript)
+    return transcript or ""
 
 
 def _build_csv(clips_with_transcript: list[tuple[Clip, str]]) -> str:
@@ -47,24 +63,31 @@ def _build_csv(clips_with_transcript: list[tuple[Clip, str]]) -> str:
     return output.getvalue()
 
 
-def _build_json_payload(clips_with_transcript: list[tuple[Clip, str]], job_id: uuid.UUID | None = None) -> dict:
-    clips_payload = []
-    scores: list[float] = []
-    for clip, vt in clips_with_transcript:
-        transcript = _resolve_transcript(clip, vt)
-        clips_payload.append({
-            "id": str(clip.id),
-            "title": clip.title,
-            "start_time": clip.start_time,
-            "end_time": clip.end_time,
-            "score": clip.score,
-            "transcript": transcript,
-        })
-        if clip.score is not None:
-            try:
-                scores.append(float(clip.score))
-            except Exception:
-                pass
+def _score_seguro(clip: Clip) -> float | None:
+    """Score del clip como float, o None si falta o no es convertible."""
+    if clip.score is None:
+        return None
+    try:
+        return float(clip.score)
+    except Exception:
+        pass
+    return None
+
+
+def _item_de_clip(clip: Clip, transcript: str) -> dict:
+    """Diccionario de un clip para el payload JSON."""
+    return {
+        "id": str(clip.id),
+        "title": clip.title,
+        "start_time": clip.start_time,
+        "end_time": clip.end_time,
+        "score": clip.score,
+        "transcript": transcript,
+    }
+
+
+def _payload_con_resumen(clips_payload: list[dict], scores: list[float], job_id: uuid.UUID | None) -> dict:
+    """Payload final con total, job_id y promedio de scores."""
     payload: dict = {
         "total_clips": len(clips_payload),
         "clips": clips_payload,
@@ -74,6 +97,18 @@ def _build_json_payload(clips_with_transcript: list[tuple[Clip, str]], job_id: u
     if scores:
         payload["avg_score"] = round(sum(scores) / len(scores), 2)
     return payload
+
+
+def _build_json_payload(clips_with_transcript: list[tuple[Clip, str]], job_id: uuid.UUID | None = None) -> dict:
+    """Payload JSON del export de clips."""
+    clips_payload = []
+    scores: list[float] = []
+    for clip, vt in clips_with_transcript:
+        clips_payload.append(_item_de_clip(clip, _resolve_transcript(clip, vt)))
+        score = _score_seguro(clip)
+        if score is not None:
+            scores.append(score)
+    return _payload_con_resumen(clips_payload, scores, job_id)
 
 
 def _fetch_job_clips(db: DbSession, job_id: uuid.UUID) -> list[tuple[Clip, str]]:

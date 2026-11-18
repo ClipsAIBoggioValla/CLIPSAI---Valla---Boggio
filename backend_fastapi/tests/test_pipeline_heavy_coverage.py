@@ -86,21 +86,7 @@ class TestHelpersWhisper:
 
 class TestExtractAudioWav:
     def _run_plan(self, video: Path, salida: Path, primer_ok: bool = True):
-        intento = {"n": 0}
-
-        def run(cmd, **k):
-            intento["n"] += 1
-            if cmd[0] == "ffprobe":
-                return _resp_run("video\naudio\n")
-            if cmd[0] == "ffmpeg" and "version" in " ".join(cmd):
-                return _resp_run()
-            if intento["n"] == 2 and not primer_ok:
-                return _resp_run(returncode=1, stderr="kaput")
-            if not salida.exists():
-                salida.write_bytes(b"wav-data")
-            return _resp_run()
-
-        return run, intento
+        return _run_plan_factory(video, salida, primer_ok)
 
     def test_exito(self, tmp_path, monkeypatch) -> None:
         video = _video_tmp(tmp_path)
@@ -147,6 +133,64 @@ class TestExtractAudioWav:
 # ------------------------------------------------------------------ transcribe_wav
 
 
+def _run_ffprobe_o_version(cmd) -> object | None:
+    """Respuesta rápida para los comandos de sonda (ffprobe / versión)."""
+    if cmd[0] == "ffprobe":
+        return _resp_run("video\naudio\n")
+    if cmd[0] == "ffmpeg" and "version" in " ".join(cmd):
+        return _resp_run()
+    return None
+
+
+def _run_plan_es_fallo_primer_intento(intento: dict, primer_ok: bool) -> bool:
+    return intento["n"] == 2 and not primer_ok
+
+
+def _run_plan_run_factory(salida: Path, primer_ok: bool, intento: dict):
+    def run(cmd, **k):
+        intento["n"] += 1
+        rapido = _run_ffprobe_o_version(cmd)
+        if rapido is not None:
+            return rapido
+        if _run_plan_es_fallo_primer_intento(intento, primer_ok):
+            return _resp_run(returncode=1, stderr="kaput")
+        if not salida.exists():
+            salida.write_bytes(b"wav-data")
+        return _resp_run()
+
+    return run
+
+
+def _run_plan_factory(video: Path, salida: Path, primer_ok: bool = True):
+    intento = {"n": 0}
+    return _run_plan_run_factory(salida, primer_ok, intento), intento
+
+
+def _aux_assert_transcribe_primer_segmento(resultado) -> None:
+    assert len(resultado) == 2
+    assert resultado[0]["text"] == "Hola mundo."
+    assert [w["text"] for w in resultado[0]["words"]] == ["Hola", "mundo."]
+
+
+def _aux_assert_transcribe_clamp_y_modelo(resultado, mod) -> None:
+    # el segmento invertido se clampa a end=start+0.5
+    assert resultado[1]["end"] == pytest.approx(5.5)
+    # el modelo resuelto por _MODEL_MAP
+    mod.WhisperModel.assert_called_once()
+    assert mod.WhisperModel.call_args.args[0].startswith("deepdml/faster-whisper-large-v3-turbo")
+
+
+def _aux_assert_flujo_completo_clip(clip, video_file) -> None:
+    assert clip.status == "COMPLETED"
+    assert clip.storage_path != str(video_file)          # nunca el original
+    assert clip.storage_path.endswith("_subtitled.mp4")
+
+
+def _aux_assert_flujo_completo_final(clip, salida, db) -> None:
+    assert salida is not None and Path(clip.storage_path).exists()
+    assert db.commits >= 2
+
+
 def _fake_whisper_module(segs: list[Any], fallo_al_cargar: bool = False) -> types.ModuleType:
     mod = types.ModuleType("faster_whisper")
 
@@ -189,14 +233,8 @@ class TestTranscribeWav:
         mod = _fake_whisper_module(segs)
         with patch.dict(sys.modules, {"faster_whisper": mod}):
             resultado = ws.transcribe_wav(str(wav), model_name="turbo")
-        assert len(resultado) == 2
-        assert resultado[0]["text"] == "Hola mundo."
-        assert [w["text"] for w in resultado[0]["words"]] == ["Hola", "mundo."]
-        # el segmento invertido se clampa a end=start+0.5
-        assert resultado[1]["end"] == pytest.approx(5.5)
-        # el modelo resuelto por _MODEL_MAP
-        mod.WhisperModel.assert_called_once()
-        assert mod.WhisperModel.call_args.args[0].startswith("deepdml/faster-whisper-large-v3-turbo")
+        _aux_assert_transcribe_primer_segmento(resultado)
+        _aux_assert_transcribe_clamp_y_modelo(resultado, mod)
 
     def test_cero_segmentos(self, tmp_path) -> None:
         wav = tmp_path / "g2.wav"
@@ -421,11 +459,8 @@ class TestRunSubtitlePipeline:
         ):
             sp.run_subtitle_pipeline(clip.id)
 
-        assert clip.status == "COMPLETED"
-        assert clip.storage_path != str(video_file)          # nunca el original
-        assert clip.storage_path.endswith("_subtitled.mp4")
-        assert salida is not None and Path(clip.storage_path).exists()
-        assert db.commits >= 2
+        _aux_assert_flujo_completo_clip(clip, video_file)
+        _aux_assert_flujo_completo_final(clip, salida, db)
 
     def test_flujo_runpod_sin_extract_local(self, tmp_path, db, user, monkeypatch) -> None:
         clip, video_file = self._setup(db, user, tmp_path)

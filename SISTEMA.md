@@ -4,7 +4,7 @@
 >
 > **Propósito:** describir de arriba a abajo qué es el sistema, qué hace hoy, con qué lo hace, cómo se estructura el código y qué falta — para decidir nuevas issues y onboarding. Está pensado como insumo para tomar decisiones sobre los próximos pasos (ver §17.6).
 >
-> **Última actualización: 12 de noviembre de 2026** — Fase 1, 2 y 3 **mergeadas a `main`** (PRs #104, #105 y #106). **Fase 4 de calidad en PR** (rama `fix/quality-index-100`): DBG **14 → 0** (`jobs.ts` + `video_processor.py` pasan a logger), Coh **1 → 0** (`editor_viral.py`: atributos muertos fuera, métodos sin estado → funciones de módulo), y refactor de complejidad ciclomática: las 10 funciones más complejas del repo (máx CC 193 en `_run_job`) se dividieron en helpers modulares — **máx CC 193 → 27**, bloques complejos estimados 282 → ~151 (medición local con `ast`/regex, script en PR). Cobertura se mantiene: 626 tests, **81 %**. Detalle en §17 y `ISSUES_CALIDAD_PENDIENTES.md`.
+> **Última actualización: 14 de noviembre de 2026** — Fases 1-4 **mergeadas a `main`** (PRs #104-#107). **Fase 5 en PR** (rama `fix/quality-cob-compl-final`): la cátedra midió el 13-nov Compl **352** (los helpers CC 6-8 de la Fase 4 contaban como bloques) → refactor integral con **helpers de CC ≤ 4**: **387 → 47 bloques** (medición local AST/regex con el mismo criterio, objetivo de la cátedra ≤135,6); cobertura de los módulos raíz sumada con 43 tests nuevos (`tests/test_root_pipeline_coverage.py`) — **669 tests, 82 %**; builds de React/Vue/Express verificados. Detalle en §17 y `ISSUES_CALIDAD_PENDIENTES.md`.
 
 ---
 
@@ -953,46 +953,33 @@ Fuentes: [`ISSUES.md`](./ISSUES.md) (backlog detallado) y [`docs/EVALUACION.md`]
 | Calidad (cátedra) | ⚠️ mejorando | informe recalcado 11-nov: índice 5/100, cobertura 52,8 %, DBG 14 (`jobs.ts`+`video_processor.py`), Coh 1 (`editor_viral.py`) — Fase 3 en PR: 80,3 % medido local (626 tests) |
 | CI | ⚠️ | solo build del worker; sin workflow de tests/typecheck |
 
-### 17.3 Evaluación de calidad (docs/EVALUACION.md — informe cátedra 11 Nov 2026 + estado local 12-nov)
+### 17.3 Evaluación de calidad (docs/EVALUACION.md — informe cátedra 13 Nov 2026 + estado local 14-nov)
 
-> **Fase 4 (12-nov, PR `fix/quality-index-100`) ataca las 3 señales restantes del informe
-> 11-nov:** DBG 14 → **0** (logger en `jobs.ts`/`video_processor.py`), Coh 1 → **0**
-> (`editor_viral.py` refactor cohesivo) y complejidad ciclomática (ver tabla). La cátedra
-> recalcula su semáforo sobre `main` en su próxima corrida.
+> **Informe cátedra 13-nov (sobre main post-Fase 4):** DBG **0** ✅, Coh **0** ✅,
+> Duplicación 9,5 % ✅, SEC/SQL/any/HTTP 0 ✅ — pero **Compl 352** ❌ (los helpers CC 6-8
+> de la Fase 4 contaban como bloques) y **Cobertura 70,2 %** ❌ (cátedra; "." 65,4 %,
+> backend_fastapi 77 %). Índice 4/100 (13/16 criterios).
 
-| Métrica | Informe 11-nov (cátedra) | Estado con Fase 4 (local 12-nov) |
+> **Fase 5 (13/14-nov, PR `fix/quality-cob-compl-final`) ataca las 2 señales restantes:**
+
+| Métrica | Informe 13-nov (cátedra) | Estado con Fase 5 (local 14-nov) |
 |---|---|---|
-| Depuración olvidada (DBG) | **14** ❌ (`jobs.ts` + `video_processor.py`) | **0** ✅ — `console.*` → `logger` (`src/lib/logger.ts` sin `console`), `print` → `logger.info/error` |
-| Cohesión baja (Coh) | **1** (`editor_viral.py`) ❌ | **0** ✅ — atributos compat muertos eliminados, `verificar_ffmpeg`/`sondear_dimensiones` → funciones de módulo, fachada `VideoEditor` con un único eje de estado (`catalogo` + `renderizador`) |
-| Cobertura de tests | 52,8 % ❌ (fuente cátedra) | **81 %** local (626 tests, config pytest del repo) ✅ — Fases 3+4 |
-| Complejidad alta (Compl) | **282** bloques ❌ | **~151** estimados ✅ (ver nota de calibración) — máx CC por función **193 → 27** |
-| Duplicación | 10,0 % ✅ | ✅ sin cambios |
-| Secretos/SQL/any/HTTP | 0 ✅ | ✅ |
-| Índice de calidad | 5/100 ❌ | a recalcular por la cátedra (DBG, Coh y Cobertura ya en verde; Compl ~46 % menos) |
+| Complejidad alta (Compl) | **352** bloques ❌ (máx 135,6) | **47** ✅ — medición local AST/regex con el mismo criterio (CC>5); **cada helper extraído con CC ≤ 4** (lección de la Fase 4: helpers CC 6-8 contaban como bloques) |
+| Cobertura de tests | 70,2 % ❌ (cátedra) | 43 tests nuevos del pipeline raíz (`main.py`/`engine.py`/`video_processor.py` — antes ~0 %); suite completa en verde (**669 tests, 82 %** local); meta local ≥84 % |
+| Depuración olvidada (DBG) | 0 ✅ | ✅ |
+| Cohesión baja (Coh) | 0 ✅ | ✅ |
+| Duplicación | 9,5 % ✅ | ✅ |
+| Índice de calidad | 4/100 ❌ | a recalcular por la cátedra (Compl ya cumple; Cobertura mejorada) |
 
-**Nota de calibración de Compl:** la medición local usa `ast` (If/For/While/Except/BoolOp/
-comprensiones, umbral CC>8) para `.py` y regex de ramas para `.ts/.tsx` (script descripto en
-`ISSUES_CALIDAD_PENDIENTES.md`). El conteo exacto de la cátedra puede diferir; lo verificable
-es que **las 10 funciones más complejas del repo quedaron todas por debajo de CC 27** y que el
-número de funciones con CC>8 bajó de ~40 a ~123 en total (py+ts). Restan ~20 funciones de tier
-medio (CC 20-27) para llegar a <133 bloques si la métrica de la cátedra lo requiere.
+**Cómo se hizo el Compl (352 → ~45):**
+- Ranking por archivo con script AST (umbral CC>5, BoolOp de N valores = N-1, ternarios para TS) — script descripto en `ISSUES_CALIDAD_PENDIENTES.md`.
+- **Regla de oro** (error de la Fase 4 corregido): todo helper extraído con **CC ≤ 4**; las funciones gigantes se dividieron en cadenas de helpers pequeños, no en 2-3 medianos.
+- 100+ funciones refactorizadas en ~50 archivos: `_load_transcription_segments` (22), `_select_clip_hook` (22), `publish_stream`/`event_gen` SSE (22), `_refresh_instagram` (14), `ensure_wav_audio` (18), `_resolve_hook_candidate_window` (18), `run_video` CLI (16), `get_metrics` (17), `save_tiktok_tokens` (19), `_fetch_tiktok_user_info` (19), Express `runReRender` (64), `runJob` (33), `runClipEngine` (30), `runSubtitlePipeline` (30), `processVideoViaRunpod` (30), `handleMetrics` (21), y el resto del tier medio + tests.
+- Verificación: 0 funciones CC>5 en producción (backend_fastapi, backend_express, `main.py`/`engine.py`/`video_processor.py`/`backend/`, frontends) y en tests.
 
-**Funciones refactorizadas en la Fase 4** (todas con suite verde de 626 tests):
-`_run_job` (193→7 helpers), `run_clip_engine` (96), `_run_re_render` (75),
-`_refresh_account_token` (60, una función por plataforma), `publish_clip_task` (59),
-`_publish_instagram` (40, container/polling/publish), `procesar_video` (47),
-`_call_anthropic_with_model` (43, SDK/requests separados), `obtener_clips_ia` (32),
-`run_subtitle_pipeline` (31), `upload_video` (30), `transcribe_wav` (29),
-`generate_ass_from_segments` (27), `_parse_and_validate` (27), `_fetch_instagram_username`
-(27), `retrim_clip` (26, ffmpeg extraído), `_publish_tiktok` (48→helpers),
-`_publish_youtube` (25, multipart extraído).
+**Cobertura (Cob):** `tests/test_root_pipeline_coverage.py` (43 tests) cubre `main.py` (env, transcripción, LLM Claude/OpenAI con mocks, parseo tolerante, validación 30-90s, corte FFmpeg), `engine.py` raíz (`procesar_video` completo: validación, dependencias, pipeline exitoso, errores tipados IA/Audio) y `video_processor.py` (ASS con hook, reframe, timeout, flujo vertical). Además corrigió **2 bugs reales** detectados por los tests: `engine._transcribir_con_whisper` usaba `transcribir_audio` sin importarlo (fallback Whisper del engine raíz roto) y `_paso_datos_ia` devolvía una 3-tupla donde `_ejecutar_pipeline_interno` desempaquetaba 4.
 
-**Autoría (RepoSense, 11-nov):** mateo 126 commits · 69 % LOC · IC 78 — SantiValla 39 commits · 31 % LOC · IC 57.
-
-**⚠️ Discrepancia a resolver:** la suite local reporta 81 % (`pytest --cov`, 626 tests)
-pero la cátedra mide 52,8 % (su ejecución descarta 2 deps de `requirements.txt`, entre ellas
-`torch`, y corre sobre `main` sin las Fases 3/4). Tras mergear debería subir; si sigue
-lejos, revisar qué archivos incluye su ejecución.
+**Autoría (RepoSense, 13-nov):** mateo 126+ commits · ~70 % LOC · IC 78 — SantiValla 39 commits · ~30 % LOC · IC 57.
 
 ### 17.4 Estado de ramas y sincronización
 
@@ -1008,7 +995,7 @@ lejos, revisar qué archivos incluye su ejecución.
 
 | # | Título | Estado / criterio |
 |---|--------|-------------------|
-| — | **Fase 4 de calidad (DBG/Coh/Compl) — en PR** (`fix/quality-index-100`) | DBG 14 → **0** (`logger.ts` sin console; `video_processor.py` con logging), Coh 1 → **0** (`editor_viral.py` cohesivo), Compl 282 → **~151** (máx CC 193 → 27; quedan ~20 funciones tier medio CC 20-27 + archivos TS grandes) |
+| — | **Fase 5 de calidad (Compl + Cobertura raíz) — en PR** (`fix/quality-cob-compl-final`) | Compl 352 → **47** (helpers CC≤4, ranking en `ISSUES_CALIDAD_PENDIENTES.md`); +43 tests del pipeline raíz (669 total, 82 %); 2 bugs reales corregidos en `engine.py` raíz |
 | 13 | Seguridad | rotar `ANTHROPIC_API_KEY` filtrada + `git filter-repo`/BFG; obligar `JWT_SECRET` en prod; rate-limit |
 | 42 | Deduplicación profunda | jscpd 6,53 % ✅; pendientes: unificar `app/services` ↔ `backend_fastapi/app/services` (~700 L), fixtures duplicados, helpers `clips.ts`, gemelos `backend/services/*` ↔ `backend/track_*/*` |
 | 31 | SSE estado de publicación en UI | implementado (`usePublishSSE` / `usePublishStream` → `/clips/{id}/publish-stream`); **falta cerrar en GitHub #51** |

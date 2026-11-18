@@ -15,38 +15,109 @@ def _get_clip_or_none(db: Session, clip_id: uuid.UUID) -> Clip | None:
     return db.get(Clip, clip_id)
 
 
-def _resolve_video_path(clip: Clip, db: Session) -> str | None:
-    for attr in ("storage_path", "file_path"):
-        v = getattr(clip, attr, None)
+def _ruta_de_atributos(obj: Any, atributos: tuple[str, ...]) -> str | None:
+    """Primera ruta de archivo existente entre los atributos dados."""
+    for attr in atributos:
+        v = getattr(obj, attr, None)
         if v and Path(str(v)).is_file():
             return str(v)
-    if clip.video_id is not None:
-        try:
-            from ..models import Video
-
-            video = db.get(Video, clip.video_id)
-            if video is not None:
-                for attr in ("filepath", "file_path"):
-                    v = getattr(video, attr, None)
-                    if v and Path(str(v)).is_file():
-                        return str(v)
-        except Exception:
-            pass
-    if clip.job_id is not None:
-        try:
-            from ..models import Job, Video
-
-            job = db.get(Job, clip.job_id)
-            if job is not None:
-                video = db.get(Video, job.video_id)
-                if video is not None:
-                    for attr in ("filepath", "file_path"):
-                        v = getattr(video, attr, None)
-                        if v and Path(str(v)).is_file():
-                            return str(v)
-        except Exception:
-            pass
     return None
+
+
+def _ruta_desde_video(db: Session, video_id: Any) -> str | None:
+    """Ruta del video por video_id directo (si existe)."""
+    try:
+        from ..models import Video
+
+        video = db.get(Video, video_id)
+        if video is not None:
+            return _ruta_de_atributos(video, ("filepath", "file_path"))
+    except Exception:
+        pass
+    return None
+
+
+def _ruta_video_de_job(db: Session, job: Any) -> str | None:
+    """Ruta del Video asociado al Job."""
+    from ..models import Video
+
+    video = db.get(Video, job.video_id)
+    if video is not None:
+        return _ruta_de_atributos(video, ("filepath", "file_path"))
+    return None
+
+
+def _ruta_desde_job(db: Session, job_id: Any) -> str | None:
+    """Ruta del video a través del Job del clip."""
+    try:
+        from ..models import Job
+
+        job = db.get(Job, job_id)
+        if job is not None:
+            return _ruta_video_de_job(db, job)
+    except Exception:
+        pass
+    return None
+
+
+def _ruta_via_ids(clip: Clip, db: Session) -> str | None:
+    """Ruta del video por video_id directo o vía Job del clip."""
+    for id_attr, resolver in (("video_id", _ruta_desde_video), ("job_id", _ruta_desde_job)):
+        valor = getattr(clip, id_attr, None)
+        if valor is None:
+            continue
+        ruta = resolver(db, valor)
+        if ruta is not None:
+            return ruta
+    return None
+
+
+def _resolve_video_path(clip: Clip, db: Session) -> str | None:
+    """Ruta del video del clip: storage/file del clip, Video directo o vía Job."""
+    ruta = _ruta_de_atributos(clip, ("storage_path", "file_path"))
+    if ruta is not None:
+        return ruta
+    return _ruta_via_ids(clip, db)
+
+
+def _tags_para_error(clip: Any) -> dict:
+    """Dict de tags del clip, preservando tags crudos no dict."""
+    tags = clip.tags if isinstance(clip.tags, dict) else {}
+    if not isinstance(tags, dict):
+        tags = {"_raw_tags": clip.tags} if clip.tags is not None else {}
+    return tags
+
+
+def _guardar_error_log(clip: Any, error_log: str) -> None:
+    """Guarda el error en error_log o en tags si el modelo no lo soporta."""
+    if hasattr(clip, "error_log"):
+        try:
+            setattr(clip, "error_log", error_log[:8000])
+        except Exception:
+            pass
+        return
+    tags = _tags_para_error(clip)
+    tags["error_log"] = error_log[:4000]
+    tags["_subtitle_error"] = error_log[:2000]
+    clip.tags = tags
+
+
+def _limpiar_error_completado(clip: Any, has_error_log: bool) -> None:
+    """Al completar con modelo que soporta error_log, lo limpia."""
+    if has_error_log:
+        try:
+            setattr(clip, "error_log", None)
+        except Exception:
+            pass
+
+
+def _guardar_output_path(clip: Any, output_path: str | None) -> None:
+    """Guarda la ruta de salida del clip (best-effort)."""
+    if output_path is not None:
+        try:
+            clip.storage_path = output_path
+        except Exception:
+            pass
 
 
 def _update_clip_status(
@@ -56,31 +127,13 @@ def _update_clip_status(
     error_log: str | None = None,
     output_path: str | None = None,
 ) -> None:
+    """Actualiza estado, error_log y ruta de salida del clip."""
     clip.status = status
-    has_error_log = hasattr(clip, "error_log")
     if error_log is not None:
-        if has_error_log:
-            try:
-                setattr(clip, "error_log", error_log[:8000])
-            except Exception:
-                pass
-        else:
-            tags = clip.tags if isinstance(clip.tags, dict) else {}
-            if not isinstance(tags, dict):
-                tags = {"_raw_tags": clip.tags} if clip.tags is not None else {}
-            tags["error_log"] = error_log[:4000]
-            tags["_subtitle_error"] = error_log[:2000]
-            clip.tags = tags
-    elif status == "COMPLETED" and has_error_log:
-        try:
-            setattr(clip, "error_log", None)
-        except Exception:
-            pass
-    if output_path is not None:
-        try:
-            clip.storage_path = output_path
-        except Exception:
-            pass
+        _guardar_error_log(clip, error_log)
+    elif status == "COMPLETED":
+        _limpiar_error_completado(clip, hasattr(clip, "error_log"))
+    _guardar_output_path(clip, output_path)
 
 
 def _marcar_clip_procesando(db: Session, clip: Any) -> None:
@@ -111,26 +164,43 @@ def _transcribir_clip(video_path: str) -> tuple[list[dict], str | None]:
     return transcribe_wav(tmp_wav.name, language="es"), tmp_wav.name
 
 
+def _segmento_en_ventana(s: float, e: float, inicio: float, fin: float) -> bool:
+    """True si el segmento tiene longitud y cruza la ventana del clip."""
+    if e <= s:
+        return False
+    if e < inicio or s > fin:
+        return False
+    return True
+
+
+def _recorte_ventana(seg: dict, inicio: float, fin: float) -> dict | None:
+    """Recorte de un segmento a la ventana; None si queda vacío."""
+    s = float(seg["start"])
+    e = float(seg["end"])
+    if not _segmento_en_ventana(s, e, inicio, fin):
+        return None
+    cs = max(s, inicio)
+    ce = min(e, fin)
+    if ce > cs:
+        return {"start": cs - inicio, "end": ce - inicio, "text": str(seg["text"])}
+    return None
+
+
+def _normalizar_segmentos(segments: list[dict]) -> list[dict]:
+    """Todos los segmentos tal cual, como dicts normalizados."""
+    return [{"start": float(s["start"]), "end": float(s["end"]), "text": str(s["text"])} for s in segments]
+
+
 def _recortar_segmentos(segments: list[dict], clip: Any) -> list[dict]:
     """Recorta los segmentos a la ventana del clip y los shiftea a 0."""
     inicio = float(clip.start_time)
     fin = float(clip.end_time)
-    clipped: list[dict] = []
-    for seg in segments:
-        s = float(seg["start"])
-        e = float(seg["end"])
-        if e <= s:
-            continue
-        if e < inicio or s > fin:
-            continue
-        cs = max(s, inicio)
-        ce = min(e, fin)
-        if ce > cs:
-            clipped.append({"start": cs - inicio, "end": ce - inicio, "text": str(seg["text"])})
+    recortes = (_recorte_ventana(seg, inicio, fin) for seg in segments)
+    clipped = [recorte for recorte in recortes if recorte is not None]
     if clipped:
         return clipped
     # Sin recortes dentro de la ventana: usar todos los segmentos tal cual
-    return [{"start": float(s["start"]), "end": float(s["end"]), "text": str(s["text"])} for s in segments]
+    return _normalizar_segmentos(segments)
 
 
 def _resolver_salida(video_path: str, clip: Any) -> str:
@@ -176,17 +246,53 @@ def _limpiar_temporales(wav_path: str | None, ass_path: str | None, tmp_wav_crea
                 pass
 
 
-def run_subtitle_pipeline(clip_id: uuid.UUID | str) -> None:
+def _parse_clip_id(clip_id: uuid.UUID | str) -> uuid.UUID:
+    """UUID del clip o ValueError descriptivo."""
     try:
-        cid = uuid.UUID(str(clip_id))
+        return uuid.UUID(str(clip_id))
     except Exception as exc:
         raise ValueError(f"clip_id invalido: {clip_id}") from exc
+
+
+def _asegurar_video_fuente(clip: Clip, db: Session, cid: uuid.UUID) -> str:
+    """Ruta del video fuente o FileNotFoundError si no existe."""
+    video_path = _resolve_video_path(clip, db)
+    if video_path is None or not Path(video_path).is_file():
+        raise FileNotFoundError(f"Video fuente no encontrado para clip {cid}")
+    return video_path
+
+
+def _crear_ass_temporal() -> str:
+    """Archivo .ass temporal para el render."""
+    tmp_ass = tempfile.NamedTemporaryFile(suffix=".ass", delete=False)
+    tmp_ass.close()
+    return tmp_ass.name
+
+
+def _transcribir_y_renderizar(video_path: str, clip: Any, ass_path: str) -> tuple[str, str | None]:
+    """Transcribe, recorta, escribe el .ass y renderiza; devuelve (output_path, wav_path)."""
+    from ..services.ass_generator import write_ass_file
+    from ..services.ffmpeg_service import burn_subtitles
+
+    segments, wav_path = _transcribir_clip(video_path)
+    if not segments:
+        raise RuntimeError("Transcripcion vacia: no se generaron segmentos")
+
+    target_segments = _recortar_segmentos(segments, clip)
+    write_ass_file(target_segments, ass_path, title=clip.title or str(clip.id))
+
+    output_path = _resolver_salida(video_path, clip)
+    burn_subtitles(video_path, ass_path, output_path)
+    return output_path, wav_path
+
+
+def run_subtitle_pipeline(clip_id: uuid.UUID | str) -> None:
+    """Genera el video del clip con subtítulos quemados y marca su estado final."""
+    cid = _parse_clip_id(clip_id)
 
     db: Session = SessionLocal()
     wav_path: str | None = None
     ass_path: str | None = None
-    tmp_wav_created = False
-    tmp_ass_created = False
 
     try:
         clip = _get_clip_or_none(db, cid)
@@ -194,38 +300,9 @@ def run_subtitle_pipeline(clip_id: uuid.UUID | str) -> None:
             return
         _marcar_clip_procesando(db, clip)
 
-        video_path = _resolve_video_path(clip, db)
-        if video_path is None or not Path(video_path).is_file():
-            raise FileNotFoundError(f"Video fuente no encontrado para clip {cid}")
-
-        from ..services.ass_generator import write_ass_file
-        from ..services.ffmpeg_service import burn_subtitles
-        from ..services.runpod_service import is_runpod_configured
-        from ..services.whisper_service import extract_audio_wav, transcribe_video, transcribe_wav
-
-        tmp_ass = tempfile.NamedTemporaryFile(suffix=".ass", delete=False)
-        tmp_ass.close()
-        ass_path = tmp_ass.name
-        tmp_ass_created = True
-
-        if is_runpod_configured():
-            segments = transcribe_video(video_path, language="es")
-        else:
-            tmp_wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-            tmp_wav.close()
-            wav_path = tmp_wav.name
-            tmp_wav_created = True
-            extract_audio_wav(video_path, wav_path)
-            segments = transcribe_wav(wav_path, language="es")
-
-        if not segments:
-            raise RuntimeError("Transcripcion vacia: no se generaron segmentos")
-
-        target_segments = _recortar_segmentos(segments, clip)
-        write_ass_file(target_segments, ass_path, title=clip.title or str(clip.id))
-
-        output_path = _resolver_salida(video_path, clip)
-        burn_subtitles(video_path, ass_path, output_path)
+        video_path = _asegurar_video_fuente(clip, db, cid)
+        ass_path = _crear_ass_temporal()
+        output_path, wav_path = _transcribir_y_renderizar(video_path, clip, ass_path)
 
         refreshed = _get_clip_or_none(db, cid)
         if refreshed is None:
@@ -236,4 +313,4 @@ def run_subtitle_pipeline(clip_id: uuid.UUID | str) -> None:
     except Exception as exc:
         _marcar_fallo(db, cid, exc)
     finally:
-        _limpiar_temporales(wav_path, ass_path, tmp_wav_created, tmp_ass_created)
+        _limpiar_temporales(wav_path, ass_path, wav_path is not None, ass_path is not None)

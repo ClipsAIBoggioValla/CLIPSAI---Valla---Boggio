@@ -110,6 +110,28 @@ def _resolver_video_de_clip(db: Any, clip: Any) -> Any | None:
     return video
 
 
+def _segundos_de_timestamp(ts_str: str) -> float:
+    """Convierte HH:MM:SS (o MM:SS, o SS) en segundos."""
+    parts = ts_str.split(":")
+    if len(parts) == 3:
+        return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+    if len(parts) == 2:
+        return int(parts[0]) * 60 + float(parts[1])
+    return float(parts[0])
+
+
+def _segmento_de_linea(line: str, re_ts, cursor: float) -> tuple[dict, float] | None:
+    """Segmento con timestamp parseado; None si la línea no trae timestamp válido."""
+    m = re_ts.match(line)
+    if m is None:
+        return None
+    try:
+        s = _segundos_de_timestamp(m.group(1))
+    except Exception:
+        return None
+    return {"start": s, "end": s + 3.0, "text": m.group(2).strip()}, s + 3.0
+
+
 def _parsear_transcript_simple(txt: str) -> list[dict]:
     """Parser simple `HH:MM:SS - texto` con cursor de 3s para líneas sin timestamp."""
     import re
@@ -121,30 +143,18 @@ def _parsear_transcript_simple(txt: str) -> list[dict]:
         line = line.strip()
         if not line:
             continue
-        m = re_ts.match(line)
-        if m:
-            ts_str = m.group(1)
-            t = m.group(2).strip()
-            try:
-                parts = ts_str.split(":")
-                if len(parts) == 3:
-                    s = int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
-                elif len(parts) == 2:
-                    s = int(parts[0]) * 60 + float(parts[1])
-                else:
-                    s = float(parts[0])
-                segs.append({"start": s, "end": s + 3.0, "text": t})
-                cursor = s + 3.0
-                continue
-            except Exception:
-                pass
+        resultado = _segmento_de_linea(line, re_ts, cursor)
+        if resultado is not None:
+            segs.append(resultado[0])
+            cursor = resultado[1]
+            continue
         segs.append({"start": cursor, "end": cursor + 3.0, "text": line})
         cursor += 3.0
     return segs
 
 
-def _cargar_segmentos(video: Any) -> list[dict]:
-    """Segmentos para re-render: Whisper primero, fallback al parser simple."""
+def _segmentos_de_whisper(video: Any) -> list[dict]:
+    """Segmentos vía Whisper (lista vacía si falla o no devuelve nada)."""
     try:
         from ..services.whisper_service import transcribe_video
 
@@ -153,15 +163,40 @@ def _cargar_segmentos(video: Any) -> list[dict]:
             return [{"start": float(s["start"]), "end": float(s["end"]), "text": str(s["text"])} for s in segs]
     except Exception:
         pass
-    # Fallback parse transcript
-    txt = None
+    return []
+
+
+def _transcript_de_video(video: Any) -> str | None:
+    """Texto del transcript: columna directa o archivo de transcripción."""
     if video.transcript:
-        txt = video.transcript
-    elif video.transcription_filepath and Path(str(video.transcription_filepath)).is_file():
-        txt = Path(str(video.transcription_filepath)).read_text(encoding="utf-8", errors="ignore")
+        return video.transcript
+    if video.transcription_filepath and Path(str(video.transcription_filepath)).is_file():
+        return Path(str(video.transcription_filepath)).read_text(encoding="utf-8", errors="ignore")
+    return None
+
+
+def _cargar_segmentos(video: Any) -> list[dict]:
+    """Segmentos para re-render: Whisper primero, fallback al parser simple."""
+    segs = _segmentos_de_whisper(video)
+    if segs:
+        return segs
+    # Fallback parse transcript
+    txt = _transcript_de_video(video)
     if txt:
         return _parsear_transcript_simple(txt)
     return []
+
+
+def _duracion_de_video(video: Any, segments: list[dict]) -> float | None:
+    """Duración estimada: duration_seconds o fin del último segmento."""
+    try:
+        if video.duration_seconds:
+            return float(video.duration_seconds)
+        if segments:
+            return float(segments[-1].get("end", 0))
+    except Exception:
+        return None
+    return None
 
 
 def _detectar_hooks(video: Any, segments: list[dict]) -> list[dict]:
@@ -171,17 +206,27 @@ def _detectar_hooks(video: Any, segments: list[dict]) -> list[dict]:
     try:
         from ..services.hook_service import detect_hooks
 
-        duration = None
-        try:
-            if video.duration_seconds:
-                duration = float(video.duration_seconds)
-            elif segments:
-                duration = float(segments[-1].get("end", 0))
-        except Exception:
-            duration = None
+        duration = _duracion_de_video(video, segments)
         return detect_hooks(segments, duration_hint=duration, mock=False) or []
     except Exception:
         return []
+
+
+def _hook_en_rango(clip: Any, h: dict) -> tuple[float, float] | None:
+    """(hs, he) si el hook cae dentro del clip y dura 3-6s; None si no."""
+    hk = h.get("hook") or {}
+    hs = float(hk.get("start_time", hk.get("start", 0)))
+    he = float(hk.get("end_time", hk.get("end", 0)))
+    if clip.start_time <= hs < he <= clip.end_time and 3.0 <= (he - hs) <= 6.0:
+        return hs, he
+    return None
+
+
+def _score_supera(h: dict, best: tuple | None) -> bool:
+    """True si el hook supera al mejor actual (o no hay mejor aún)."""
+    if best is None:
+        return True
+    return int(h.get("viral_score", 0)) > best[2].get("viral_score", 0)
 
 
 def _buscar_hook_llm(clip: Any, hooks: list[dict]) -> tuple | None:
@@ -189,16 +234,35 @@ def _buscar_hook_llm(clip: Any, hooks: list[dict]) -> tuple | None:
     best = None
     for h in hooks:
         try:
-            hk = h.get("hook") or {}
-            hs = float(hk.get("start_time", hk.get("start", 0)))
-            he = float(hk.get("end_time", hk.get("end", 0)))
-            if clip.start_time <= hs < he <= clip.end_time and 3.0 <= (he - hs) <= 6.0:
-                score = int(h.get("viral_score", 0))
-                if best is None or score > best[2].get("viral_score", 0):
-                    best = (hs, he, h)
+            hs, he = _hook_en_rango(clip, h)
+            if _score_supera(h, best):
+                best = (hs, he, h)
         except Exception:
             continue
     return best
+
+
+def _ajustar_al_segmento_cercano(clip: Any, segments: list[dict], hook_dur: float, hs: float, he: float) -> tuple[float, float]:
+    """Ajusta el hook al inicio del segmento más cercano si cabe dentro del clip."""
+    try:
+        closest = min(segments, key=lambda s: abs(float(s.get("start", 0)) - hs))
+        cs = float(closest.get("start", hs))
+        if clip.start_time <= cs <= clip.end_time - hook_dur:
+            return cs, cs + hook_dur
+    except Exception:
+        pass
+    return hs, he
+
+
+def _recortar_al_clip(hook_dur: float, hs: float, he: float, start: float, end: float) -> tuple[float, float]:
+    """Ajusta el hook para que quede dentro del rango [start, end] del clip."""
+    if hs < start:
+        hs = start
+        he = hs + hook_dur
+    if he > end:
+        he = end
+        hs = he - hook_dur
+    return hs, he
 
 
 def _hook_sintetico(clip: Any, segments: list[dict]) -> tuple | None:
@@ -211,20 +275,8 @@ def _hook_sintetico(clip: Any, segments: list[dict]) -> tuple | None:
     hs = center - hook_dur / 2
     he = hs + hook_dur
     if segments:
-        try:
-            closest = min(segments, key=lambda s: abs(float(s.get("start", 0)) - hs))
-            cs = float(closest.get("start", hs))
-            if clip.start_time <= cs <= clip.end_time - hook_dur:
-                hs = cs
-                he = hs + hook_dur
-        except Exception:
-            pass
-    if hs < clip.start_time:
-        hs = clip.start_time
-        he = hs + hook_dur
-    if he > clip.end_time:
-        he = clip.end_time
-        hs = he - hook_dur
+        hs, he = _ajustar_al_segmento_cercano(clip, segments, hook_dur, hs, he)
+    hs, he = _recortar_al_clip(hook_dur, hs, he, clip.start_time, clip.end_time)
     if he - hs >= 3.0:
         return (round(hs, 2), round(he, 2), None)
     return None
@@ -241,35 +293,50 @@ def _elegir_hook_re_render(clip: Any, hooks: list[dict], segments: list[dict]) -
         return None
 
 
+def _tags_hook_activado(tags: dict, hook_sel: tuple | None) -> None:
+    """Marca el hook aplicado con el rango seleccionado."""
+    hs, he, _ = hook_sel if hook_sel else (None, None, None)
+    tags["hook"] = {"start": hs, "end": he, "applied": True, "source": "re-render"}
+
+
+def _tags_hook_fallido(tags: dict, meta: dict) -> None:
+    """Hook pedido pero no aplicado (ej. duración <15s o fallo FFmpeg)."""
+    if meta.get("hook_applied") is False or not meta.get("hook_applied"):
+        # Mantener has_hook True (usuario lo pidió) pero marcar detalle
+        if "hook" not in tags:
+            tags["hook"] = {"applied": False, "reason": "hook no aplicable o fallo FFmpeg", "requested": True}
+
+
 def _tags_hook_re_render(tags: dict, meta: dict, enable_hook: bool, hook_sel: tuple | None) -> None:
     """Mantiene la estructura legacy 'hook' según el toggle y el resultado del render."""
     if enable_hook and meta.get("hook_applied"):
-        hs, he, _ = hook_sel if hook_sel else (None, None, None)
-        tags["hook"] = {"start": hs, "end": he, "applied": True, "source": "re-render"}
+        _tags_hook_activado(tags, hook_sel)
         # has_hook ya True arriba
     elif not enable_hook:
         tags.pop("hook", None)
         tags["has_hook"] = False
     else:
-        # enable_hook True pero hook no aplicado (ej. duración <15s)
-        if meta.get("hook_applied") is False or not meta.get("hook_applied"):
-            # Mantener has_hook True (usuario lo pidió) pero marcar detalle
-            if "hook" not in tags:
-                tags["hook"] = {"applied": False, "reason": "hook no aplicable o fallo FFmpeg", "requested": True}
+        _tags_hook_fallido(tags, meta)
+
+
+def _tags_ass_aplicado(tags: dict, segments: list[dict]) -> None:
+    """Marca ASS aplicado con la cantidad de segmentos usados."""
+    tags["ass"] = {"applied": True, "segments": len(segments) if segments else 0}
+    tags["has_ass"] = True
 
 
 def _tags_ass_re_render(tags: dict, meta: dict, enable_ass: bool, segments: list[dict]) -> None:
     """Mantiene la estructura legacy 'ass' según el toggle y el resultado del render."""
-    if enable_ass and meta.get("ass_applied"):
-        tags["ass"] = {"applied": True, "segments": len(segments) if segments else 0}
-        tags["has_ass"] = True
-    elif enable_ass and not meta.get("ass_applied"):
-        # enable_ass True pero ASS falló: mantener has_ass True y registrar error
-        tags["ass"] = {"applied": False, "reason": "ASS fallo, fallback sin subtítulos", "requested": True}
-        tags["has_ass"] = True
-    elif not enable_ass:
+    if not enable_ass:
         tags.pop("ass", None)
         tags["has_ass"] = False
+        return
+    if meta.get("ass_applied"):
+        _tags_ass_aplicado(tags, segments)
+        return
+    # enable_ass True pero ASS falló: mantener has_ass True y registrar error
+    tags["ass"] = {"applied": False, "reason": "ASS fallo, fallback sin subtítulos", "requested": True}
+    tags["has_ass"] = True
 
 
 def _tags_dict(clip: Any) -> dict:
@@ -318,63 +385,95 @@ def _re_render_fallido(db: Any, clip: Any, clip_id: uuid.UUID, exc: Exception) -
     logger.exception(f"[re-render] fallo clip {clip_id}")
 
 
+def _video_origen_valido(db: Any, clip: Any) -> Any | None:
+    """Video origen del clip; None si no existe o su archivo físico no está en disco."""
+    video = _resolver_video_de_clip(db, clip)
+    if video is None or not Path(str(video.filepath)).is_file():
+        return None
+    return video
+
+
+def _detectar_hooks_si_se_piden(enable_hook: bool, video: Any, segments: list[dict]) -> list[dict]:
+    """Hooks LLM solo si enable_hook está activo y hay segmentos."""
+    if enable_hook and segments:
+        return _detectar_hooks(video, segments)
+    return []
+
+
+def _segmentos_y_hooks_re_render(enable_ass: bool, enable_hook: bool, video: Any) -> tuple[list[dict], list[dict]]:
+    """Segmentos y hooks LLM para el re-render (vacíos si fallan o no se necesitan)."""
+    if not (enable_ass or enable_hook):
+        return [], []
+    try:
+        # Reusar lógica de jobs.py sin importar circular: intentar whisper + parse
+        segments = _cargar_segmentos(video)
+        hooks = _detectar_hooks_si_se_piden(enable_hook, video, segments)
+        return segments, hooks
+    except Exception as e:
+        logger.warning(f"[re-render] segmentos/hooks fallo: {e}")
+        return [], []
+
+
+def _hook_efectivo_re_render(clip: Any, enable_hook: bool, hooks: list[dict], segments: list[dict]) -> tuple | None:
+    """Hook seleccionado para el re-render (None si enable_hook es False o no aplica)."""
+    # Seleccionar hook si enable_hook
+    hook_sel = _elegir_hook_re_render(clip, hooks, segments) if enable_hook and segments else None
+    # Desactivar flags según enable
+    return hook_sel if enable_hook else None
+
+
+def _renderizar_re_render(video: Any, clip: Any, enable_ass: bool, segments: list[dict], hook_sel: tuple | None) -> tuple[str, dict]:
+    """Llama al renderer de jobs con los parámetros efectivos del re-render."""
+    # Si enable_ass False, no pasar segmentos a render (evita ASS)
+    segs_for_render = segments if enable_ass else []
+
+    from ..routers.jobs import _render_clip_with_ass_and_hook as _render  # reuse
+
+    # Usar helper de jobs para render (import diferido para evitar ciclo)
+    # _render espera segments list; si enable_ass False, pasar lista vacía
+    return _render(
+        str(video.filepath),
+        float(clip.start_time),
+        float(clip.end_time),
+        segs_for_render or [],
+        hook_sel,
+        clip.job_id,
+        0,
+        clip.title,
+    )
+
+
+def _ejecutar_re_render(db: Any, clip_id: uuid.UUID, enable_ass: bool, enable_hook: bool) -> None:
+    """Ciclo completo de re-render sobre el clip (render + persistencia)."""
+    clip = db.get(Clip, clip_id)
+    if clip is None:
+        return
+    # Resolver video
+    video = _video_origen_valido(db, clip)
+    if video is None:
+        clip.status = "FAILED"
+        clip.error_log = "Video origen no encontrado para re-render"
+        db.commit()
+        return
+
+    # Cargar segmentos si alguno de los flags activo
+    segments, hooks = _segmentos_y_hooks_re_render(enable_ass, enable_hook, video)
+
+    effective_hook = _hook_efectivo_re_render(clip, enable_hook, hooks, segments)
+
+    try:
+        out_path, meta = _renderizar_re_render(video, clip, enable_ass, segments, effective_hook)
+        _re_render_exitoso(db, clip, clip_id, out_path, meta, enable_ass, enable_hook, segments, effective_hook)
+    except Exception as e:
+        _re_render_fallido(db, clip, clip_id, e)
+
+
 def _run_re_render(clip_id: uuid.UUID, enable_ass: bool, enable_hook: bool) -> None:
     from ..database import SessionLocal as _SessionLocal
 
     db = _SessionLocal()
     try:
-        clip = db.get(Clip, clip_id)
-        if clip is None:
-            return
-        # Resolver video
-        video = _resolver_video_de_clip(db, clip)
-        if video is None or not Path(str(video.filepath)).is_file():
-            clip.status = "FAILED"
-            clip.error_log = "Video origen no encontrado para re-render"
-            db.commit()
-            return
-
-        # Cargar segmentos si alguno de los flags activo
-        segments: list[dict] = []
-        hooks: list[dict] = []
-        if enable_ass or enable_hook:
-            try:
-                # Reusar lógica de jobs.py sin importar circular: intentar whisper + parse
-                segments = _cargar_segmentos(video)
-                if enable_hook and segments:
-                    hooks = _detectar_hooks(video, segments)
-            except Exception as e:
-                logger.warning(f"[re-render] segmentos/hooks fallo: {e}")
-                segments = []
-                hooks = []
-
-        # Seleccionar hook si enable_hook
-        hook_sel = _elegir_hook_re_render(clip, hooks, segments) if enable_hook and segments else None
-
-        # Desactivar flags según enable
-        effective_hook = hook_sel if enable_hook else None
-        effective_segments: list[dict] | None = segments if enable_ass else None
-        # Si enable_ass False, no pasar segmentos a render (evita ASS)
-        segs_for_render = effective_segments if enable_ass else []
-
-        from ..routers.jobs import _render_clip_with_ass_and_hook as _render  # reuse
-
-        # Usar helper de jobs para render (import diferido para evitar ciclo)
-        try:
-            # _render espera segments list; si enable_ass False, pasar lista vacía
-            out_path, meta = _render(
-                str(video.filepath),
-                float(clip.start_time),
-                float(clip.end_time),
-                segs_for_render or [],
-                effective_hook,
-                clip.job_id,
-                0,
-                clip.title,
-            )
-            _re_render_exitoso(db, clip, clip_id, out_path, meta, enable_ass, enable_hook, segments, effective_hook)
-        except Exception as e:
-            _re_render_fallido(db, clip, clip_id, e)
+        _ejecutar_re_render(db, clip_id, enable_ass, enable_hook)
     except Exception as e:
         logger.exception(f"[re-render] error inesperado {clip_id}: {e}")
     finally:
@@ -395,19 +494,85 @@ def _get_clip_or_404(db: DbSession, clip_id: uuid.UUID) -> Clip:
 
 
 def _assert_ownership(db: DbSession, clip: Clip, current_user) -> None:
-    video = None
-    if clip.video_id is not None:
-        video = db.get(Video, clip.video_id)
-    if video is None and clip.job_id is not None:
-        from ..models import Job
-
-        job = db.get(Job, clip.job_id)
-        if job is not None:
-            video = db.get(Video, job.video_id)
+    video = _resolver_video_de_clip(db, clip)
     if video is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clip no encontrado")
     if video.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado para este clip")
+
+
+def _filtrar_por_texto_y_score(base, q: Optional[str], min_score: Optional[float]):
+    """Filtros de búsqueda por texto y score mínimo."""
+    if q is not None and q.strip() != "":
+        pattern = f"%{q.strip()}%"
+        base = base.where(
+            (Clip.title.ilike(pattern)) | (Video.transcript.ilike(pattern))
+        )
+
+    if min_score is not None:
+        base = base.where(Clip.score >= min_score)
+    return base
+
+
+def _filtrar_por_ids_y_status(base, video_id, job_id, clip_status):
+    """Filtros por video, job y status del clip."""
+    if video_id is not None:
+        base = base.where((Clip.video_id == video_id) | (Job.video_id == video_id))
+
+    if job_id is not None:
+        base = base.where(Clip.job_id == job_id)
+
+    if clip_status is not None:
+        base = base.where(Clip.status == clip_status)
+    return base
+
+
+_ORDENES_CLIPS = {
+    "created_at_desc": lambda base: base.order_by(Clip.created_at.desc()),
+    "created_at_asc": lambda base: base.order_by(Clip.created_at.asc()),
+    "score_desc": lambda base: base.order_by(Clip.score.desc().nulls_last(), Clip.created_at.desc()),
+    "score_asc": lambda base: base.order_by(Clip.score.asc().nulls_last(), Clip.created_at.desc()),
+}
+
+
+def _ordenar_clips(base, sort_by: str):
+    """Ordena la query según `sort_by` (sin cambio si el orden es desconocido)."""
+    orden = _ORDENES_CLIPS.get(sort_by)
+    if orden is not None:
+        return orden(base)
+    return base
+
+
+def _transcript_resumido(video_transcript) -> str | None:
+    """Transcript del video truncado a 500 caracteres."""
+    if video_transcript:
+        return str(video_transcript)[:500]
+    return None
+
+
+def _clip_list_item(clip, video_transcript) -> ClipListItem:
+    """Item de la lista de clips a partir de una fila (clip, transcript)."""
+    return ClipListItem(
+        id=clip.id,
+        job_id=clip.job_id,
+        title=clip.title,
+        score=clip.score,
+        start_time=clip.start_time,
+        end_time=clip.end_time,
+        transcript=_transcript_resumido(video_transcript),
+        status=getattr(clip, "status", None),
+        published_platform=getattr(clip, "published_platform", None),
+        social_post_url=getattr(clip, "social_post_url", None),
+        published_at=getattr(clip, "published_at", None),
+        created_at=clip.created_at,
+        updated_at=getattr(clip, "updated_at", None),
+        file_path=_clip_file_path(clip),
+        stream_url=_clip_stream_url(clip.id),
+        duration=_clip_duration(clip.start_time, clip.end_time),
+        has_ass=_clip_has_ass(clip.tags),
+        has_hook=_clip_has_hook(clip.tags),
+        tags=clip.tags if isinstance(clip.tags, (dict, list)) else None,
+    )
 
 
 @router.get(
@@ -438,69 +603,18 @@ def list_clips(
         .where(Video.user_id == current_user.id)
     )
 
-    if q is not None and q.strip() != "":
-        pattern = f"%{q.strip()}%"
-        base = base.where(
-            (Clip.title.ilike(pattern)) | (Video.transcript.ilike(pattern))
-        )
-
-    if min_score is not None:
-        base = base.where(Clip.score >= min_score)
-
-    if video_id is not None:
-        base = base.where((Clip.video_id == video_id) | (Job.video_id == video_id))
-
-    if job_id is not None:
-        base = base.where(Clip.job_id == job_id)
-
-    if status is not None:
-        base = base.where(Clip.status == status)
+    base = _filtrar_por_texto_y_score(base, q, min_score)
+    base = _filtrar_por_ids_y_status(base, video_id, job_id, status)
 
     count_stmt = select(func.count()).select_from(base.subquery())
     total: int = db.scalar(count_stmt) or 0
     total_pages: int = math.ceil(total / limit) if total > 0 else 0
 
-    if sort_by == "created_at_desc":
-        base = base.order_by(Clip.created_at.desc())
-    elif sort_by == "created_at_asc":
-        base = base.order_by(Clip.created_at.asc())
-    elif sort_by == "score_desc":
-        base = base.order_by(Clip.score.desc().nulls_last(), Clip.created_at.desc())
-    elif sort_by == "score_asc":
-        base = base.order_by(Clip.score.asc().nulls_last(), Clip.created_at.desc())
-
-    base = base.offset((page - 1) * limit).limit(limit)
+    base = _ordenar_clips(base, sort_by).offset((page - 1) * limit).limit(limit)
 
     rows = db.execute(base).all()
 
-    items: list[ClipListItem] = []
-    for clip, video_transcript in rows:
-        transcript: str | None = None
-        if video_transcript:
-            transcript = str(video_transcript)[:500]
-        items.append(
-            ClipListItem(
-                id=clip.id,
-                job_id=clip.job_id,
-                title=clip.title,
-                score=clip.score,
-                start_time=clip.start_time,
-                end_time=clip.end_time,
-                transcript=transcript,
-                status=getattr(clip, "status", None),
-                published_platform=getattr(clip, "published_platform", None),
-                social_post_url=getattr(clip, "social_post_url", None),
-                published_at=getattr(clip, "published_at", None),
-                created_at=clip.created_at,
-                updated_at=getattr(clip, "updated_at", None),
-                file_path=_clip_file_path(clip),
-                stream_url=_clip_stream_url(clip.id),
-                duration=_clip_duration(clip.start_time, clip.end_time),
-                has_ass=_clip_has_ass(clip.tags),
-                has_hook=_clip_has_hook(clip.tags),
-                tags=clip.tags if isinstance(clip.tags, (dict, list)) else None,
-            )
-        )
+    items: list[ClipListItem] = [_clip_list_item(clip, video_transcript) for clip, video_transcript in rows]
 
     return ClipListResponse(items=items, total=total, page=page, limit=limit, total_pages=total_pages)
 
@@ -602,66 +716,77 @@ def delete_clip(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.get(
-    "/{clip_id}/descarga",
-    summary="Descargar archivo del clip (público - sin autenticación para Meta crawler)",
-)
-def download_clip(
-    clip_id: uuid.UUID,
-    db: DbSession,
-):
-    # 1. Lectura directa desde BD: consulta registro clip y obtén ruta real almacenada
-    clip = _get_clip_or_404(db, clip_id)
-    raw_path = None
-    for attr in ("file_path", "video_path", "output_path", "storage_path", "filepath", "path"):
-        v = getattr(clip, attr, None)
+def _ruta_desde_atributos(obj, attrs: tuple[str, ...]) -> str | None:
+    """Primer atributo del objeto con una ruta no vacía."""
+    for attr in attrs:
+        v = getattr(obj, attr, None)
         if v and str(v).strip():
-            raw_path = str(v).strip()
-            break
-    # Fallback: si clip no tiene ruta, intentar video asociado
-    if not raw_path and clip.video_id is not None:
-        try:
-            video = db.get(Video, clip.video_id)
-            if video is not None:
-                for attr in ("filepath", "file_path", "video_path", "path"):
-                    v = getattr(video, attr, None)
-                    if v and str(v).strip():
-                        raw_path = str(v).strip()
-                        break
-        except Exception:
-            pass
-    if not raw_path:
-        logger.error(f"[CLIP DESCARGA] clip {clip_id} sin ruta en BD (file_path/video_path/output_path vacíos)")
-        raise HTTPException(status_code=400, detail="El archivo de clip no existe o está vacío")
+            return str(v).strip()
+    return None
 
+
+def _ruta_del_video_asociado(db, clip: Clip) -> str | None:
+    """Ruta cruda del archivo del video asociado al clip (None si falla o no hay)."""
+    try:
+        video = db.get(Video, clip.video_id)
+        if video is not None:
+            return _ruta_desde_atributos(video, ("filepath", "file_path", "video_path", "path"))
+    except Exception:
+        pass
+    return None
+
+
+def _raw_path_de_clip(db, clip: Clip) -> str | None:
+    """Ruta cruda del archivo del clip (clip primero, video asociado como fallback)."""
+    raw_path = _ruta_desde_atributos(clip, ("file_path", "video_path", "output_path", "storage_path", "filepath", "path"))
+    # Fallback: si clip no tiene ruta, intentar video asociado
+    if raw_path or clip.video_id is None:
+        return raw_path
+    return _ruta_del_video_asociado(db, clip)
+
+
+def _redirigir_si_remota(raw_path: str, clip_id: uuid.UUID):
+    """RedirectResponse 302 si la ruta es una URL remota (R2); None si es local."""
     # Clips procesados por el worker RunPod: storage_path es una URL R2 → redirigir
     if raw_path.lower().startswith(("http://", "https://")):
         logger.info(f"[CLIP DESCARGA] clip {clip_id} es URL remota (R2) — redirigiendo: {raw_path[:120]}")
         return RedirectResponse(url=raw_path, status_code=302)
+    return None
 
+
+def _encontrar_en_storage_reales(basename: str) -> str | None:
+    """Busca el basename en los directorios reales de storage; None si no está."""
+    # Fallback limitado y real: buscar basename solo en directorios de storage configurados
+    candidatos_reales = [
+        f"/app/storage/clips/{basename}",
+        f"/app/storage/uploads/{basename}",
+        f"/app/storage/{basename}",
+    ]
+    for cand in candidatos_reales:
+        if os.path.isfile(cand) and os.path.getsize(cand) > 0:
+            logger.info(f"[CLIP DESCARGA] Fallback real encontrado en {cand} para basename {basename}")
+            return cand
+    return None
+
+
+def _ruta_final_descarga(raw_path: str, clip_id: uuid.UUID) -> str:
+    """Resuelve la ruta final del archivo (fallback a storage real o 404)."""
     # 2. Verificación de ruta — modo 100% real: solo ubicaciones válidas de storage, sin fallback de prueba
     ruta_final = raw_path
     if not os.path.isfile(ruta_final):
-        # Fallback limitado y real: buscar basename solo en directorios de storage configurados
         basename = os.path.basename(ruta_final) if os.path.basename(ruta_final) else ruta_final
-        candidatos_reales = [
-            f"/app/storage/clips/{basename}",
-            f"/app/storage/uploads/{basename}",
-            f"/app/storage/{basename}",
-        ]
-        encontrado = None
-        for cand in candidatos_reales:
-            if os.path.isfile(cand) and os.path.getsize(cand) > 0:
-                encontrado = cand
-                logger.info(f"[CLIP DESCARGA] Fallback real encontrado en {cand} para basename {basename}")
-                break
+        encontrado = _encontrar_en_storage_reales(basename)
         if encontrado:
             ruta_final = encontrado
         else:
             # Modo 100% real: no existe archivo físico → error 404 real para que el frontend muestre toast
             logger.error(f"[CLIP DESCARGA] clip {clip_id} archivo no encontrado raw_path={raw_path} basename={basename} — sin fallback de prueba (modo 100%% real)")
             raise HTTPException(status_code=404, detail=f"Archivo de clip no encontrado en storage: {raw_path}. El clip debe ser reprocesado via /clips/{{id}}/re-render.")
+    return ruta_final
 
+
+def _tamano_verificado(ruta_final: str) -> int:
+    """Tamaño del archivo; HTTPException 400 si no se puede leer o está vacío."""
     # Verificación final tamaño
     try:
         size = os.path.getsize(ruta_final)
@@ -672,6 +797,31 @@ def download_clip(
     except Exception as e:
         logger.error(f"[CLIP DESCARGA] error obteniendo tamaño {ruta_final}: {e}")
         raise HTTPException(status_code=400, detail="El archivo de clip no existe o está vacío")
+    return size
+
+
+@router.get(
+    "/{clip_id}/descarga",
+    summary="Descargar archivo del clip (público - sin autenticación para Meta crawler)",
+)
+def download_clip(
+    clip_id: uuid.UUID,
+    db: DbSession,
+):
+    # 1. Lectura directa desde BD: consulta registro clip y obtén ruta real almacenada
+    clip = _get_clip_or_404(db, clip_id)
+    raw_path = _raw_path_de_clip(db, clip)
+    if not raw_path:
+        logger.error(f"[CLIP DESCARGA] clip {clip_id} sin ruta en BD (file_path/video_path/output_path vacíos)")
+        raise HTTPException(status_code=400, detail="El archivo de clip no existe o está vacío")
+
+    # Clips procesados por el worker RunPod: storage_path es una URL R2 → redirigir
+    redirect = _redirigir_si_remota(raw_path, clip_id)
+    if redirect is not None:
+        return redirect
+
+    ruta_final = _ruta_final_descarga(raw_path, clip_id)
+    size = _tamano_verificado(ruta_final)
 
     # Log requerido
     msg = f"[CLIP DESCARGA] Sirviendo archivo real: {ruta_final} (Tamaño: {size} bytes)"

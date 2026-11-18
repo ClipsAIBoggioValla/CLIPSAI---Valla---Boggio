@@ -17,6 +17,28 @@ function scoreBadge(score: number) {
   return 'bg-red-500/15 text-red-300 border-red-500/30'
 }
 
+function scoreLabelFor(score: number): string {
+  return score >= 71 ? 'Alto' : score >= 41 ? 'Medio' : 'Bajo'
+}
+
+function statsKpiSubtitle(stats: StatsSummary | null): string {
+  return stats ? `${stats.total_videos} videos subidos` : 'Jobs procesados'
+}
+
+function chartTitleFor(hasPlatformData: boolean): string {
+  return hasPlatformData ? 'Distribución por Plataforma' : 'Distribución por Score'
+}
+
+function chartSubtitleFor(hasPlatformData: boolean): string {
+  return hasPlatformData ? 'Clips agrupados por red social objetivo' : 'Conteo de clips agrupados por rango de viralidad'
+}
+
+function hasNoMetrics(metrics: MetricsResponse): boolean {
+  return metrics.total_jobs === 0 && metrics.total_clips === 0
+}
+
+const CHART_CARD_CLASS = 'rounded-2xl bg-[#121824] border border-[rgba(255,255,255,0.08)] p-5 sm:p-6 shadow-xl'
+
 function KpiSkeleton() {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -28,6 +50,301 @@ function KpiSkeleton() {
         </div>
       ))}
     </div>
+  )
+}
+
+function renderActiveJobBanner(activeJobId: string | null) {
+  if (!activeJobId) return null
+  return (
+    <div className="rounded-xl border border-[rgba(180,241,5,0.22)] bg-[rgba(180,241,5,0.08)] px-4 py-3 flex items-center justify-between gap-3 mb-6">
+      <div className="flex items-center gap-2 text-sm font-bold text-[#B4F105]">
+        <span className="h-2 w-2 rounded-full bg-[#B4F105] animate-pulse" /> Procesamiento activo
+      </div>
+      <Link to={`/jobs/${activeJobId}`} className="btn-custom btn-custom-primary btn-custom-sm">
+        Ver progreso → <i className="bi bi-arrow-right" />
+      </Link>
+    </div>
+  )
+}
+
+function renderLoadingSkeletons(loading: boolean) {
+  if (!loading) return null
+  return (
+    <>
+      <KpiSkeleton />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 mt-6">
+        <div className="rounded-2xl bg-[#121824] border border-[rgba(255,255,255,0.08)] p-6 h-[320px] animate-pulse">
+          <div className="h-4 bg-[rgba(255,255,255,0.06)] rounded w-1/3 mb-6" />
+          <div className="h-[240px] bg-[rgba(255,255,255,0.04)] rounded" />
+        </div>
+        <div className="rounded-2xl bg-[#121824] border border-[rgba(255,255,255,0.08)] p-6 h-[320px] animate-pulse">
+          <div className="h-4 bg-[rgba(255,255,255,0.06)] rounded w-1/3 mb-6" />
+          <div className="h-[240px] bg-[rgba(255,255,255,0.04)] rounded" />
+        </div>
+      </div>
+    </>
+  )
+}
+
+function renderErrorState(error: string | null, loading: boolean, retry: () => void) {
+  if (!error || loading) return null
+  return (
+    <div role="alert" className="alert-custom alert-custom-danger">
+      <i className="bi bi-exclamation-triangle-fill alert-custom-icon" />
+      <div className="alert-custom-content">{error}</div>
+      <button onClick={retry} className="btn-custom btn-custom-danger btn-custom-sm">
+        Reintentar
+      </button>
+    </div>
+  )
+}
+
+function renderEmptyState(metrics: MetricsResponse | null, loading: boolean, error: string | null) {
+  if (loading || error || !metrics || !hasNoMetrics(metrics)) return null
+  return (
+    <div className="rounded-2xl bg-[#121824] border border-dashed border-[rgba(180,241,5,0.18)] p-10 text-center shadow-xl">
+      <div className="h-12 w-12 rounded-full bg-[rgba(180,241,5,0.10)] border border-[rgba(180,241,5,0.22)] flex items-center justify-center text-xl mx-auto text-[#B4F105]">📊</div>
+      <p className="text-sm font-bold text-[#F1F5F9] mt-4">Aún no tienes métricas</p>
+      <p className="text-xs text-[#94A3B8] mt-1 max-w-[300px] mx-auto">
+        Cuando proceses tu primer video verás aquí clips generados, horas ahorradas y actividad de los últimos 7 días.
+      </p>
+      <Link to="/upload" className="btn-custom btn-custom-primary mt-5 shadow-[0_0_20px_rgba(180,241,5,0.3)]">
+        <i className="bi bi-lightning-charge-fill" /> Subir primer video
+      </Link>
+    </div>
+  )
+}
+
+function renderFourthKpi(stats: StatsSummary | null, metrics: MetricsResponse) {
+  if (stats) {
+    return (
+      <>
+        <p className="text-xs font-bold text-[#94A3B8] uppercase tracking-widest">Promedio Viralidad</p>
+        <div className="flex items-center gap-3 mt-3">
+          <p className="text-3xl font-extrabold text-white tracking-tight">{stats.avg_score.toFixed(1)}</p>
+          <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-bold ${scoreBadge(stats.avg_score)}`}>
+            {scoreLabelFor(stats.avg_score)}
+          </span>
+        </div>
+        <p className="text-xs text-[#94A3B8] mt-1">Score promedio de tus clips</p>
+      </>
+    )
+  }
+  return (
+    <>
+      <p className="text-xs font-bold text-[#94A3B8] uppercase tracking-widest">Minutos Procesados</p>
+      <p className="text-3xl font-extrabold mt-3 text-white">{metrics.total_minutes_processed}</p>
+      <p className="text-xs text-[#94A3B8] mt-1">Acumulado total</p>
+    </>
+  )
+}
+
+function renderPlatformBars(
+  entries: { platform: string; count: number }[],
+  platformColors: Record<string, string>,
+  maxPlatform: number,
+) {
+  return (
+    <div className="space-y-4">
+      {entries.map((entry) => (
+        <div key={entry.platform} className="space-y-1.5">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-medium capitalize" style={{ color: platformColors[entry.platform] ?? '#9ca3af' }}>{entry.platform}</span>
+            <span className="text-gray-400 font-mono">{entry.count} clips</span>
+          </div>
+          <div className="h-8 bg-[rgba(255,255,255,0.06)] rounded-full overflow-hidden p-1 border border-[rgba(255,255,255,0.04)]">
+            <div
+              className="h-full rounded-full transition-all duration-700 flex items-center justify-end pr-2"
+              style={{ width: `${(entry.count / maxPlatform) * 100}%`, backgroundColor: platformColors[entry.platform] ?? '#6366f1', minWidth: entry.count > 0 ? '32px' : '0' }}
+            >
+              {entry.count > 0 && <span className="text-[11px] font-bold text-white">{entry.count}</span>}
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function renderScoreBars(
+  items: { range: string; label: string; count: number }[],
+  barColors: Record<string, string>,
+  maxCount: number,
+) {
+  return (
+    <div>
+      <div className="space-y-4">
+        {items.map((item) => (
+          <div key={item.range} className="space-y-1.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-medium" style={{ color: barColors[item.label] ?? '#9ca3af' }}>{item.label} ({item.range})</span>
+              <span className="text-[#94A3B8] font-mono">{item.count} clips</span>
+            </div>
+            <div className="h-8 bg-[rgba(255,255,255,0.06)] rounded-full overflow-hidden p-1 border border-[rgba(255,255,255,0.04)]">
+              <div
+                className="h-full rounded-full transition-all duration-700 flex items-center justify-end pr-2"
+                style={{ width: `${(item.count / maxCount) * 100}%`, backgroundColor: barColors[item.label] ?? '#6366f1', minWidth: item.count > 0 ? '32px' : '0' }}
+              >
+                {item.count > 0 && <span className="text-[11px] font-bold text-white">{item.count}</span>}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center justify-center gap-4 mt-6">
+        <span className="inline-flex items-center gap-1.5 text-xs text-gray-400">
+          <span className="h-2.5 w-2.5 rounded-full" style={{ background: '#ef4444' }} /> 0-40 Bajo
+        </span>
+        <span className="inline-flex items-center gap-1.5 text-xs text-gray-400">
+          <span className="h-2.5 w-2.5 rounded-full" style={{ background: '#f59e0b' }} /> 41-70 Medio
+        </span>
+        <span className="inline-flex items-center gap-1.5 text-xs text-gray-400">
+          <span className="h-2.5 w-2.5 rounded-full" style={{ background: '#10b981' }} /> 71-100 Alto
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function renderDistributionChart(view: {
+  hasPlatformData: boolean
+  platformEntries: { platform: string; count: number }[]
+  platformColors: Record<string, string>
+  maxPlatform: number
+  stats: StatsSummary | null
+  barColors: Record<string, string>
+  maxCount: number
+}) {
+  if (view.hasPlatformData) {
+    return renderPlatformBars(view.platformEntries, view.platformColors, view.maxPlatform)
+  }
+  return renderScoreBars(view.stats?.score_distribution ?? [], view.barColors, view.maxCount)
+}
+
+type RecentDay = MetricsResponse['recent_activity'][number]
+
+function renderDayBar(value: number, maxRecent: number, scale: number, colorClass: string, unit: string) {
+  return (
+    <div
+      className={`h-full rounded-full ${colorClass} transition-all flex items-center justify-center`}
+      style={{ width: `${(value / maxRecent) * scale}%`, minWidth: value > 0 ? '24px' : '0' }}
+      title={`${value} ${unit}`}
+    >
+      {value > 0 && <span className="text-[10px] font-bold text-white">{value}</span>}
+    </div>
+  )
+}
+
+function renderDayBars(day: RecentDay, maxRecent: number) {
+  return (
+    <>
+      {renderDayBar(day.jobs, maxRecent, 40, 'bg-violet-500', 'jobs')}
+      {renderDayBar(day.clips, maxRecent, 40, 'bg-emerald-500', 'clips')}
+      {renderDayBar(day.minutes_processed, maxRecent, 20, 'bg-amber-500', 'min')}
+    </>
+  )
+}
+
+function renderRecentActivity(days: RecentDay[], maxRecent: number) {
+  return (
+    <div className="mt-6 space-y-3">
+      {days.map((day) => (
+        <div key={day.date} className="space-y-1.5">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-mono text-gray-400">{day.date.slice(5)}</span>
+            <span className="text-gray-500">{day.jobs} jobs · {day.clips} clips · {day.minutes_processed} min</span>
+          </div>
+          <div className="h-8 bg-[rgba(255,255,255,0.06)] rounded-full overflow-hidden p-1 flex gap-1 border border-[rgba(255,255,255,0.04)]">
+            {renderDayBars(day, maxRecent)}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+interface MetricsView {
+  metrics: MetricsResponse
+  hasPlatformData: boolean
+  platformEntries: { platform: string; count: number }[]
+  platformColors: Record<string, string>
+  maxPlatform: number
+  stats: StatsSummary | null
+  barColors: Record<string, string>
+  maxCount: number
+  maxRecent: number
+}
+
+function renderMetricsBody(view: MetricsView, loading: boolean, error: string | null) {
+  if (loading || error || !view.metrics || hasNoMetrics(view.metrics)) return null
+  return (
+    <>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="kpi-card">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-bold text-[#94A3B8] uppercase tracking-widest">Total Videos / Jobs</p>
+            <span className="kpi-accent"><i className="bi bi-film" /></span>
+          </div>
+          <p className="text-3xl font-extrabold mt-3 text-white tracking-tight">{view.metrics.total_jobs}</p>
+          <p className="text-xs text-[#94A3B8] mt-1">{statsKpiSubtitle(view.stats)}</p>
+        </div>
+
+        <div className="kpi-card">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-bold text-[#94A3B8] uppercase tracking-widest">Total Clips</p>
+            <span className="kpi-accent"><i className="bi bi-collection-play" /></span>
+          </div>
+          <p className="text-3xl font-extrabold mt-3 text-white tracking-tight">{view.metrics.total_clips}</p>
+          <p className="text-xs text-[#94A3B8] mt-1">Clips virales extraídos</p>
+        </div>
+
+        <div className="kpi-card">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-bold text-[#94A3B8] uppercase tracking-widest">Tiempo Ahorrado</p>
+            <span className="kpi-accent !bg-[rgba(180,241,5,0.14)] !border-[rgba(180,241,5,0.25)] !text-[#B4F105]"><i className="bi bi-lightning-charge" /></span>
+          </div>
+          <p className="text-3xl font-extrabold mt-3 text-[#B4F105] tracking-tight" style={{ textShadow: '0 0 16px rgba(180,241,5,0.35)' }}>{formatHours(view.metrics.time_saved_hours)}</p>
+          <p className="text-xs text-[#94A3B8] mt-1">Estimado · {view.metrics.total_minutes_processed} min procesados</p>
+        </div>
+
+        <div className="kpi-card">
+          {renderFourthKpi(view.stats, view.metrics)}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 mt-6">
+        <div className={CHART_CARD_CLASS}>
+          <h2 className="text-sm font-semibold" style={{ color: '#f9fafb' }}>
+            {chartTitleFor(view.hasPlatformData)}
+          </h2>
+          <p className="text-xs mt-1" style={{ color: '#d1d5db' }}>
+            {chartSubtitleFor(view.hasPlatformData)}
+          </p>
+          <div className="mt-6">
+            {renderDistributionChart(view)}
+          </div>
+        </div>
+
+        <div className={CHART_CARD_CLASS}>
+          <h2 className="text-sm font-semibold text-white">Actividad Reciente</h2>
+          <p className="text-xs mt-1" style={{ color: '#d1d5db' }}>
+            Últimos 7 días · jobs, clips y minutos procesados
+          </p>
+          {renderRecentActivity(view.metrics.recent_activity, view.maxRecent)}
+          <div className="flex items-center justify-center gap-4 mt-6">
+            <span className="inline-flex items-center gap-1.5 text-xs text-gray-400">
+              <span className="h-2.5 w-2.5 rounded-full bg-violet-500" /> Jobs
+            </span>
+            <span className="inline-flex items-center gap-1.5 text-xs text-gray-400">
+              <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> Clips
+            </span>
+            <span className="inline-flex items-center gap-1.5 text-xs text-gray-400">
+              <span className="h-2.5 w-2.5 rounded-full bg-amber-500" /> Min
+            </span>
+          </div>
+        </div>
+      </div>
+    </>
   )
 }
 
@@ -103,23 +420,10 @@ export default function DashboardPage() {
     ? Math.max(1, ...metrics.recent_activity.map((d) => Math.max(d.jobs, d.clips, d.minutes_processed)))
     : 1
 
-  const isEmpty = metrics && metrics.total_jobs === 0 && metrics.total_clips === 0
-
-  const chartCardClass = 'rounded-2xl bg-[#121824] border border-[rgba(255,255,255,0.08)] p-5 sm:p-6 shadow-xl'
-
   return (
     <div className="min-h-screen bg-[#0B0F17] text-white">
       <div className="max-w-6xl mx-auto px-4 py-6 sm:py-8">
-        {activeJobId && (
-          <div className="rounded-xl border border-[rgba(180,241,5,0.22)] bg-[rgba(180,241,5,0.08)] px-4 py-3 flex items-center justify-between gap-3 mb-6">
-            <div className="flex items-center gap-2 text-sm font-bold text-[#B4F105]">
-              <span className="h-2 w-2 rounded-full bg-[#B4F105] animate-pulse" /> Procesamiento activo
-            </div>
-            <Link to={`/jobs/${activeJobId}`} className="btn-custom btn-custom-primary btn-custom-sm">
-              Ver progreso → <i className="bi bi-arrow-right" />
-            </Link>
-          </div>
-        )}
+        {renderActiveJobBanner(activeJobId)}
         <div className="mb-6 sm:mb-8">
           <div className="inline-flex items-center gap-2 mb-3 px-3 py-1 rounded-full text-xs font-bold bg-[rgba(180,241,5,0.10)] text-[#B4F105] border border-[rgba(180,241,5,0.22)]">
             <span className="h-1.5 w-1.5 rounded-full bg-[#B4F105] shadow-[0_0_6px_rgba(180,241,5,0.6)] animate-pulse" /> LIVE
@@ -147,214 +451,23 @@ export default function DashboardPage() {
           </Link>
         </div>
 
-        {loading && (
-          <>
-            <KpiSkeleton />
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 mt-6">
-              <div className="rounded-2xl bg-[#121824] border border-[rgba(255,255,255,0.08)] p-6 h-[320px] animate-pulse">
-                <div className="h-4 bg-[rgba(255,255,255,0.06)] rounded w-1/3 mb-6" />
-                <div className="h-[240px] bg-[rgba(255,255,255,0.04)] rounded" />
-              </div>
-              <div className="rounded-2xl bg-[#121824] border border-[rgba(255,255,255,0.08)] p-6 h-[320px] animate-pulse">
-                <div className="h-4 bg-[rgba(255,255,255,0.06)] rounded w-1/3 mb-6" />
-                <div className="h-[240px] bg-[rgba(255,255,255,0.04)] rounded" />
-              </div>
-            </div>
-          </>
-        )}
+        {renderLoadingSkeletons(loading)}
 
-        {error && !loading && (
-          <div role="alert" className="alert-custom alert-custom-danger">
-            <i className="bi bi-exclamation-triangle-fill alert-custom-icon" />
-            <div className="alert-custom-content">{error}</div>
-            <button onClick={fetchAll} className="btn-custom btn-custom-danger btn-custom-sm">
-              Reintentar
-            </button>
-          </div>
-        )}
+        {renderErrorState(error, loading, fetchAll)}
 
-        {!loading && !error && isEmpty && (
-          <div className="rounded-2xl bg-[#121824] border border-dashed border-[rgba(180,241,5,0.18)] p-10 text-center shadow-xl">
-            <div className="h-12 w-12 rounded-full bg-[rgba(180,241,5,0.10)] border border-[rgba(180,241,5,0.22)] flex items-center justify-center text-xl mx-auto text-[#B4F105]">📊</div>
-            <p className="text-sm font-bold text-[#F1F5F9] mt-4">Aún no tienes métricas</p>
-            <p className="text-xs text-[#94A3B8] mt-1 max-w-[300px] mx-auto">
-              Cuando proceses tu primer video verás aquí clips generados, horas ahorradas y actividad de los últimos 7 días.
-            </p>
-            <Link to="/upload" className="btn-custom btn-custom-primary mt-5 shadow-[0_0_20px_rgba(180,241,5,0.3)]">
-              <i className="bi bi-lightning-charge-fill" /> Subir primer video
-            </Link>
-          </div>
-        )}
+        {renderEmptyState(metrics, loading, error)}
 
-        {!loading && !error && metrics && !isEmpty && (
-          <>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="kpi-card">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-bold text-[#94A3B8] uppercase tracking-widest">Total Videos / Jobs</p>
-                  <span className="kpi-accent"><i className="bi bi-film" /></span>
-                </div>
-                <p className="text-3xl font-extrabold mt-3 text-white tracking-tight">{metrics.total_jobs}</p>
-                <p className="text-xs text-[#94A3B8] mt-1">{stats ? `${stats.total_videos} videos subidos` : 'Jobs procesados'}</p>
-              </div>
-
-              <div className="kpi-card">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-bold text-[#94A3B8] uppercase tracking-widest">Total Clips</p>
-                  <span className="kpi-accent"><i className="bi bi-collection-play" /></span>
-                </div>
-                <p className="text-3xl font-extrabold mt-3 text-white tracking-tight">{metrics.total_clips}</p>
-                <p className="text-xs text-[#94A3B8] mt-1">Clips virales extraídos</p>
-              </div>
-
-              <div className="kpi-card">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-bold text-[#94A3B8] uppercase tracking-widest">Tiempo Ahorrado</p>
-                  <span className="kpi-accent !bg-[rgba(180,241,5,0.14)] !border-[rgba(180,241,5,0.25)] !text-[#B4F105]"><i className="bi bi-lightning-charge" /></span>
-                </div>
-                <p className="text-3xl font-extrabold mt-3 text-[#B4F105] tracking-tight" style={{ textShadow: '0 0 16px rgba(180,241,5,0.35)' }}>{formatHours(metrics.time_saved_hours)}</p>
-                <p className="text-xs text-[#94A3B8] mt-1">Estimado · {metrics.total_minutes_processed} min procesados</p>
-              </div>
-
-              <div className="kpi-card">
-                {stats ? (
-                  <>
-                    <p className="text-xs font-bold text-[#94A3B8] uppercase tracking-widest">Promedio Viralidad</p>
-                    <div className="flex items-center gap-3 mt-3">
-                      <p className="text-3xl font-extrabold text-white tracking-tight">{stats.avg_score.toFixed(1)}</p>
-                      <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-bold ${scoreBadge(stats.avg_score)}`}>
-                        {stats.avg_score >= 71 ? 'Alto' : stats.avg_score >= 41 ? 'Medio' : 'Bajo'}
-                      </span>
-                    </div>
-                    <p className="text-xs text-[#94A3B8] mt-1">Score promedio de tus clips</p>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-xs font-bold text-[#94A3B8] uppercase tracking-widest">Minutos Procesados</p>
-                    <p className="text-3xl font-extrabold mt-3 text-white">{metrics.total_minutes_processed}</p>
-                    <p className="text-xs text-[#94A3B8] mt-1">Acumulado total</p>
-                  </>
-                )}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 mt-6">
-              <div className={chartCardClass}>
-                <h2 className="text-sm font-semibold" style={{ color: '#f9fafb' }}>
-                  {hasPlatformData ? 'Distribución por Plataforma' : 'Distribución por Score'}
-                </h2>
-                <p className="text-xs mt-1" style={{ color: '#d1d5db' }}>
-                  {hasPlatformData ? 'Clips agrupados por red social objetivo' : 'Conteo de clips agrupados por rango de viralidad'}
-                </p>
-                <div className="mt-6">
-                  {hasPlatformData ? (
-                    <div className="space-y-4">
-                      {platformEntries.map((entry) => (
-                        <div key={entry.platform} className="space-y-1.5">
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="font-medium capitalize" style={{ color: platformColors[entry.platform] ?? '#9ca3af' }}>{entry.platform}</span>
-                            <span className="text-gray-400 font-mono">{entry.count} clips</span>
-                          </div>
-                          <div className="h-8 bg-[rgba(255,255,255,0.06)] rounded-full overflow-hidden p-1 border border-[rgba(255,255,255,0.04)]">
-                            <div
-                              className="h-full rounded-full transition-all duration-700 flex items-center justify-end pr-2"
-                              style={{ width: `${(entry.count / maxPlatform) * 100}%`, backgroundColor: platformColors[entry.platform] ?? '#6366f1', minWidth: entry.count > 0 ? '32px' : '0' }}
-                            >
-                              {entry.count > 0 && <span className="text-[11px] font-bold text-white">{entry.count}</span>}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div>
-                      <div className="space-y-4">
-                        {(stats?.score_distribution ?? []).map((item) => (
-                          <div key={item.range} className="space-y-1.5">
-                            <div className="flex items-center justify-between text-xs">
-                              <span className="font-medium" style={{ color: barColors[item.label] ?? '#9ca3af' }}>{item.label} ({item.range})</span>
-                              <span className="text-[#94A3B8] font-mono">{item.count} clips</span>
-                            </div>
-                            <div className="h-8 bg-[rgba(255,255,255,0.06)] rounded-full overflow-hidden p-1 border border-[rgba(255,255,255,0.04)]">
-                              <div
-                                className="h-full rounded-full transition-all duration-700 flex items-center justify-end pr-2"
-                                style={{ width: `${(item.count / maxCount) * 100}%`, backgroundColor: barColors[item.label] ?? '#6366f1', minWidth: item.count > 0 ? '32px' : '0' }}
-                              >
-                                {item.count > 0 && <span className="text-[11px] font-bold text-white">{item.count}</span>}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="flex items-center justify-center gap-4 mt-6">
-                        <span className="inline-flex items-center gap-1.5 text-xs text-gray-400">
-                          <span className="h-2.5 w-2.5 rounded-full" style={{ background: '#ef4444' }} /> 0-40 Bajo
-                        </span>
-                        <span className="inline-flex items-center gap-1.5 text-xs text-gray-400">
-                          <span className="h-2.5 w-2.5 rounded-full" style={{ background: '#f59e0b' }} /> 41-70 Medio
-                        </span>
-                        <span className="inline-flex items-center gap-1.5 text-xs text-gray-400">
-                          <span className="h-2.5 w-2.5 rounded-full" style={{ background: '#10b981' }} /> 71-100 Alto
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className={chartCardClass}>
-                <h2 className="text-sm font-semibold text-white">Actividad Reciente</h2>
-                <p className="text-xs mt-1" style={{ color: '#d1d5db' }}>
-                  Últimos 7 días · jobs, clips y minutos procesados
-                </p>
-                <div className="mt-6 space-y-3">
-                  {metrics.recent_activity.map((day) => (
-                    <div key={day.date} className="space-y-1.5">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="font-mono text-gray-400">{day.date.slice(5)}</span>
-                        <span className="text-gray-500">{day.jobs} jobs · {day.clips} clips · {day.minutes_processed} min</span>
-                      </div>
-                      <div className="h-8 bg-[rgba(255,255,255,0.06)] rounded-full overflow-hidden p-1 flex gap-1 border border-[rgba(255,255,255,0.04)]">
-                        <div
-                          className="h-full rounded-full bg-violet-500 transition-all flex items-center justify-center"
-                          style={{ width: `${(day.jobs / maxRecent) * 40}%`, minWidth: day.jobs > 0 ? '24px' : '0' }}
-                          title={`${day.jobs} jobs`}
-                        >
-                          {day.jobs > 0 && <span className="text-[10px] font-bold text-white">{day.jobs}</span>}
-                        </div>
-                        <div
-                          className="h-full rounded-full bg-emerald-500 transition-all flex items-center justify-center"
-                          style={{ width: `${(day.clips / maxRecent) * 40}%`, minWidth: day.clips > 0 ? '24px' : '0' }}
-                          title={`${day.clips} clips`}
-                        >
-                          {day.clips > 0 && <span className="text-[10px] font-bold text-white">{day.clips}</span>}
-                        </div>
-                        <div
-                          className="h-full rounded-full bg-amber-500 transition-all flex items-center justify-center"
-                          style={{ width: `${(day.minutes_processed / maxRecent) * 20}%`, minWidth: day.minutes_processed > 0 ? '24px' : '0' }}
-                          title={`${day.minutes_processed} min`}
-                        >
-                          {day.minutes_processed > 0 && <span className="text-[10px] font-bold text-white">{day.minutes_processed}</span>}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="flex items-center justify-center gap-4 mt-6">
-                  <span className="inline-flex items-center gap-1.5 text-xs text-gray-400">
-                    <span className="h-2.5 w-2.5 rounded-full bg-violet-500" /> Jobs
-                  </span>
-                  <span className="inline-flex items-center gap-1.5 text-xs text-gray-400">
-                    <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> Clips
-                  </span>
-                  <span className="inline-flex items-center gap-1.5 text-xs text-gray-400">
-                    <span className="h-2.5 w-2.5 rounded-full bg-amber-500" /> Min
-                  </span>
-                </div>
-              </div>
-            </div>
-          </>
-        )}
+        {renderMetricsBody({
+          metrics: metrics as MetricsResponse,
+          stats,
+          hasPlatformData,
+          platformEntries,
+          platformColors,
+          maxPlatform,
+          barColors,
+          maxCount,
+          maxRecent,
+        }, loading, error)}
       </div>
     </div>
   )

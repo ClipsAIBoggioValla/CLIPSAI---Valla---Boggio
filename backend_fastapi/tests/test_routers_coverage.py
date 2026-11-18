@@ -32,6 +32,51 @@ from backend_fastapi.app.security import create_access_token, hash_password
 PASSWORD = "ClaveSegura_2026!"
 
 
+# ---------------------------------------------------------------- helpers de aserción (_aux_*)
+
+
+def _aux_assert_registro_201(res, db) -> None:
+    assert res.status_code == 201, res.text
+    assert res.json()["email"] == "nueva@example.com"
+    assert "id" in res.json()
+
+
+def _aux_assert_list_clips_body(body) -> None:
+    assert body["total"] == 1
+    assert body["items"][0]["title"] == "Clip de prueba"
+    assert body["items"][0]["duration"] == pytest.approx(35.0)
+
+
+def _aux_assert_export_job_json_body(body, job) -> None:
+    assert body["total_clips"] == 1
+    assert body["job_id"] == str(job.id)
+    assert body["clips"][0]["transcript"] == "00:00:00 - Linea del video"
+
+
+def _aux_assert_metrics_totals(body) -> None:
+    assert body["total_jobs"] == 1
+    assert body["total_clips"] == 2
+    assert body["platform_distribution"]["tiktok"] == 3
+
+
+def _aux_assert_metrics_activity(body) -> None:
+    assert body["recent_activity"][-1]["clips"] == 2
+    # 600 s -> 10 min -> 10 * 3 / 60 = 0.5 h
+    assert body["time_saved_hours"] == pytest.approx(0.5)
+
+
+def _aux_assert_summary_totals(body) -> None:
+    assert body["total_videos"] == 4
+    assert body["total_clips"] == 10
+    assert body["avg_score"] == pytest.approx(77.3)
+
+
+def _aux_assert_summary_distribution(body) -> None:
+    assert [item["range"] for item in body["score_distribution"]] == ["0-40", "41-70", "71-100"]
+    assert body["recent_job"] is None
+    assert body["estimated_time_saved_minutes"] == 150
+
+
 # ---------------------------------------------------------------- health
 
 
@@ -51,9 +96,7 @@ class TestAuth:
             "/auth/registro",
             json={"email": "nueva@example.com", "password": PASSWORD, "full_name": "Nueva"},
         )
-        assert res.status_code == 201, res.text
-        assert res.json()["email"] == "nueva@example.com"
-        assert "id" in res.json()
+        _aux_assert_registro_201(res, db)
         assert len(db.added) == 1
         # sql-injection de seguridad: el hash no es la contraseña
         assert db.added[0].hashed_password != PASSWORD
@@ -372,9 +415,7 @@ class TestClips:
         res = client.get("/clips")
         assert res.status_code == 200, res.text
         body = res.json()
-        assert body["total"] == 1
-        assert body["items"][0]["title"] == "Clip de prueba"
-        assert body["items"][0]["duration"] == pytest.approx(35.0)
+        _aux_assert_list_clips_body(body)
         assert body["items"][0]["has_ass"] is True
 
     def test_list_clips_422_limit_fuera_de_rango(self, client) -> None:
@@ -521,11 +562,8 @@ class TestExport:
 
         res = client.get(f"/jobs/{job.id}/export", params={"format": "json"})
         assert res.status_code == 200
-        body = res.json()
-        assert body["total_clips"] == 1
-        assert body["job_id"] == str(job.id)
-        assert body["clips"][0]["transcript"] == "00:00:00 - Linea del video"
-        assert body["avg_score"] == pytest.approx(80.0)
+        _aux_assert_export_job_json_body(res.json(), job)
+        assert res.json()["avg_score"] == pytest.approx(80.0)
 
     def test_export_job_404(self, client) -> None:
         res = client.get(f"/jobs/{_fixtures.uuid.uuid4()}/export", params={"format": "csv"})
@@ -579,12 +617,8 @@ class TestMetrics:
         res = client.get("/metrics")
         assert res.status_code == 200
         body = res.json()
-        assert body["total_jobs"] == 1
-        assert body["total_clips"] == 2
-        assert body["platform_distribution"]["tiktok"] == 3
-        assert body["recent_activity"][-1]["clips"] == 2
-        # 600 s -> 10 min -> 10 * 3 / 60 = 0.5 h
-        assert body["time_saved_hours"] == pytest.approx(0.5)
+        _aux_assert_metrics_totals(body)
+        _aux_assert_metrics_activity(body)
 
     def test_agregado_api_metrics_200(self, client) -> None:
         assert client.get("/api/metrics").status_code == 200
@@ -603,12 +637,8 @@ class TestStats:
         res = client.get("/stats/summary")
         assert res.status_code == 200, res.text
         body = res.json()
-        assert body["total_videos"] == 4
-        assert body["total_clips"] == 10
-        assert body["avg_score"] == pytest.approx(77.3)
-        assert [item["range"] for item in body["score_distribution"]] == ["0-40", "41-70", "71-100"]
-        assert body["recent_job"] is None
-        assert body["estimated_time_saved_minutes"] == 150
+        _aux_assert_summary_totals(body)
+        _aux_assert_summary_distribution(body)
 
 
 # ---------------------------------------------------------------- social

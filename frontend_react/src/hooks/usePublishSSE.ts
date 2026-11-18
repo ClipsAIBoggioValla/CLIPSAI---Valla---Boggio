@@ -30,6 +30,44 @@ function getToken(): string | null {
   }
 }
 
+function isTerminalPublishStatus(status: string): boolean {
+  return status === 'PUBLISHED' || status === 'FAILED'
+}
+
+function sseDataGuard(data: unknown): boolean {
+  return typeof data !== 'string' || !data
+}
+
+function sseStreamErrorMessage(cause: unknown): string {
+  if (cause instanceof Error) return cause.message
+  return 'Error en el flujo SSE'
+}
+
+interface SseHandlers {
+  setStatus: (s: PublishSSEStatus) => void
+  setSocialPostUrl: (v: string | null) => void
+  setErrorLog: (v: string | null) => void
+  setError: (msg: string) => void
+  close: () => void
+}
+
+function applySseStatus(payload: Partial<PublishSSEPayload>, h: SseHandlers): void {
+  if (typeof payload.status !== 'string') return
+  const nextStatus = payload.status.toUpperCase()
+  h.setStatus(nextStatus)
+  if (isTerminalPublishStatus(nextStatus)) h.close()
+}
+
+function applySseFields(payload: Partial<PublishSSEPayload>, h: SseHandlers): void {
+  if (typeof payload.social_post_url === 'string') h.setSocialPostUrl(payload.social_post_url)
+  if (typeof payload.error_log === 'string') h.setErrorLog(payload.error_log)
+}
+
+function applySsePayload(payload: Partial<PublishSSEPayload>, h: SseHandlers): void {
+  applySseStatus(payload, h)
+  applySseFields(payload, h)
+}
+
 export function usePublishSSE(clipId: string | null): UsePublishSSEResult {
   const [status, setStatus] = useState<PublishSSEStatus | null>(null)
   const [socialPostUrl, setSocialPostUrl] = useState<string | null>(null)
@@ -68,16 +106,17 @@ export function usePublishSSE(clipId: string | null): UsePublishSSEResult {
       if (eventSourceRef.current === eventSource) eventSourceRef.current = null
     }
 
+    const handlers: SseHandlers = {
+      setStatus,
+      setSocialPostUrl,
+      setErrorLog,
+      setError,
+      close: closeConnection,
+    }
+
     const handleMessage = (event: MessageEvent<string>) => {
       try {
-        const payload = JSON.parse(event.data) as Partial<PublishSSEPayload>
-        if (typeof payload.status === 'string') {
-          const nextStatus = payload.status.toUpperCase()
-          setStatus(nextStatus)
-          if (nextStatus === 'PUBLISHED' || nextStatus === 'FAILED') closeConnection()
-        }
-        if (typeof payload.social_post_url === 'string') setSocialPostUrl(payload.social_post_url)
-        if (typeof payload.error_log === 'string') setErrorLog(payload.error_log)
+        applySsePayload(JSON.parse(event.data) as Partial<PublishSSEPayload>, handlers)
       } catch (cause: unknown) {
         setError(cause instanceof Error ? `Respuesta SSE inválida: ${cause.message}` : 'Respuesta SSE inválida')
       }
@@ -86,12 +125,12 @@ export function usePublishSSE(clipId: string | null): UsePublishSSEResult {
     const handleDone = () => closeConnection()
     const handleStreamError = (event: Event) => {
       const messageEvent = event as MessageEvent<string>
-      if (typeof messageEvent.data !== 'string' || !messageEvent.data) return
+      if (sseDataGuard(messageEvent.data)) return
       try {
         const payload = JSON.parse(messageEvent.data) as { detail?: unknown }
         if (typeof payload.detail === 'string') setError(payload.detail)
       } catch (cause: unknown) {
-        setError(cause instanceof Error ? cause.message : 'Error en el flujo SSE')
+        setError(sseStreamErrorMessage(cause))
       }
     }
 

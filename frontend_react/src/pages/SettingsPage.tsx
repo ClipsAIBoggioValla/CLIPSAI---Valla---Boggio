@@ -6,6 +6,85 @@ import { userService } from '@/services/api'
 import { ApiError } from '@/types/api'
 import SettingsForms from '@/components/settings/SettingsForms'
 
+type ThemePreference = 'light' | 'dark' | 'system'
+type ExportFormat = 'csv' | 'json'
+
+type ProfileWithName = { name?: string | null; full_name?: string | null; email?: string | null; theme_preference?: string | null }
+
+interface ProfileStateApply {
+  setFullName: (v: string) => void
+  setEmail: (v: string) => void
+  setTheme: (v: ThemePreference) => void
+}
+
+function profileNameValue(source: ProfileWithName): string {
+  return source.name ?? source.full_name ?? ''
+}
+
+function applyProfileResponse(profile: ProfileWithName, apply: ProfileStateApply): void {
+  apply.setFullName(profileNameValue(profile))
+  apply.setEmail(profile.email ?? '')
+  if (profile.theme_preference) apply.setTheme(profile.theme_preference as ThemePreference)
+}
+
+function applyStoredUserFallback(user: ProfileWithName | null | undefined, apply: ProfileStateApply): void {
+  if (!user) return
+  apply.setFullName(profileNameValue(user))
+  apply.setEmail(user.email ?? '')
+}
+
+function profileErrorMessage(err: unknown): string | null {
+  if (err instanceof ApiError) return err.detail
+  if (err instanceof Error) return err.message
+  return null
+}
+
+function profileSaveErrorMessage(err: unknown): string {
+  return err instanceof ApiError ? err.detail : err instanceof Error ? err.message : 'Error al guardar perfil'
+}
+
+function restoreSavedPreferences(apply: { setTheme: (v: ThemePreference) => void; setExportFormat: (v: ExportFormat) => void }): void {
+  const savedTheme = localStorage.getItem('theme') as ThemePreference | null
+  if (savedTheme) apply.setTheme(savedTheme)
+  const savedFmt = localStorage.getItem('export_format') as ExportFormat | null
+  if (savedFmt) apply.setExportFormat(savedFmt)
+}
+
+function syncThemeClass(theme: ThemePreference): void {
+  if (theme === 'dark') document.documentElement.classList.add('dark')
+  else if (theme === 'light') document.documentElement.classList.remove('dark')
+  else {
+    const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+    document.documentElement.classList.toggle('dark', isDark)
+  }
+}
+
+function missingFieldsError(current: string, next: string, confirm: string): string | null {
+  if (current && next && confirm) return null
+  return 'Completa todos los campos'
+}
+
+function passwordChangeError(current: string, next: string, confirm: string): string | null {
+  const missing = missingFieldsError(current, next, confirm)
+  if (missing) return missing
+  if (next.length < 8) return 'La nueva contraseña debe tener al menos 8 caracteres'
+  if (next !== confirm) return 'Las contraseñas no coinciden'
+  return null
+}
+
+function password400Message(detail: string): string {
+  return detail || 'La contraseña actual es incorrecta'
+}
+
+function passwordRequestErrorMessage(err: unknown): string | null {
+  if (err instanceof ApiError) {
+    if (err.status === 400) return password400Message(err.detail)
+    return err.detail
+  }
+  if (err instanceof Error) return err.message
+  return null
+}
+
 export default function SettingsPage() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
@@ -24,28 +103,24 @@ export default function SettingsPage() {
   const [passwordError, setPasswordError] = useState<string | null>(null)
   const [passwordToast, setPasswordToast] = useState<string | null>(null)
 
-  const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('dark')
-  const [exportFormat, setExportFormat] = useState<'csv' | 'json'>('csv')
+  const [theme, setTheme] = useState<ThemePreference>('dark')
+  const [exportFormat, setExportFormat] = useState<ExportFormat>('csv')
   const [prefToast, setPrefToast] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
     setLoadingProfile(true)
+    const apply: ProfileStateApply = { setFullName, setEmail, setTheme }
     userService.getMe().then((p) => {
       if (cancelled) return
-      const nameVal = (p as unknown as { name?: string | null }).name ?? p.full_name ?? ''
-      setFullName(nameVal); setEmail(p.email ?? '')
-      if (p.theme_preference) setTheme(p.theme_preference as 'light' | 'dark' | 'system')
+      applyProfileResponse(p as ProfileWithName, apply)
     }).catch((err: unknown) => {
       if (cancelled) return
-      if (user) { setFullName((user as unknown as { full_name?: string }).full_name ?? ''); setEmail(user.email ?? '') }
-      if (err instanceof ApiError) setProfileError(err.detail)
-      else if (err instanceof Error) setProfileError(err.message)
+      applyStoredUserFallback(user as ProfileWithName | null, apply)
+      const msg = profileErrorMessage(err)
+      if (msg !== null) setProfileError(msg)
     }).finally(() => { if (!cancelled) setLoadingProfile(false) })
-    const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | 'system' | null
-    if (savedTheme) setTheme(savedTheme)
-    const savedFmt = localStorage.getItem('export_format') as 'csv' | 'json' | null
-    if (savedFmt) setExportFormat(savedFmt)
+    restoreSavedPreferences({ setTheme, setExportFormat })
     return () => { cancelled = true }
   }, [user])
 
@@ -53,14 +128,11 @@ export default function SettingsPage() {
     e.preventDefault(); setProfileError(null); setProfileToast(null); setSavingProfile(true)
     try {
       const updated = await userService.updateMe({ full_name: fullName.trim() || null, email: email.trim() || null })
-      const updatedName = (updated as unknown as { name?: string | null }).name ?? updated.full_name ?? ''
-      setFullName(updatedName); setEmail(updated.email ?? '')
+      applyProfileResponse(updated as ProfileWithName, { setFullName, setEmail, setTheme })
       setProfileToast('Ajustes actualizados correctamente')
       setTimeout(() => setProfileToast(null), 3000)
     } catch (err: unknown) {
-      if (err instanceof ApiError) setProfileError(err.detail)
-      else if (err instanceof Error) setProfileError(err.message)
-      else setProfileError('Error al guardar perfil')
+      setProfileError(profileSaveErrorMessage(err))
     } finally { setSavingProfile(false) }
   }
 
@@ -68,21 +140,15 @@ export default function SettingsPage() {
     e.preventDefault()
     try { await userService.updateMe({ theme_preference: theme }) } catch {}
     localStorage.setItem('theme', theme); localStorage.setItem('export_format', exportFormat)
-    if (theme === 'dark') document.documentElement.classList.add('dark')
-    else if (theme === 'light') document.documentElement.classList.remove('dark')
-    else {
-      const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-      document.documentElement.classList.toggle('dark', isDark)
-    }
+    syncThemeClass(theme)
     setPrefToast('Ajustes actualizados correctamente')
     setTimeout(() => setPrefToast(null), 3000)
   }
 
   async function handleChangePassword(e: React.FormEvent) {
     e.preventDefault(); setPasswordError(null); setPasswordToast(null)
-    if (!currentPassword || !newPassword || !confirmPassword) { setPasswordError('Completa todos los campos'); return }
-    if (newPassword.length < 8) { setPasswordError('La nueva contraseña debe tener al menos 8 caracteres'); return }
-    if (newPassword !== confirmPassword) { setPasswordError('Las contraseñas no coinciden'); return }
+    const problem = passwordChangeError(currentPassword, newPassword, confirmPassword)
+    if (problem) { setPasswordError(problem); return }
     setSavingPassword(true)
     try {
       const res = await userService.changePassword({ current_password: currentPassword, new_password: newPassword })
@@ -90,10 +156,8 @@ export default function SettingsPage() {
       setCurrentPassword(''); setNewPassword(''); setConfirmPassword('')
       setTimeout(() => { logout(); navigate('/auth', { replace: true }) }, 1000)
     } catch (err: unknown) {
-      if (err instanceof ApiError && err.status === 400) setPasswordError(err.detail || 'La contraseña actual es incorrecta')
-      else if (err instanceof ApiError) setPasswordError(err.detail)
-      else if (err instanceof Error) setPasswordError(err.message)
-      else setPasswordError('Error al cambiar contraseña')
+      const msg = passwordRequestErrorMessage(err)
+      setPasswordError(msg ?? 'Error al cambiar contraseña')
     } finally { setSavingPassword(false) }
   }
 

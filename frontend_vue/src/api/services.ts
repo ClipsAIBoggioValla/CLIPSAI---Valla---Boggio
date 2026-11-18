@@ -64,6 +64,23 @@ export const statsService = {
   },
 }
 
+function readStoredToken(): string | null {
+  try { return localStorage.getItem('clipsai_token') } catch { return null }
+}
+
+function downloadCacheBust(clip: import('@/types/api').ClipListItem): string {
+  return `t=${clip.updated_at ? new Date(clip.updated_at as unknown as string).getTime() : Date.now()}`
+}
+
+function buildClipDownloadUrl(clip: import('@/types/api').ClipListItem, token: string | null): string {
+  const bust = downloadCacheBust(clip)
+  return `/clips/${clip.id}/descarga${token ? `?token=${encodeURIComponent(token)}&${bust}` : `?${bust}`}`
+}
+
+function clipFilename(clip: import('@/types/api').ClipListItem): string {
+  return `${clip.title || clip.id}.mp4`
+}
+
 export const metricsService = {
   async getMetrics(): Promise<import('@/types/api').MetricsResponse> {
     const { data } = await apiClient.get<import('@/types/api').MetricsResponse>('/metrics')
@@ -113,12 +130,11 @@ export const clipService = {
   },
   async downloadClip(clip: import('@/types/api').ClipListItem): Promise<void> {
     try {
-      const token = (() => { try { return localStorage.getItem('clipsai_token') } catch { return null } })()
-      const bust = `t=${clip.updated_at ? new Date(clip.updated_at as unknown as string).getTime() : Date.now()}`
-      const res = await apiClient.get<Blob>(`/clips/${clip.id}/descarga${token ? `?token=${encodeURIComponent(token)}&${bust}` : `?${bust}`}`, { responseType: 'blob' })
+      const token = readStoredToken()
+      const res = await apiClient.get<Blob>(buildClipDownloadUrl(clip, token), { responseType: 'blob' })
       const blob = res.data as unknown as Blob
       const cd = (res.headers as Record<string, string>)['content-disposition'] ?? null
-      triggerBlobDownload(blob, cd, `${clip.title || clip.id}.mp4`)
+      triggerBlobDownload(blob, cd, clipFilename(clip))
     } catch {
       window.open(`${(import.meta.env.VITE_API_URL ?? 'http://localhost:8000').trim().replace(/\/$/, '')}/clips/${clip.id}/descarga`, '_blank')
     }

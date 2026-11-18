@@ -5,16 +5,25 @@ import { ApiError } from '@/types/api'
 import AuthForm from '@/components/auth/AuthForm'
 import type { AuthMode } from '@/components/auth/AuthForm'
 
+function apiErrorMessage(status: number, detail: string): string {
+  if (status === 401) return 'Credenciales inválidas. Verifica tu email y contraseña.'
+  if (status === 409) return 'El email ya está registrado. Prueba iniciando sesión.'
+  return detail
+}
+
 function messageForError(err: unknown): string {
-  if (err instanceof ApiError) {
-    if (err.status === 401) return 'Credenciales inválidas. Verifica tu email y contraseña.'
-    if (err.status === 409) return 'El email ya está registrado. Prueba iniciando sesión.'
-    if (err.status === 422) return err.detail
-    if (err.status === 400) return err.detail
-    return err.detail
-  }
+  if (err instanceof ApiError) return apiErrorMessage(err.status, err.detail)
   if (err instanceof Error) return err.message
   return 'Error inesperado. Intenta nuevamente.'
+}
+
+function savedJobDestination(): string {
+  let dest = '/upload'
+  try {
+    const saved = localStorage.getItem('clipsai_active_job_id')
+    if (saved) dest = `/jobs/${saved}`
+  } catch {}
+  return dest
 }
 
 export default function AuthPage() {
@@ -29,12 +38,7 @@ export default function AuthPage() {
   const [error, setError] = useState<string | null>(null)
 
   if (!isLoading && isAuthenticated) {
-    let dest = '/upload'
-    try {
-      const saved = localStorage.getItem('clipsai_active_job_id')
-      if (saved) dest = `/jobs/${saved}`
-    } catch {}
-    return <Navigate to={dest} replace />
+    return <Navigate to={savedJobDestination()} replace />
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -47,12 +51,7 @@ export default function AuthPage() {
       } else {
         await register({ email: email.trim(), password, full_name: fullName.trim() || undefined })
       }
-      let dest = '/upload'
-      try {
-        const saved = localStorage.getItem('clipsai_active_job_id')
-        if (saved) dest = `/jobs/${saved}`
-      } catch {}
-      navigate(dest, { replace: true })
+      navigate(savedJobDestination(), { replace: true })
     } catch (err: unknown) {
       setError(messageForError(err))
     } finally {

@@ -16,6 +16,17 @@ def encode_state(user_id: str) -> str:
     return base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
 
 
+def _user_id_de_json(decoded: str) -> str | None:
+    """user_id dentro del JSON decodificado; None si no lo trae."""
+    try:
+        data = json.loads(decoded)
+        if isinstance(data, dict) and "user_id" in data:
+            return str(data["user_id"])
+    except Exception:
+        pass
+    return None
+
+
 def decode_state(state: str) -> str | None:
     """Decodifica el state y devuelve el user_id, o None si no es válido."""
     if not state:
@@ -24,12 +35,9 @@ def decode_state(state: str) -> str | None:
     for decoder in (base64.urlsafe_b64decode, base64.b64decode):
         try:
             decoded = decoder(padded.encode()).decode()
-            try:
-                data = json.loads(decoded)
-                if isinstance(data, dict) and "user_id" in data:
-                    return str(data["user_id"])
-            except Exception:
-                pass
+            user_id = _user_id_de_json(decoded)
+            if user_id is not None:
+                return user_id
             return decoded
         except Exception:
             continue
