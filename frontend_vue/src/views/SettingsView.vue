@@ -35,12 +35,93 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import type { Ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { userService } from '@/api/services'
 import { ApiError } from '@/types/api'
+import type { AuthUser } from '@/types/api'
 import Avatar from '@/components/Avatar.vue'
 import SettingsForms from '@/components/settings/SettingsForms.vue'
+
+type ThemePreference = 'light' | 'dark' | 'system'
+type ExportFormat = 'csv' | 'json'
+type ProfileWithName = { full_name?: string | null; email?: string | null; avatar_url?: string | null; theme_preference?: string | null }
+
+function profileSaveErrorMessage(err: unknown): string {
+  return err instanceof ApiError ? err.detail : err instanceof Error ? err.message : 'Error al guardar perfil'
+}
+
+function profileFallbackMessage(err: unknown): string | null {
+  if (err instanceof ApiError) return err.detail
+  if (err instanceof Error) return err.message
+  return null
+}
+
+function restoreSavedPreferences(theme: Ref<ThemePreference>, exportFormat: Ref<ExportFormat>): void {
+  const savedTheme = localStorage.getItem('theme') as ThemePreference | null
+  if (savedTheme) theme.value = savedTheme
+  const savedFmt = localStorage.getItem('export_format') as ExportFormat | null
+  if (savedFmt) exportFormat.value = savedFmt
+}
+
+function syncThemeClass(theme: ThemePreference): void {
+  if (theme === 'dark') document.documentElement.classList.add('dark')
+  else if (theme === 'light') document.documentElement.classList.remove('dark')
+  else { const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches; document.documentElement.classList.toggle('dark', isDark) }
+}
+
+function applyFetchedTheme(p: ProfileWithName, theme: Ref<ThemePreference>): void {
+  if (p.theme_preference) theme.value = p.theme_preference as ThemePreference
+}
+
+function applyFetchedProfile(p: ProfileWithName, target: { fullName: Ref<string>; email: Ref<string>; avatarUrl: Ref<string>; theme: Ref<ThemePreference> }): void {
+  target.fullName.value = p.full_name ?? ''
+  target.email.value = p.email ?? ''
+  target.avatarUrl.value = p.avatar_url ?? ''
+  applyFetchedTheme(p, target.theme)
+}
+
+function applyStoredUserFallback(user: AuthUser | null, fullName: Ref<string>, email: Ref<string>): void {
+  if (!user) return
+  fullName.value = (user as unknown as { full_name?: string }).full_name ?? ''
+  email.value = user.email ?? ''
+}
+
+function profileUpdatePayload(fullName: string, email: string, avatarUrl: string): { full_name: string | null; email: string | null; avatar_url: string | null } {
+  return { full_name: fullName.trim() || null, email: email.trim() || null, avatar_url: avatarUrl.trim() || null }
+}
+
+function applyProfileUpdate(updated: ProfileWithName, fullName: Ref<string>, email: Ref<string>): void {
+  fullName.value = updated.full_name ?? ''
+  email.value = updated.email ?? ''
+}
+
+function missingFieldsError(current: string, next: string, confirm: string): string | null {
+  if (current && next && confirm) return null
+  return 'Completa todos los campos'
+}
+
+function passwordChangeError(current: string, next: string, confirm: string): string | null {
+  const missing = missingFieldsError(current, next, confirm)
+  if (missing) return missing
+  if (next.length < 8) return 'La nueva contraseña debe tener al menos 8 caracteres'
+  if (next !== confirm) return 'Las contraseñas no coinciden'
+  return null
+}
+
+function password400Message(detail: string): string {
+  return detail || 'La contraseña actual es incorrecta'
+}
+
+function passwordRequestErrorMessage(err: unknown): string | null {
+  if (err instanceof ApiError) {
+    if (err.status === 400) return password400Message(err.detail)
+    return err.detail
+  }
+  if (err instanceof Error) return err.message
+  return null
+}
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -60,43 +141,31 @@ const savingPassword = ref(false)
 const passwordError = ref<string | null>(null)
 const passwordToast = ref<string | null>(null)
 
-const theme = ref<'light'|'dark'|'system'>('dark')
-const exportFormat = ref<'csv'|'json'>('csv')
+const theme = ref<ThemePreference>('dark')
+const exportFormat = ref<ExportFormat>('csv')
 const prefToast = ref<string | null>(null)
 
 onMounted(async () => {
   try {
     const p = await userService.getMe()
-    fullName.value = p.full_name ?? ''
-    email.value = p.email ?? ''
-    avatarUrl.value = p.avatar_url ?? ''
-    if (p.theme_preference) theme.value = p.theme_preference as 'light'|'dark'|'system'
+    applyFetchedProfile(p as unknown as ProfileWithName, { fullName, email, avatarUrl, theme })
   } catch (err: unknown) {
-    if (auth.user) {
-      fullName.value = (auth.user as unknown as { full_name?: string }).full_name ?? ''
-      email.value = auth.user.email ?? ''
-    }
-    if (err instanceof ApiError) profileError.value = err.detail
-    else if (err instanceof Error) profileError.value = err.message
+    applyStoredUserFallback(auth.user, fullName, email)
+    const msg = profileFallbackMessage(err)
+    if (msg !== null) profileError.value = msg
   } finally { loadingProfile.value = false }
-  const savedTheme = localStorage.getItem('theme') as 'light'|'dark'|'system' | null
-  if (savedTheme) theme.value = savedTheme
-  const savedFmt = localStorage.getItem('export_format') as 'csv'|'json' | null
-  if (savedFmt) exportFormat.value = savedFmt
+  restoreSavedPreferences(theme, exportFormat)
 })
 
 async function handleSaveProfile() {
   profileError.value = null; profileToast.value = null; savingProfile.value = true
   try {
-    const updated = await userService.updateMe({ full_name: fullName.value.trim() || null, email: email.value.trim() || null, avatar_url: avatarUrl.value.trim() || null })
-    fullName.value = updated.full_name ?? ''
-    email.value = updated.email ?? ''
+    const updated = await userService.updateMe(profileUpdatePayload(fullName.value, email.value, avatarUrl.value))
+    applyProfileUpdate(updated as unknown as ProfileWithName, fullName, email)
     profileToast.value = 'Ajustes actualizados correctamente'
     setTimeout(() => profileToast.value = null, 3000)
   } catch (err: unknown) {
-    if (err instanceof ApiError) profileError.value = err.detail
-    else if (err instanceof Error) profileError.value = err.message
-    else profileError.value = 'Error al guardar perfil'
+    profileError.value = profileSaveErrorMessage(err)
   } finally { savingProfile.value = false }
 }
 
@@ -104,18 +173,15 @@ async function handleSavePreferences() {
   try { await userService.updateMe({ theme_preference: theme.value }) } catch {}
   localStorage.setItem('theme', theme.value)
   localStorage.setItem('export_format', exportFormat.value)
-  if (theme.value === 'dark') document.documentElement.classList.add('dark')
-  else if (theme.value === 'light') document.documentElement.classList.remove('dark')
-  else { const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches; document.documentElement.classList.toggle('dark', isDark) }
+  syncThemeClass(theme.value)
   prefToast.value = 'Ajustes actualizados correctamente'
   setTimeout(() => prefToast.value = null, 3000)
 }
 
 async function handleChangePassword() {
   passwordError.value = null; passwordToast.value = null
-  if (!currentPassword.value || !newPassword.value || !confirmPassword.value) { passwordError.value = 'Completa todos los campos'; return }
-  if (newPassword.value.length < 8) { passwordError.value = 'La nueva contraseña debe tener al menos 8 caracteres'; return }
-  if (newPassword.value !== confirmPassword.value) { passwordError.value = 'Las contraseñas no coinciden'; return }
+  const problem = passwordChangeError(currentPassword.value, newPassword.value, confirmPassword.value)
+  if (problem) { passwordError.value = problem; return }
   savingPassword.value = true
   try {
     const res = await userService.changePassword({ current_password: currentPassword.value, new_password: newPassword.value })
@@ -123,12 +189,8 @@ async function handleChangePassword() {
     currentPassword.value=''; newPassword.value=''; confirmPassword.value=''
     setTimeout(() => { auth.logout(); router.replace('/auth') }, 1000)
   } catch (err: unknown) {
-    if (err instanceof ApiError && err.status === 400) passwordError.value = err.detail || 'La contraseña actual es incorrecta'
-    else if (err instanceof ApiError) passwordError.value = err.detail
-    else if (err instanceof Error) passwordError.value = err.message
-    else passwordError.value = 'Error al cambiar contraseña'
+    const msg = passwordRequestErrorMessage(err)
+    passwordError.value = msg ?? 'Error al cambiar contraseña'
   } finally { savingPassword.value = false }
 }
 </script>
-EOF
-echo "written ($(wc -l < frontend_vue/src/views/SettingsView.vue) lines)"

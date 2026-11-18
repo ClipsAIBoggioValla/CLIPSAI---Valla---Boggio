@@ -40,28 +40,100 @@ def _as_seconds(value: Any) -> float:
     raise ValueError(f"Timestamp inválido: {value!r}")
 
 
-def run_video(video_argument: str) -> list[Path]:
-    """Ejecuta Whisper→Claude y el mismo render crop 9:16+ASS usado por Jobs."""
+def _video_cli_valido(video_argument: str) -> Path:
+    """Ruta absoluta del video CLI. FileNotFoundError si no existe."""
     video_path = Path(video_argument).expanduser().resolve()
     if not video_path.is_file():
         raise FileNotFoundError(f"Video no encontrado: {video_path}")
+    return video_path
 
+
+def _transcript_temporal() -> Path:
+    """Archivo de transcripción temporal vacío (habilita el fallback de Whisper del engine)."""
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".txt", prefix="clipsai_cli_", encoding="utf-8", delete=False
+    ) as transcript_file:
+        return Path(transcript_file.name)
+
+
+def _clip_cli(item: dict, index: int) -> tuple[float, float]:
+    """(start, end) del clip CLI. ValueError si los timestamps son inválidos."""
+    start = _as_seconds(item.get("start_time", item.get("inicio", item.get("start", 0))))
+    end = _as_seconds(item.get("end_time", item.get("fin", item.get("end", 0))))
+    if end <= start:
+        raise ValueError(f"Clip {index + 1}: timestamps inválidos {start}–{end}")
+    return start, end
+
+
+def _clips_cli_validos(clips: list) -> list[dict]:
+    """Clips renderizables del resultado del engine (dicts con datos)."""
+    return [c for c in clips if isinstance(c, dict)]
+
+
+def _renderizar_clip_cli(render: Any, select_hook: Any, clip: dict, index: int, segments: list[dict], video_path: Path, job_id: uuid.UUID) -> Path:
+    """Un clip del CLI: hook + render 9:16 con el pipeline de jobs."""
+    start, end = _clip_cli(clip, index)
+    hook_selection = select_hook(start, end, clip.get("hook_selection") if isinstance(clip.get("hook_selection"), dict) else None)
+    output_path, _metadata = render(
+        str(video_path),
+        start,
+        end,
+        segments,
+        hook_selection,
+        job_id,
+        index,
+        str(clip.get("title") or clip.get("titulo") or "Clip")[:255],
+    )
+    return Path(output_path).resolve()
+
+
+def _renderizar_clips_cli(clips: list, segments: list[dict], video_path: Path) -> list[Path]:
+    """Renderiza cada clip del resultado del engine con el pipeline de jobs."""
     from .routers.jobs import (
-        STORAGE_CLIPS_DIR,
         _render_clip_with_ass_and_hook,
         _select_hook_for_clip,
     )
+
+    job_id = uuid.uuid4()
+    generated: list[Path] = []
+    for index, clip in enumerate(_clips_cli_validos(clips)):
+        logger.debug("Renderizando clip CLI %s", index + 1)
+        generated.append(_renderizar_clip_cli(_render_clip_with_ass_and_hook, _select_hook_for_clip, clip, index, segments, video_path, job_id))
+    return generated
+
+
+def _payload_cli(result: Any) -> tuple[list, list]:
+    """(clips, segments) del resultado del engine para el CLI. ValueError si no hay clips."""
+    clips = _clips_de_resultado(result)
+    segments = _segmentos_de_resultado(result)
+    if not isinstance(clips, list) or not clips:
+        raise RuntimeError("El motor no devolvió clips para renderizar")
+    if not isinstance(segments, list):
+        segments = []
+    return clips, segments
+
+
+def _clips_de_resultado(result: Any) -> Any:
+    """Clips crudos del resultado del engine."""
+    return result.get("clips") if isinstance(result, dict) else None
+
+
+def _segmentos_de_resultado(result: Any) -> Any:
+    """Segmentos crudos del resultado del engine."""
+    return result.get("transcription_segments", []) if isinstance(result, dict) else []
+
+
+def run_video(video_argument: str) -> list[Path]:
+    """Ejecuta Whisper→Claude y el mismo render crop 9:16+ASS usado por Jobs."""
+    video_path = _video_cli_valido(video_argument)
+
+    from .routers.jobs import STORAGE_CLIPS_DIR  # noqa: F401  (conservado por compat)
     from .services.engine import run_clip_engine
 
-    temporary_transcript: Path | None = None
+    temporary_transcript = _transcript_temporal()
     try:
         # run_clip_engine requiere una ruta de transcripción aunque Whisper la genere
         # directamente desde el video. El archivo vacío solo habilita su fallback.
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".txt", prefix="clipsai_cli_", encoding="utf-8", delete=False
-        ) as transcript_file:
-            temporary_transcript = Path(transcript_file.name)
-
         def report_progress(progress: int = 35) -> None:
             pass
 
@@ -71,48 +143,12 @@ def run_video(video_argument: str) -> list[Path]:
             progress_callback=report_progress,
         )
     finally:
-        if temporary_transcript is not None:
-            temporary_transcript.unlink(missing_ok=True)
+        temporary_transcript.unlink(missing_ok=True)
 
-    clips = result.get("clips") if isinstance(result, dict) else None
-    segments = result.get("transcription_segments", []) if isinstance(result, dict) else []
-    if not isinstance(clips, list) or not clips:
-        raise RuntimeError("El motor no devolvió clips para renderizar")
-    if not isinstance(segments, list):
-        segments = []
-
-    job_id = uuid.uuid4()
-    generated: list[Path] = []
-    for index, clip in enumerate(clips):
-        if not isinstance(clip, dict):
-            logger.warning("Se omite el resultado %s porque no es un objeto de clip", index + 1)
-            continue
-        start = _as_seconds(clip.get("start_time", clip.get("inicio", clip.get("start", 0))))
-        end = _as_seconds(clip.get("end_time", clip.get("fin", clip.get("end", 0))))
-        if end <= start:
-            raise ValueError(f"Clip {index + 1}: timestamps inválidos {start}–{end}")
-        hook_selection = _select_hook_for_clip(
-            start,
-            end,
-            clip.get("hook_selection") if isinstance(clip.get("hook_selection"), dict) else None,
-        )
-        output_path, metadata = _render_clip_with_ass_and_hook(
-            str(video_path),
-            start,
-            end,
-            segments,
-            hook_selection,
-            job_id,
-            index,
-            str(clip.get("title") or clip.get("titulo") or "Clip")[:255],
-        )
-        path = Path(output_path).resolve()
-        generated.append(path)
-
+    clips, segments = _payload_cli(result)
+    generated = _renderizar_clips_cli(clips, segments, video_path)
     if not generated:
         raise RuntimeError("No se generaron archivos MP4")
-    for path in generated:
-        pass
     return generated
 
 
@@ -125,6 +161,27 @@ def command_run(args: argparse.Namespace) -> int:
         return 1
 
 
+def _job_cli(db, job_id: uuid.UUID) -> Any:
+    """Job consultado por el CLI. None si no existe."""
+    return db.get(Job, job_id)
+
+
+def _detalle_de_fallo(job: Any) -> None:
+    """Muestra (best-effort) el traceback del fallo guardado en result_metadata."""
+    metadata = job.result_metadata if isinstance(job.result_metadata, dict) else {}
+    stack_trace = metadata.get("traceback") or metadata.get("stack_trace")
+    if stack_trace:
+        logger.error("Traceback del fallo:\n%s", str(stack_trace)[:2000])
+
+
+def _mostrar_estado_job(job: Any) -> None:
+    """Muestra el estado del job y su error si falló."""
+    if job.error_message:
+        logger.error("Error del job: %s", job.error_message)
+    if str(job.status).lower() == "failed":
+        _detalle_de_fallo(job)
+
+
 def command_inspect(args: argparse.Namespace) -> int:
     try:
         job_id = uuid.UUID(args.job_id)
@@ -133,16 +190,10 @@ def command_inspect(args: argparse.Namespace) -> int:
 
     db = SessionLocal()
     try:
-        job = db.get(Job, job_id)
+        job = _job_cli(db, job_id)
         if job is None:
             return 1
-        if job.error_message:
-            pass
-        if str(job.status).lower() == "failed":
-            metadata = job.result_metadata if isinstance(job.result_metadata, dict) else {}
-            stack_trace = metadata.get("traceback") or metadata.get("stack_trace")
-            if stack_trace:
-                pass
+        _mostrar_estado_job(job)
         return 0
     except SQLAlchemyError as exc:
         logger.exception("No se pudo consultar el Job %s", job_id)
@@ -151,18 +202,28 @@ def command_inspect(args: argparse.Namespace) -> int:
         db.close()
 
 
+def _jobs_recientes(db) -> list:
+    """Últimos 10 jobs ordenados por fecha descendente."""
+    return db.execute(select(Job).order_by(Job.created_at.desc()).limit(10)).scalars().all()
+
+
+def _imprimir_job(job: Job) -> None:
+    """Una línea por job con fecha y error truncado."""
+    created_at = job.created_at.isoformat(timespec="seconds") if isinstance(job.created_at, datetime) else "desconocido"
+    error = " ".join(str(job.error_message or "").split())
+    if len(error) > 72:
+        error = error[:69] + "..."
+    logger.info("%s  %s  %s", created_at, job.status, error)
+
+
 def command_list(_args: argparse.Namespace) -> int:
     db = SessionLocal()
     try:
-        jobs = db.execute(select(Job).order_by(Job.created_at.desc()).limit(10)).scalars().all()
+        jobs = _jobs_recientes(db)
         if not jobs:
             return 0
-
         for job in jobs:
-            created_at = job.created_at.isoformat(timespec="seconds") if isinstance(job.created_at, datetime) else "desconocido"
-            error = " ".join(str(job.error_message or "").split())
-            if len(error) > 72:
-                error = error[:69] + "..."
+            _imprimir_job(job)
         return 0
     except SQLAlchemyError as exc:
         logger.exception("No se pudieron listar los Jobs")

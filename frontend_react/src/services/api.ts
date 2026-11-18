@@ -134,40 +134,56 @@ export const clipService = {
     return `${base}/clips/${clipId}/descarga`
   },
   async downloadClip(clip: import('@/types/api').ClipListItem): Promise<void> {
-    const token = (() => { try { return localStorage.getItem(TOKEN_KEY) } catch { return null } })()
-    const bust = `t=${clip.updated_at ? new Date(clip.updated_at as unknown as string).getTime() : Date.now()}`
-    const url = `${BASE_URL}/clips/${clip.id}/descarga${token ? `?token=${encodeURIComponent(token)}&${bust}` : `?${bust}`}`
-    try {
-      const headers: Record<string, string> = { 'ngrok-skip-browser-warning': 'true' }
-      if (token) headers['Authorization'] = `Bearer ${token}`
-      const res = await fetch(url, { headers, credentials: 'include' })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const blob = await res.blob()
-      triggerBlobDownload(blob, res.headers.get('Content-Disposition'), `${clip.title || clip.id}.mp4`)
-    } catch {
-      const fallback = this.downloadUrl(clip.id)
-      window.open(fallback, '_blank')
-    }
+    const token = readStoredToken()
+    const url = buildDownloadUrl(clip, token)
+    await tryDownload(url, token, `${clip.title || clip.id}.mp4`, () => window.open(this.downloadUrl(clip.id), '_blank'))
   },
 }
 
+function readStoredToken(): string | null {
+  try { return localStorage.getItem(TOKEN_KEY) } catch { return null }
+}
+
+function cacheBustParam(clip: import('@/types/api').ClipListItem): string {
+  return `t=${clip.updated_at ? new Date(clip.updated_at as unknown as string).getTime() : Date.now()}`
+}
+
+function buildDownloadUrl(clip: import('@/types/api').ClipListItem, token: string | null): string {
+  const bust = cacheBustParam(clip)
+  return `${BASE_URL}/clips/${clip.id}/descarga${token ? `?token=${encodeURIComponent(token)}&${bust}` : `?${bust}`}`
+}
+
+async function tryDownload(url: string, token: string | null, filename: string, openFallback: () => void): Promise<void> {
+  try {
+    const headers: Record<string, string> = { 'ngrok-skip-browser-warning': 'true' }
+    if (token) headers['Authorization'] = `Bearer ${token}`
+    const res = await fetch(url, { headers, credentials: 'include' })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const blob = await res.blob()
+    triggerBlobDownload(blob, res.headers.get('Content-Disposition'), filename)
+  } catch {
+    openFallback()
+  }
+}
+
+async function errorDetailFromResponse(res: Response, fallback: string): Promise<string> {
+  try {
+    const j = await res.json()
+    return typeof j.detail === 'string' ? j.detail : fallback
+  } catch {
+    const t = await res.text().catch(() => '')
+    if (t) return t.slice(0, 500)
+    return fallback
+  }
+}
+
 async function fetchBlob(url: string): Promise<{ blob: Blob; contentDisposition: string | null }> {
-  const token = (() => { try { return localStorage.getItem(TOKEN_KEY) } catch { return null } })()
+  const token = readStoredToken()
   const res = await fetch(url, {
     credentials: 'include',
     headers: { 'ngrok-skip-browser-warning': 'true', ...(token ? { Authorization: `Bearer ${token}` } : {}) } as HeadersInit,
   })
-  if (!res.ok) {
-    let detail = `HTTP ${res.status}`
-    try {
-      const j = await res.json()
-      if (typeof j.detail === 'string') detail = j.detail
-    } catch {
-      const t = await res.text().catch(() => '')
-      if (t) detail = t.slice(0, 500)
-    }
-    throw new Error(detail)
-  }
+  if (!res.ok) throw new Error(await errorDetailFromResponse(res, `HTTP ${res.status}`))
   return { blob: await res.blob(), contentDisposition: res.headers.get('Content-Disposition') }
 }
 

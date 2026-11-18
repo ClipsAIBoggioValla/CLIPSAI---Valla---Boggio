@@ -72,39 +72,97 @@ def _ts_to_seconds(ts: str) -> float:
         return 0.0
 
 
+def _campo_inicio(item: dict) -> str:
+    """Timestamp de inicio del clip crudo de la IA."""
+    return str(item.get("inicio") or item.get("start_time") or "00:00:00")
+
+
+def _campo_fin(item: dict) -> str:
+    """Timestamp de fin del clip crudo de la IA."""
+    return str(item.get("fin") or item.get("end_time") or "00:00:30")
+
+
+def _score_normalizado(score_raw: int) -> int:
+    """Score a escala 0-100 (multiplicado por 10 si venía 0-10)."""
+    return max(0, min(100, score_raw * 10 if score_raw <= 10 else score_raw))
+
+
+def _headline_de(item: dict) -> str:
+    """Headline del clip con fallbacks y tope de 120 chars."""
+    return str(item.get("titulo_sugerido") or item.get("headline") or item.get("titulo") or "Clip viral")[:120]
+
+
+def _criterio_de(item: dict) -> str:
+    """Criterio/emotional trigger del clip con fallbacks."""
+    return str(item.get("criterio_principal") or item.get("tipo_contenido") or "revelación")
+
+
+def _motivo_de(item: dict) -> str:
+    """Motivo viral del clip con fallbacks."""
+    return str(item.get("motivo") or item.get("viral_reason") or "Momento con alto potencial viral detectado por IA")
+
+
+def _hook_de(item: dict, headline: str) -> str:
+    """Hook del clip; recorte del headline si no viene."""
+    return str(item.get("hook_texto") or headline[:20])
+
+
+def _campos_clip_ia(item: dict) -> dict | None:
+    """Campos normalizados del clip crudo. None si la ventana es inválida."""
+    inicio = _campo_inicio(item)
+    fin = _campo_fin(item)
+    start = _ts_to_seconds(inicio)
+    end = _ts_to_seconds(fin)
+    if end <= start:
+        return None
+    score = _score_normalizado(int(item.get("score", 7)))
+    headline = _headline_de(item)
+    criterio = _criterio_de(item)
+    motivo = _motivo_de(item)
+    hook = _hook_de(item, headline)
+    audio_score = int(item.get("audio_score", 7))
+    return {
+        "start": start,
+        "end": end,
+        "score": score,
+        "headline": headline,
+        "criterio": criterio,
+        "motivo": motivo,
+        "hook": hook,
+        "audio_score": audio_score,
+    }
+
+
+def _viral_report_de(item: dict, campos: dict) -> dict:
+    """Reporte viral estándar para el candidato."""
+    audio_score = campos["audio_score"]
+    criterio = campos["criterio"]
+    return {
+        "hook_strength": int(min(100, max(0, audio_score * 10 if audio_score <= 10 else audio_score))),
+        "emotional_trigger": criterio,
+        "trend_alignment": int(min(100, campos["score"])),
+        "clarity": int(min(100, 80 + (campos["score"] % 20))),
+        "viral_reason": campos["motivo"],
+        "suggested_hashtags": item.get("suggested_hashtags") or [f"#{criterio}", "#clipsai", "#viral"],
+        "call_to_action": item.get("call_to_action") or campos["hook"],
+    }
+
+
 def _map_llm_to_candidates(raw_clips: List[dict]) -> List[ViralClipCandidate]:
     cands: List[ViralClipCandidate] = []
     for item in raw_clips:
         try:
-            inicio = str(item.get("inicio") or item.get("start_time") or "00:00:00")
-            fin = str(item.get("fin") or item.get("end_time") or "00:00:30")
-            start = _ts_to_seconds(inicio)
-            end = _ts_to_seconds(fin)
-            if end <= start:
+            campos = _campos_clip_ia(item)
+            if campos is None:
                 continue
-            score_raw = int(item.get("score", 7))
-            score = max(0, min(100, score_raw * 10 if score_raw <= 10 else score_raw))
-            headline = str(item.get("titulo_sugerido") or item.get("headline") or item.get("titulo") or "Clip viral")[:120]
-            criterio = str(item.get("criterio_principal") or item.get("tipo_contenido") or "revelación")
-            motivo = str(item.get("motivo") or item.get("viral_reason") or "Momento con alto potencial viral detectado por IA")
-            hook = str(item.get("hook_texto") or headline[:20])
-            audio_score = int(item.get("audio_score", 7))
             cands.append(
                 ViralClipCandidate(
                     clip_id=str(uuid.uuid4()),
-                    start_time=float(start),
-                    end_time=float(end),
-                    score=int(score),
-                    headline=headline,
-                    viral_report={
-                        "hook_strength": int(min(100, max(0, audio_score * 10 if audio_score <= 10 else audio_score))),
-                        "emotional_trigger": criterio,
-                        "trend_alignment": int(min(100, score)),
-                        "clarity": int(min(100, 80 + (score % 20))),
-                        "viral_reason": motivo,
-                        "suggested_hashtags": item.get("suggested_hashtags") or [f"#{criterio}", "#clipsai", "#viral"],
-                        "call_to_action": item.get("call_to_action") or hook,
-                    },
+                    start_time=float(campos["start"]),
+                    end_time=float(campos["end"]),
+                    score=int(campos["score"]),
+                    headline=campos["headline"],
+                    viral_report=_viral_report_de(item, campos),
                 )
             )
         except Exception:
@@ -112,22 +170,35 @@ def _map_llm_to_candidates(raw_clips: List[dict]) -> List[ViralClipCandidate]:
     return cands
 
 
-async def analyze_transcript(
-    transcript: TranscriptData, use_mock: bool = False
-) -> List[ViralClipCandidate]:
-    if use_mock:
-        fixture = Path("tests/fixtures/mock_transcript.json")
-        alt2 = Path(__file__).parent.parent.parent / "tests" / "fixtures" / "mock_transcript.json"
-        src = None
-        for p in (fixture, alt2):
-            if p.exists():
-                src = p
-                break
-        if src and src.exists():
-            data = json.loads(src.read_text(encoding="utf-8"))
-            transcript = TranscriptData.model_validate(data)
-        return _mock_candidates_from_transcript(transcript)
+def _ruta_transcript_mock() -> Path | None:
+    """Primera ruta existente del fixture de transcript mock."""
+    fixture = Path("tests/fixtures/mock_transcript.json")
+    alt2 = Path(__file__).parent.parent.parent / "tests" / "fixtures" / "mock_transcript.json"
+    for p in (fixture, alt2):
+        if p.exists():
+            return p
+    return None
 
+
+def _cargar_transcript_mock() -> TranscriptData | None:
+    """TranscriptData desde el fixture mock; None si no existe."""
+    src = _ruta_transcript_mock()
+    if src and src.exists():
+        data = json.loads(src.read_text(encoding="utf-8"))
+        return TranscriptData.model_validate(data)
+    return None
+
+
+def _candidatos_mock(transcript: TranscriptData) -> List[ViralClipCandidate]:
+    """Candidatos mock, reemplazando el transcript por el fixture si existe."""
+    nuevo = _cargar_transcript_mock()
+    if nuevo is not None:
+        transcript = nuevo
+    return _mock_candidates_from_transcript(transcript)
+
+
+def _importar_obtener_clips_ia():
+    """Importa perezosamente obtener_clips_ia de main.py ajustando sys.path."""
     try:
         import sys
         from pathlib import Path as _P
@@ -138,13 +209,27 @@ async def analyze_transcript(
         from main import obtener_clips_ia  # type: ignore
     except Exception as e:
         raise RuntimeError(f"No se pudo importar obtener_clips_ia desde main.py: {e}") from e
+    return obtener_clips_ia
 
-    transcript_text = _transcript_to_text(transcript)
+
+def _clips_de_llm(transcript_text: str) -> List[dict]:
+    """Clips crudos del LLM a partir del texto de transcripción."""
+    obtener_clips_ia = _importar_obtener_clips_ia()
+
     datos_audio: List[dict] = []
     try:
-        raw = obtener_clips_ia(transcript_text, datos_audio, None)
+        return obtener_clips_ia(transcript_text, datos_audio, None)
     except Exception as e:
         raise RuntimeError(f"obtener_clips_ia falló: {e}") from e
+
+
+async def analyze_transcript(
+    transcript: TranscriptData, use_mock: bool = False
+) -> List[ViralClipCandidate]:
+    if use_mock:
+        return _candidatos_mock(transcript)
+
+    raw = _clips_de_llm(_transcript_to_text(transcript))
 
     candidates = _map_llm_to_candidates(raw)
     if not candidates:

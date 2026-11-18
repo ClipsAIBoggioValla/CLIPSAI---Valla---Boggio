@@ -7,6 +7,15 @@ export const socialAuthRouter = Router()
 
 const ALLOWED_PLATFORMS = new Set(['youtube', 'instagram', 'tiktok'])
 
+/** Primer valor de env no vacío (equivalente a `a || b || c || ''`). */
+function firstEnv(...names: string[]): string {
+  for (const name of names) {
+    const value = process.env[name] || ''
+    if (value) return value
+  }
+  return ''
+}
+
 // ============================================================================
 // Helpers de config (port de youtube_service / instagram_service / tiktok_service)
 // ============================================================================
@@ -25,30 +34,35 @@ function sanitizeRedirect(uri: string, fallback: string): string {
   return uri
 }
 
+function publicBackendBase(): string {
+  return (process.env.PUBLIC_BACKEND_URL || 'https://api.clipsai.xyz').replace(/\/+$/, '')
+}
+
+function socialRedirectUri(envName: string, defaultUri: string): string {
+  return sanitizeRedirect((process.env[envName] || '').trim() || defaultUri, defaultUri)
+}
+
 function getGoogleConfig(): { clientId: string; clientSecret: string; redirectUri: string } {
-  const clientId = (process.env.GOOGLE_CLIENT_ID || '').trim()
-  const clientSecret = (process.env.GOOGLE_CLIENT_SECRET || '').trim()
-  const publicBase = (process.env.PUBLIC_BACKEND_URL || 'https://api.clipsai.xyz').replace(/\/+$/, '')
-  const defaultUri = `${publicBase}/auth/social/youtube/callback`
-  const redirectUri = sanitizeRedirect((process.env.GOOGLE_REDIRECT_URI || '').trim() || defaultUri, defaultUri)
+  const clientId = firstEnv('GOOGLE_CLIENT_ID').trim()
+  const clientSecret = firstEnv('GOOGLE_CLIENT_SECRET').trim()
+  const defaultUri = `${publicBackendBase()}/auth/social/youtube/callback`
+  const redirectUri = socialRedirectUri('GOOGLE_REDIRECT_URI', defaultUri)
   return { clientId, clientSecret, redirectUri }
 }
 
 function getInstagramConfig(): { clientId: string; clientSecret: string; redirectUri: string } {
-  const clientId = (process.env.INSTAGRAM_CLIENT_ID || process.env.META_APP_ID || process.env.FB_CLIENT_ID || '').trim()
-  const clientSecret = (process.env.INSTAGRAM_CLIENT_SECRET || process.env.META_APP_SECRET || process.env.FB_CLIENT_SECRET || '').trim()
-  const publicBase = (process.env.PUBLIC_BACKEND_URL || 'https://api.clipsai.xyz').replace(/\/+$/, '')
-  const defaultUri = `${publicBase}/auth/social/instagram/callback`
-  const redirectUri = sanitizeRedirect((process.env.INSTAGRAM_REDIRECT_URI || '').trim() || defaultUri, defaultUri)
+  const clientId = firstEnv('INSTAGRAM_CLIENT_ID', 'META_APP_ID', 'FB_CLIENT_ID').trim()
+  const clientSecret = firstEnv('INSTAGRAM_CLIENT_SECRET', 'META_APP_SECRET', 'FB_CLIENT_SECRET').trim()
+  const defaultUri = `${publicBackendBase()}/auth/social/instagram/callback`
+  const redirectUri = socialRedirectUri('INSTAGRAM_REDIRECT_URI', defaultUri)
   return { clientId, clientSecret, redirectUri }
 }
 
 function getTiktokConfig(): { clientKey: string; clientSecret: string; redirectUri: string } {
-  const clientKey = (process.env.TIKTOK_CLIENT_KEY || '').trim()
-  const clientSecret = (process.env.TIKTOK_CLIENT_SECRET || '').trim()
-  const publicBase = (process.env.PUBLIC_BACKEND_URL || 'https://api.clipsai.xyz').replace(/\/+$/, '')
-  const defaultUri = `${publicBase}/auth/social/tiktok/callback`
-  const redirectUri = sanitizeRedirect((process.env.TIKTOK_REDIRECT_URI || '').trim() || defaultUri, defaultUri)
+  const clientKey = firstEnv('TIKTOK_CLIENT_KEY').trim()
+  const clientSecret = firstEnv('TIKTOK_CLIENT_SECRET').trim()
+  const defaultUri = `${publicBackendBase()}/auth/social/tiktok/callback`
+  const redirectUri = socialRedirectUri('TIKTOK_REDIRECT_URI', defaultUri)
   return { clientKey, clientSecret, redirectUri }
 }
 
@@ -93,30 +107,60 @@ function generatePkcePair(): { verifier: string; challenge: string } {
 // Status / disconnect
 // ============================================================================
 
+const FALLBACK_USERNAME_RE = /^(instagram|youtube|tiktok)_[0-9a-fA-F]{8}$/
+const PLATFORM_FALLBACK_NAMES: Record<string, string> = {
+  instagram: 'Instagram User',
+  tiktok: 'TikTok User',
+}
+
+function isFallbackUsername(username: string): boolean {
+  return FALLBACK_USERNAME_RE.test(username.trim())
+}
+
+function cleanedUsername(rawUsername: unknown): string | null {
+  const raw = (rawUsername as string) || null
+  if (raw && isFallbackUsername(raw)) return null
+  return raw
+}
+
+function normalizedUsername(platform: string, rawUsername: unknown): string | null {
+  const fallbackName = PLATFORM_FALLBACK_NAMES[platform] ?? null
+  return cleanedUsername(rawUsername) ?? fallbackName
+}
+
+interface StatusEntry {
+  connected: true
+  username: string | null
+  expires_at: string | null
+}
+
+function statusEntryFor(acc: Record<string, unknown>): { platform: string; entry: StatusEntry } | null {
+  const platform = String(acc.platform || '').toLowerCase()
+  if (!ALLOWED_PLATFORMS.has(platform)) return null
+  return {
+    platform,
+    entry: {
+      connected: true,
+      username: normalizedUsername(platform, acc.platform_username),
+      expires_at: acc.token_expires_at ? new Date(acc.token_expires_at as string).toISOString() : null,
+    },
+  }
+}
+
 async function buildStatus(userId: string): Promise<Record<string, unknown>> {
   const status: Record<string, unknown> = {
     instagram: { connected: false, username: null, expires_at: null },
     youtube: { connected: false, username: null, expires_at: null },
     tiktok: { connected: false, username: null, expires_at: null },
   }
-  const fallbackRe = /^(instagram|youtube|tiktok)_[0-9a-fA-F]{8}$/
   try {
     const r = await pool.query(
       'SELECT platform, platform_username, token_expires_at FROM social_accounts WHERE user_id = $1',
       [userId]
     )
     for (const acc of r.rows as Array<Record<string, unknown>>) {
-      const platform = String(acc.platform || '').toLowerCase()
-      if (!(platform in status)) continue
-      let username: string | null = (acc.platform_username as string) || null
-      if (username && fallbackRe.test(username.trim())) username = null
-      if (!username && platform === 'instagram') username = 'Instagram User'
-      if (!username && platform === 'tiktok') username = 'TikTok User'
-      status[platform] = {
-        connected: true,
-        username,
-        expires_at: acc.token_expires_at ? new Date(acc.token_expires_at as string).toISOString() : null,
-      }
+      const found = statusEntryFor(acc)
+      if (found) status[found.platform] = found.entry
     }
   } catch (err) {
     console.error('[social/status] error:', err)
@@ -178,6 +222,15 @@ function redirectWithIntegration(
   res.redirect(302, url)
 }
 
+async function applyOptionalUsername(tokens: Record<string, unknown>, fetchFn: (accessToken: string) => Promise<string | null>): Promise<void> {
+  try {
+    const username = await fetchFn(String(tokens.access_token || ''))
+    if (username) tokens.username = username
+  } catch {
+    /* username opcional */
+  }
+}
+
 async function exchangeGoogleTokens(code: string): Promise<Record<string, unknown>> {
   const { clientId, clientSecret, redirectUri } = getGoogleConfig()
   const body = new URLSearchParams({
@@ -194,13 +247,21 @@ async function exchangeGoogleTokens(code: string): Promise<Record<string, unknow
   })
   if (!resp.ok) throw new Error(`Google token HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`)
   const tokens = (await resp.json()) as Record<string, unknown>
-  try {
-    const username = await fetchYoutubeUsername(String(tokens.access_token || ''))
-    if (username) tokens.username = username
-  } catch {
-    /* username opcional */
-  }
+  await applyOptionalUsername(tokens, fetchYoutubeUsername)
   return tokens
+}
+
+function youtubeSnippet(data: Record<string, unknown>): Record<string, unknown> | null {
+  const items = (data.items as Array<Record<string, unknown>>) || []
+  if (items.length === 0) return null
+  return (items[0].snippet as Record<string, unknown>) || {}
+}
+
+function youtubeChannelName(snippet: Record<string, unknown>): string | null {
+  const custom = String(snippet.customUrl || '').trim()
+  if (custom) return custom
+  const title = String(snippet.title || '').trim()
+  return title || null
 }
 
 async function fetchYoutubeUsername(accessToken: string): Promise<string | null> {
@@ -208,27 +269,38 @@ async function fetchYoutubeUsername(accessToken: string): Promise<string | null>
   const url = 'https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true'
   const resp = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } })
   if (resp.status !== 200) return null
-  const data = (await resp.json()) as Record<string, unknown>
-  const items = (data.items as Array<Record<string, unknown>>) || []
-  if (items.length === 0) return null
-  const snippet = (items[0].snippet as Record<string, unknown>) || {}
-  const custom = String(snippet.customUrl || '').trim()
-  if (custom) return custom
-  const title = String(snippet.title || '').trim()
-  return title || null
+  const snippet = youtubeSnippet((await resp.json()) as Record<string, unknown>)
+  if (!snippet) return null
+  return youtubeChannelName(snippet)
+}
+
+function youtubeRefreshToken(tokens: Record<string, unknown>, accessToken: string): string {
+  const refreshToken = String(tokens.refresh_token || '')
+  return refreshToken || accessToken
+}
+
+function tokensExpiresAt(tokens: Record<string, unknown>, fallbackMs: number | null): string | null {
+  if (tokens.expires_in) return new Date(Date.now() + Number(tokens.expires_in) * 1000).toISOString()
+  return fallbackMs === null ? null : new Date(Date.now() + fallbackMs).toISOString()
+}
+
+async function storedOrFetchedUsername(tokens: Record<string, unknown>, fetchFn: (accessToken: string) => Promise<string | null>, fallback: string): Promise<string> {
+  const stored = String(tokens.username || '').trim()
+  if (stored) return stored
+  return (await fetchFn(String(tokens.access_token || ''))) || fallback
+}
+
+function youtubeAccountId(tokens: Record<string, unknown>, userId: string): string {
+  return String(tokens.id || tokens.user_id || userId)
 }
 
 async function saveYoutubeTokens(userId: string, tokens: Record<string, unknown>): Promise<void> {
   const accessToken = String(tokens.access_token || '')
   if (!accessToken) throw new Error('tokens sin access_token')
-  let refreshToken = String(tokens.refresh_token || '')
-  if (!refreshToken) refreshToken = accessToken
-  const expiresAt = tokens.expires_in
-    ? new Date(Date.now() + Number(tokens.expires_in) * 1000).toISOString()
-    : null
-  let username = String(tokens.username || '').trim()
-  if (!username) username = (await fetchYoutubeUsername(accessToken)) || ''
-  const accountId = String(tokens.id || tokens.user_id || userId)
+  const refreshToken = youtubeRefreshToken(tokens, accessToken)
+  const expiresAt = tokensExpiresAt(tokens, null)
+  const username = await storedOrFetchedUsername(tokens, fetchYoutubeUsername, '')
+  const accountId = youtubeAccountId(tokens, userId)
 
   await pool.query(
     `INSERT INTO social_accounts (user_id, platform, platform_account_id, platform_username, access_token, refresh_token, token_expires_at)
@@ -248,6 +320,31 @@ async function saveYoutubeTokens(userId: string, tokens: Record<string, unknown>
 // Instagram (Meta)
 // ============================================================================
 
+async function requireInstagramShortToken(shortData: Record<string, unknown>): Promise<string> {
+  const shortToken = String(shortData.access_token || '')
+  if (!shortToken) throw new Error(`Respuesta sin access_token short-lived`)
+  return shortToken
+}
+
+async function fetchLongLivedInstagramToken(clientId: string, clientSecret: string, shortToken: string): Promise<Record<string, unknown> | null> {
+  try {
+    const longParams = new URLSearchParams({
+      grant_type: 'fb_exchange_token',
+      client_id: clientId,
+      client_secret: clientSecret,
+      fb_exchange_token: shortToken,
+    })
+    const longResp = await fetch(`https://graph.facebook.com/oauth/access_token?${longParams.toString()}`)
+    if (longResp.ok) {
+      const longData = (await longResp.json()) as Record<string, unknown>
+      if (longData.access_token) return longData
+    }
+  } catch {
+    /* mantener short */
+  }
+  return null
+}
+
 async function exchangeInstagramTokens(code: string): Promise<Record<string, unknown>> {
   const { clientId, clientSecret, redirectUri } = getInstagramConfig()
   const shortParams = new URLSearchParams({
@@ -259,73 +356,79 @@ async function exchangeInstagramTokens(code: string): Promise<Record<string, unk
   const shortResp = await fetch(`https://graph.facebook.com/v18.0/oauth/access_token?${shortParams.toString()}`)
   if (!shortResp.ok) throw new Error(`Meta short token HTTP ${shortResp.status}`)
   const shortData = (await shortResp.json()) as Record<string, unknown>
-  const shortToken = String(shortData.access_token || '')
-  if (!shortToken) throw new Error(`Respuesta sin access_token short-lived`)
-
-  let tokens: Record<string, unknown> = shortData
-  try {
-    const longParams = new URLSearchParams({
-      grant_type: 'fb_exchange_token',
-      client_id: clientId,
-      client_secret: clientSecret,
-      fb_exchange_token: shortToken,
-    })
-    const longResp = await fetch(`https://graph.facebook.com/oauth/access_token?${longParams.toString()}`)
-    if (longResp.ok) {
-      const longData = (await longResp.json()) as Record<string, unknown>
-      if (longData.access_token) tokens = longData
-    }
-  } catch {
-    /* mantener short */
-  }
-  try {
-    const username = await fetchInstagramUsername(String(tokens.access_token || ''))
-    if (username) tokens.username = username
-  } catch {
-    /* opcional */
-  }
+  const shortToken = await requireInstagramShortToken(shortData)
+  const longData = await fetchLongLivedInstagramToken(clientId, clientSecret, shortToken)
+  const tokens = longData ?? shortData
+  await applyOptionalUsername(tokens, fetchInstagramUsername)
   return tokens
+}
+
+function igAccountName(ig: Record<string, unknown>): string | null {
+  const uname = String(ig.username || '').trim()
+  if (uname) return uname
+  const name = String(ig.name || '').trim()
+  return name || null
+}
+
+function instagramPageUsername(data: Record<string, unknown>): string | null {
+  const pages = (data.data as Array<Record<string, unknown>>) || []
+  for (const page of pages) {
+    const ig = page.instagram_business_account as Record<string, unknown> | undefined
+    if (ig) {
+      const name = igAccountName(ig)
+      if (name) return name
+    }
+  }
+  return null
+}
+
+async function fetchInstagramBusinessName(accessToken: string): Promise<string | null> {
+  const accUrl = `https://graph.facebook.com/v18.0/me/accounts?fields=id,name,instagram_business_account{id,username,name}&access_token=${accessToken}`
+  const resp = await fetch(accUrl)
+  if (resp.status === 200) {
+    return instagramPageUsername((await resp.json()) as Record<string, unknown>)
+  }
+  return null
+}
+
+async function fetchInstagramMeName(accessToken: string): Promise<string | null> {
+  const meResp = await fetch(`https://graph.facebook.com/v18.0/me?fields=id,name&access_token=${accessToken}`)
+  if (meResp.status === 200) {
+    const me = (await meResp.json()) as Record<string, unknown>
+    const name = String(me.name || '').trim()
+    if (name) return name
+  }
+  return null
+}
+
+async function instagramUsernameOrNull(accessToken: string): Promise<string | null> {
+  const pageName = await fetchInstagramBusinessName(accessToken)
+  if (pageName) return pageName
+  return fetchInstagramMeName(accessToken)
 }
 
 async function fetchInstagramUsername(accessToken: string): Promise<string | null> {
   if (!accessToken) return null
   try {
-    const accUrl = `https://graph.facebook.com/v18.0/me/accounts?fields=id,name,instagram_business_account{id,username,name}&access_token=${accessToken}`
-    const resp = await fetch(accUrl)
-    if (resp.status === 200) {
-      const data = (await resp.json()) as Record<string, unknown>
-      for (const page of (data.data as Array<Record<string, unknown>>) || []) {
-        const ig = page.instagram_business_account as Record<string, unknown> | undefined
-        if (ig) {
-          const uname = String(ig.username || '').trim()
-          if (uname) return uname
-          const name = String(ig.name || '').trim()
-          if (name) return name
-        }
-      }
-    }
-    const meResp = await fetch(`https://graph.facebook.com/v18.0/me?fields=id,name&access_token=${accessToken}`)
-    if (meResp.status === 200) {
-      const me = (await meResp.json()) as Record<string, unknown>
-      const name = String(me.name || '').trim()
-      if (name) return name
-    }
+    const name = await instagramUsernameOrNull(accessToken)
+    if (name) return name
   } catch {
     /* opcional */
   }
   return 'Instagram User'
 }
 
+function instagramAccountId(tokens: Record<string, unknown>, userId: string): string {
+  return String(tokens.user_id || tokens.id || userId)
+}
+
 async function saveInstagramTokens(userId: string, tokens: Record<string, unknown>): Promise<void> {
   const accessToken = String(tokens.access_token || '')
   if (!accessToken) throw new Error('tokens sin access_token')
   const refreshToken = accessToken
-  let username = String(tokens.username || '').trim()
-  if (!username) username = (await fetchInstagramUsername(accessToken)) || 'Instagram User'
-  const accountId = String(tokens.user_id || tokens.id || userId)
-  const expiresAt = tokens.expires_in
-    ? new Date(Date.now() + Number(tokens.expires_in) * 1000).toISOString()
-    : new Date(Date.now() + 60 * 24 * 3600 * 1000).toISOString()
+  const username = await storedOrFetchedUsername(tokens, fetchInstagramUsername, 'Instagram User')
+  const accountId = instagramAccountId(tokens, userId)
+  const expiresAt = tokensExpiresAt(tokens, 60 * 24 * 3600 * 1000)
 
   await pool.query(
     `INSERT INTO social_accounts (user_id, platform, platform_account_id, platform_username, access_token, refresh_token, token_expires_at)
@@ -371,6 +474,12 @@ async function exchangeTiktokCode(code: string, codeVerifier: string): Promise<R
   return tokens
 }
 
+function tiktokUserDisplayName(data: Record<string, unknown>): string | null {
+  const user = (data.data as Record<string, unknown>)?.user as Record<string, unknown> | undefined
+  const name = String(user?.display_name || user?.username || '').trim()
+  return name || null
+}
+
 async function fetchTiktokUsername(accessToken: string): Promise<string | null> {
   if (!accessToken) return null
   try {
@@ -378,10 +487,7 @@ async function fetchTiktokUsername(accessToken: string): Promise<string | null> 
       headers: { Authorization: `Bearer ${accessToken}` },
     })
     if (resp.status === 200) {
-      const data = (await resp.json()) as Record<string, unknown>
-      const user = (data.data as Record<string, unknown>)?.user as Record<string, unknown> | undefined
-      const name = String(user?.display_name || user?.username || '').trim()
-      if (name) return name
+      return tiktokUserDisplayName((await resp.json()) as Record<string, unknown>)
     }
   } catch {
     /* opcional */
@@ -389,16 +495,17 @@ async function fetchTiktokUsername(accessToken: string): Promise<string | null> 
   return null
 }
 
+function tiktokAccountId(tokens: Record<string, unknown>, userId: string): string {
+  return String(tokens.open_id || tokens.user_id || userId)
+}
+
 async function saveTiktokTokens(userId: string, tokens: Record<string, unknown>): Promise<void> {
   const accessToken = String(tokens.access_token || '')
   if (!accessToken) throw new Error('tokens sin access_token')
   const refreshToken = String(tokens.refresh_token || '')
-  let username = String(tokens.username || '').trim()
-  if (!username) username = (await fetchTiktokUsername(accessToken)) || 'TikTok User'
-  const accountId = String(tokens.open_id || tokens.user_id || userId)
-  const expiresAt = tokens.expires_in
-    ? new Date(Date.now() + Number(tokens.expires_in) * 1000).toISOString()
-    : null
+  const username = await storedOrFetchedUsername(tokens, fetchTiktokUsername, 'TikTok User')
+  const accountId = tiktokAccountId(tokens, userId)
+  const expiresAt = tokensExpiresAt(tokens, null)
 
   await pool.query(
     `INSERT INTO social_accounts (user_id, platform, platform_account_id, platform_username, access_token, refresh_token, token_expires_at)
@@ -478,50 +585,63 @@ socialAuthRouter.get('/tiktok/connect', authMiddleware, (req: AuthRequest, res: 
 // Callback endpoints (públicos, sin auth)
 // ============================================================================
 
+type CallbackOutcome = { status: 'error'; extra: string } | { status: 'success' }
+
+function callbackErrorDetail(exc: unknown): string {
+  return String((exc as { message?: string })?.message || exc).slice(0, 200)
+}
+
+async function youtubeCallbackOutcome(code: string, state: string | undefined): Promise<CallbackOutcome> {
+  let tokens: Record<string, unknown>
+  try {
+    tokens = await exchangeGoogleTokens(code)
+  } catch (exc: any) {
+    return { status: 'error', extra: callbackErrorDetail(exc) }
+  }
+  const userId = decodeState(state)?.user_id as string | undefined
+  if (!userId) return { status: 'error', extra: 'invalid_state' }
+  try {
+    await saveYoutubeTokens(String(userId), tokens)
+  } catch (exc: any) {
+    return { status: 'error', extra: callbackErrorDetail(exc) }
+  }
+  return { status: 'success' }
+}
+
 socialAuthRouter.get('/youtube/callback', async (req: Request, res: Response) => {
   const frontendBase = getFrontendBase()
   const { code, state, error } = req.query as Record<string, string | undefined>
   if (error) return redirectWithIntegration(res, frontendBase, 'youtube', 'error', error)
   if (!code) return redirectWithIntegration(res, frontendBase, 'youtube', 'error', 'missing_code')
-
-  let tokens: Record<string, unknown>
-  try {
-    tokens = await exchangeGoogleTokens(code)
-  } catch (exc: any) {
-    return redirectWithIntegration(res, frontendBase, 'youtube', 'error', String(exc?.message || exc).slice(0, 200))
-  }
-  const userId = decodeState(state)?.user_id as string | undefined
-  if (!userId) return redirectWithIntegration(res, frontendBase, 'youtube', 'error', 'invalid_state')
-  try {
-    await saveYoutubeTokens(String(userId), tokens)
-  } catch (exc: any) {
-    return redirectWithIntegration(res, frontendBase, 'youtube', 'error', String(exc?.message || exc).slice(0, 200))
-  }
+  const outcome = await youtubeCallbackOutcome(code, state)
+  if (outcome.status === 'error') return redirectWithIntegration(res, frontendBase, 'youtube', 'error', outcome.extra)
   return redirectWithIntegration(res, frontendBase, 'youtube', 'success')
 })
+
+async function instagramCallbackOutcome(code: string, state: string | undefined): Promise<CallbackOutcome> {
+  try {
+    const tokens = await exchangeInstagramTokens(code)
+    const userId = decodeState(state)?.user_id as string | undefined
+    if (!userId) throw new Error('invalid_state')
+    await saveInstagramTokens(String(userId), tokens)
+    return { status: 'success' }
+  } catch (exc: any) {
+    console.error('[instagram/callback] error:', exc?.message || exc)
+    return { status: 'error', extra: 'Error al guardar token' }
+  }
+}
 
 socialAuthRouter.get('/instagram/callback', async (req: Request, res: Response) => {
   const frontendBase = getFrontendBase()
   const { code, state, error } = req.query as Record<string, string | undefined>
   if (error) return redirectWithIntegration(res, frontendBase, 'instagram', 'error', error)
   if (!code) return redirectWithIntegration(res, frontendBase, 'instagram', 'error', 'missing_code')
-  try {
-    const tokens = await exchangeInstagramTokens(code)
-    const userId = decodeState(state)?.user_id as string | undefined
-    if (!userId) throw new Error('invalid_state')
-    await saveInstagramTokens(String(userId), tokens)
-    return redirectWithIntegration(res, frontendBase, 'instagram', 'success')
-  } catch (exc: any) {
-    console.error('[instagram/callback] error:', exc?.message || exc)
-    return redirectWithIntegration(res, frontendBase, 'instagram', 'error', 'Error al guardar token')
-  }
+  const outcome = await instagramCallbackOutcome(code, state)
+  if (outcome.status === 'error') return redirectWithIntegration(res, frontendBase, 'instagram', 'error', outcome.extra)
+  return redirectWithIntegration(res, frontendBase, 'instagram', 'success')
 })
 
-socialAuthRouter.get('/tiktok/callback', async (req: Request, res: Response) => {
-  const frontendBase = getFrontendBase()
-  const { code, state, error } = req.query as Record<string, string | undefined>
-  if (error) return redirectWithIntegration(res, frontendBase, 'tiktok', 'error', error)
-  if (!code) return redirectWithIntegration(res, frontendBase, 'tiktok', 'error', 'missing_code')
+async function tiktokCallbackOutcome(code: string, state: string | undefined): Promise<CallbackOutcome> {
   try {
     const data = decodeState(state)
     const userId = data?.user_id as string | undefined
@@ -530,9 +650,19 @@ socialAuthRouter.get('/tiktok/callback', async (req: Request, res: Response) => 
     if (!codeVerifier) throw new Error('missing_code_verifier')
     const tokens = await exchangeTiktokCode(code, codeVerifier)
     await saveTiktokTokens(String(userId), tokens)
-    return redirectWithIntegration(res, frontendBase, 'tiktok', 'success')
+    return { status: 'success' }
   } catch (exc: any) {
     console.error('[tiktok/callback] error:', exc?.message || exc)
-    return redirectWithIntegration(res, frontendBase, 'tiktok', 'error', 'Error al guardar token')
+    return { status: 'error', extra: 'Error al guardar token' }
   }
+}
+
+socialAuthRouter.get('/tiktok/callback', async (req: Request, res: Response) => {
+  const frontendBase = getFrontendBase()
+  const { code, state, error } = req.query as Record<string, string | undefined>
+  if (error) return redirectWithIntegration(res, frontendBase, 'tiktok', 'error', error)
+  if (!code) return redirectWithIntegration(res, frontendBase, 'tiktok', 'error', 'missing_code')
+  const outcome = await tiktokCallbackOutcome(code, state)
+  if (outcome.status === 'error') return redirectWithIntegration(res, frontendBase, 'tiktok', 'error', outcome.extra)
+  return redirectWithIntegration(res, frontendBase, 'tiktok', 'success')
 })

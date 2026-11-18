@@ -20,6 +20,15 @@ class EventoAudio:
     intensidad: float
 
 
+TIPOS_EVENTO_SCORE = {
+    'grito': 4,
+    'momento_intenso': 3,
+    'cambio_brusco': 2,
+    'cambio_escena': 1,
+    'silencio': 0
+}
+
+
 def cargar_audio(ruta: str) -> Tuple[np.ndarray, int]:
     """Carga un archivo de audio y retorna la señal y sample rate."""
     if not os.path.exists(ruta):
@@ -37,48 +46,65 @@ def calcular_rms(y: np.ndarray, sr: int, frame_length: int = 2048, hop_length: i
     return rms, tiempos
 
 
+def _umbral_audio(rms: np.ndarray) -> Dict:
+    """Umbrales de grito/silencio/cambio calculados del RMS."""
+    media_rms = np.mean(rms)
+    std_rms = np.std(rms)
+    return {
+        "grito": media_rms + 2 * std_rms,
+        "silencio": media_rms * 0.3,
+        "cambio": std_rms,
+        "media": media_rms,
+    }
+
+
+def _agregar_evento_nivel(rms: np.ndarray, tiempos: np.ndarray, i: int, umbrales: Dict, eventos: list) -> None:
+    """Agrega evento 'grito' o 'silencio' según el nivel del frame."""
+    frame_rms = rms[i]
+    tiempo = tiempos[i]
+
+    if frame_rms > umbrales["grito"]:
+        eventos.append(EventoAudio(
+            timestamp=segundos_a_timestamp(tiempo),
+            evento="grito",
+            intensidad=float(frame_rms)
+        ))
+
+    elif frame_rms < umbrales["silencio"]:
+        eventos.append(EventoAudio(
+            timestamp=segundos_a_timestamp(tiempo),
+            evento="silencio",
+            intensidad=float(1 - frame_rms / umbrales["silencio"]) * 10
+        ))
+
+
+def _agregar_cambio_brusco(rms: np.ndarray, tiempos: np.ndarray, i: int, frame_rms: float, umbrales: Dict, eventos: list) -> None:
+    """Agrega evento 'cambio_brusco' si hay un salto grande de energía."""
+    if i > 0:
+        cambio = abs(rms[i] - rms[i-1])
+        if cambio > umbrales["cambio"] and frame_rms > umbrales["media"]:
+            eventos.append(EventoAudio(
+                timestamp=segundos_a_timestamp(tiempos[i]),
+                evento="cambio_brusco",
+                intensidad=float(min(cambio / umbrales["cambio"], 10))
+            ))
+
+
 def detectar_eventos(rms: np.ndarray, tiempos: np.ndarray) -> List[EventoAudio]:
     """Detecta eventos en el audio basándose en RMS."""
     eventos = []
-    
-    media_rms = np.mean(rms)
-    std_rms = np.std(rms)
-    
-    umbral_grito = media_rms + 2 * std_rms
-    umbral_silencio = media_rms * 0.3
-    umbral_cambio = std_rms
-    
-    
+
+    umbrales = _umbral_audio(rms)
+
     i = 0
     while i < len(rms):
         frame_rms = rms[i]
-        tiempo = tiempos[i]
-        
-        if frame_rms > umbral_grito:
-            eventos.append(EventoAudio(
-                timestamp=segundos_a_timestamp(tiempo),
-                evento="grito",
-                intensidad=float(frame_rms)
-            ))
-        
-        elif frame_rms < umbral_silencio:
-            eventos.append(EventoAudio(
-                timestamp=segundos_a_timestamp(tiempo),
-                evento="silencio",
-                intensidad=float(1 - frame_rms / umbral_silencio) * 10
-            ))
-        
-        if i > 0:
-            cambio = abs(rms[i] - rms[i-1])
-            if cambio > umbral_cambio and frame_rms > media_rms:
-                eventos.append(EventoAudio(
-                    timestamp=segundos_a_timestamp(tiempo),
-                    evento="cambio_brusco",
-                    intensidad=float(min(cambio / std_rms, 10))
-                ))
-        
+
+        _agregar_evento_nivel(rms, tiempos, i, umbrales, eventos)
+        _agregar_cambio_brusco(rms, tiempos, i, frame_rms, umbrales, eventos)
+
         i += 1
-    
+
     return eventos
 
 
@@ -222,6 +248,65 @@ def guardar_json(eventos: List[Dict], ruta: str = "audio.json") -> None:
         json.dump(eventos, f, indent=2, ensure_ascii=False)
 
 
+def _features_de_eventos(eventos: List[Dict]) -> tuple:
+    """Matriz de features (ts, intensidad, tipo) y su índice de evento."""
+    features = []
+    eventos_idx = []
+
+    for i, evento in enumerate(eventos):
+        ts = timestamp_a_segundos(evento.get('timestamp', '00:00:00'))
+        intensidad = evento.get('intensidad', 5.0)
+        tipo_score = TIPOS_EVENTO_SCORE.get(evento.get('evento', 'silencio'), 0)
+
+        features.append([ts, intensidad, tipo_score])
+        eventos_idx.append(i)
+
+    return features, eventos_idx
+
+
+def _indices_de_cluster(labels, cluster_id: int) -> list:
+    """Índices de eventos asignados a un cluster dado."""
+    return [i for i, l in enumerate(labels) if l == cluster_id]
+
+
+def _mejores_por_cluster(labels, eventos: List[Dict], n_clusters_real: int) -> List[Dict]:
+    """Mejor evento (por intensidad) de cada cluster."""
+    mejores_por_cluster = []
+    for cluster_id in range(n_clusters_real):
+        indices_cluster = _indices_de_cluster(labels, cluster_id)
+        if not indices_cluster:
+            continue
+        mejor_idx = max(indices_cluster, key=lambda i: eventos[i].get('intensidad', 0))
+        mejores_por_cluster.append(eventos[mejor_idx])
+    return mejores_por_cluster
+
+
+def _kmeans_mejores(eventos: List[Dict], features: list, n_clusters: int) -> List[Dict]:
+    """Corre KMeans y devuelve los representantes por cluster ordenados por timestamp."""
+    from sklearn.cluster import KMeans
+    from sklearn.preprocessing import StandardScaler
+    import numpy as np
+
+    X = np.array(features)
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+
+    n_clusters_real = min(n_clusters, len(features))
+    kmeans = KMeans(n_clusters=n_clusters_real, random_state=42, n_init=10)
+    labels = kmeans.fit_predict(X_scaled)
+
+    mejores_por_cluster = _mejores_por_cluster(labels, eventos, n_clusters_real)
+
+    mejores_por_cluster.sort(key=lambda x: timestamp_a_segundos(x.get('timestamp', '00:00:00')))
+
+    return mejores_por_cluster
+
+
+def _orden_por_intensidad(eventos: List[Dict]) -> List[Dict]:
+    """Fallback: eventos ordenados por intensidad descendente."""
+    return sorted(eventos, key=lambda x: x.get('intensidad', 0), reverse=True)
+
+
 def detectar_momentos_virales_clustering(
     eventos: List[Dict], 
     n_clusters: int = 10
@@ -231,53 +316,15 @@ def detectar_momentos_virales_clustering(
     y diversos del video, evitando clusters de momentos similares repetidos.
     """
     try:
-        from sklearn.cluster import KMeans
-        from sklearn.preprocessing import StandardScaler
-        import numpy as np
-        
-        features = []
-        eventos_idx = []
-        
-        for i, evento in enumerate(eventos):
-            ts = timestamp_a_segundos(evento.get('timestamp', '00:00:00'))
-            intensidad = evento.get('intensidad', 5.0)
-            
-            tipo_score = {
-                'grito': 4,
-                'momento_intenso': 3,
-                'cambio_brusco': 2,
-                'cambio_escena': 1,
-                'silencio': 0
-            }.get(evento.get('evento', 'silencio'), 0)
-            
-            features.append([ts, intensidad, tipo_score])
-            eventos_idx.append(i)
-        
+        features, eventos_idx = _features_de_eventos(eventos)
+
         if len(features) < n_clusters:
-            return sorted(eventos, key=lambda x: x.get('intensidad', 0), reverse=True)
-        
-        X = np.array(features)
-        scaler = StandardScaler()
-        X_scaled = scaler.fit_transform(X)
-        
-        n_clusters_real = min(n_clusters, len(features))
-        kmeans = KMeans(n_clusters=n_clusters_real, random_state=42, n_init=10)
-        labels = kmeans.fit_predict(X_scaled)
-        
-        mejores_por_cluster = []
-        for cluster_id in range(n_clusters_real):
-            indices_cluster = [i for i, l in enumerate(labels) if l == cluster_id]
-            if not indices_cluster:
-                continue
-            mejor_idx = max(indices_cluster, key=lambda i: eventos[i].get('intensidad', 0))
-            mejores_por_cluster.append(eventos[mejor_idx])
-        
-        mejores_por_cluster.sort(key=lambda x: timestamp_a_segundos(x.get('timestamp', '00:00:00')))
-        
-        return mejores_por_cluster
-        
+            return _orden_por_intensidad(eventos)
+
+        return _kmeans_mejores(eventos, features, n_clusters)
+
     except Exception as e:
-        return sorted(eventos, key=lambda x: x.get('intensidad', 0), reverse=True)
+        return _orden_por_intensidad(eventos)
 
 
 def analizar_audio(audio_path: str = "audio.mp3", salida_path: str = "audio.json") -> List[Dict]:

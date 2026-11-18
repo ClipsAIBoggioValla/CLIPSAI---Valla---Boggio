@@ -31,6 +31,89 @@ export type UseUploadAndProcessResult = UseUploadAndProcessState & UseUploadAndP
 const POLL_INTERVAL_MS = 2000
 const POLL_TIMEOUT_MS = 120_000
 
+interface UploadFlowCtx {
+  isAborted: () => boolean
+  setPhase: (phase: UploadPhase) => void
+  setVideo: (video: VideoUploadResponse | null) => void
+  setJob: (job: JobResponse | null) => void
+  setError: (error: string | null) => void
+}
+
+function hasDetail(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && 'detail' in err
+}
+
+function errorText(err: unknown): string {
+  if (hasDetail(err)) return (err as { detail: string }).detail
+  if (err instanceof Error) return err.message
+  return 'Error inesperado'
+}
+
+async function startUploadAndCreateJob(
+  ctx: UploadFlowCtx,
+  videoFile: File,
+  transcriptFile: File,
+): Promise<JobResponse | null> {
+  // ---- 1. Subir video + transcripción ----
+  ctx.setPhase('uploading')
+  const uploadedVideo = await videoService.upload(videoFile, transcriptFile)
+  if (ctx.isAborted()) return null
+  ctx.setVideo(uploadedVideo)
+
+  // ---- 2. Crear Job (202 inmediato) ----
+  ctx.setPhase('creating_job')
+  const createdJob = await jobService.createJob(uploadedVideo.id)
+  if (ctx.isAborted()) return null
+  ctx.setJob(createdJob)
+
+  // ---- 3. Polling hasta COMPLETED / FAILED ----
+  ctx.setPhase('polling')
+  return createdJob
+}
+
+async function pollStatusOnce(
+  ctx: UploadFlowCtx,
+  createdJob: JobResponse,
+): Promise<'completed' | 'failed' | 'continue'> {
+  const statusRes = await jobService.getJobStatus(getJobId(createdJob))
+  ctx.setJob(statusRes)
+
+  const upperStatus = statusRes.status.toUpperCase()
+  if (upperStatus === 'COMPLETED') {
+    ctx.setPhase('completed')
+    return 'completed'
+  }
+  if (upperStatus === 'FAILED') {
+    ctx.setPhase('failed')
+    ctx.setError(statusRes.error_message ?? 'El job de procesamiento falló.')
+    return 'failed'
+  }
+  return 'continue'
+}
+
+/** Un tick de polling. Devuelve true cuando el flujo terminó (abort o estado terminal). */
+async function pollTick(ctx: UploadFlowCtx, createdJob: JobResponse): Promise<boolean> {
+  if (ctx.isAborted()) return true
+
+  await sleep(POLL_INTERVAL_MS)
+  if (ctx.isAborted()) return true
+
+  const outcome = await pollStatusOnce(ctx, createdJob)
+  return outcome !== 'continue'
+}
+
+async function pollUntilTerminal(ctx: UploadFlowCtx, createdJob: JobResponse): Promise<void> {
+  const deadline = Date.now() + POLL_TIMEOUT_MS
+
+  while (Date.now() < deadline) {
+    if (await pollTick(ctx, createdJob)) return
+  }
+
+  // Timeout
+  ctx.setPhase('failed')
+  ctx.setError('Tiempo de espera agotado. El procesamiento demora más de lo esperado.')
+}
+
 export function useUploadAndProcess(): UseUploadAndProcessResult {
   const [phase, setPhase] = useState<UploadPhase>('idle')
   const [video, setVideo] = useState<VideoUploadResponse | null>(null)
@@ -52,57 +135,22 @@ export function useUploadAndProcess(): UseUploadAndProcessResult {
     setVideo(null)
     setJob(null)
 
+    const ctx: UploadFlowCtx = {
+      isAborted: () => abortRef.current,
+      setPhase,
+      setVideo,
+      setJob,
+      setError,
+    }
+
     try {
-      // ---- 1. Subir video + transcripción ----
-      setPhase('uploading')
-      const uploadedVideo = await videoService.upload(videoFile, transcriptFile)
-      if (abortRef.current) return
-      setVideo(uploadedVideo)
-
-      // ---- 2. Crear Job (202 inmediato) ----
-      setPhase('creating_job')
-      const createdJob = await jobService.createJob(uploadedVideo.id)
-      if (abortRef.current) return
-      setJob(createdJob)
-
-      // ---- 3. Polling hasta COMPLETED / FAILED ----
-      setPhase('polling')
-      const deadline = Date.now() + POLL_TIMEOUT_MS
-
-      while (Date.now() < deadline) {
-        if (abortRef.current) return
-
-        await sleep(POLL_INTERVAL_MS)
-        if (abortRef.current) return
-
-        const statusRes = await jobService.getJobStatus(getJobId(createdJob))
-        setJob(statusRes)
-
-        const upperStatus = statusRes.status.toUpperCase()
-        if (upperStatus === 'COMPLETED') {
-          setPhase('completed')
-          return
-        }
-        if (upperStatus === 'FAILED') {
-          setPhase('failed')
-          setError(statusRes.error_message ?? 'El job de procesamiento falló.')
-          return
-        }
-      }
-
-      // Timeout
-      setPhase('failed')
-      setError('Tiempo de espera agotado. El procesamiento demora más de lo esperado.')
+      const createdJob = await startUploadAndCreateJob(ctx, videoFile, transcriptFile)
+      if (!createdJob) return
+      await pollUntilTerminal(ctx, createdJob)
     } catch (err: unknown) {
-      if (abortRef.current) return
-      setPhase('failed')
-      if (err && typeof err === 'object' && 'detail' in err) {
-        setError((err as { detail: string }).detail)
-      } else if (err instanceof Error) {
-        setError(err.message)
-      } else {
-        setError('Error inesperado')
-      }
+      if (ctx.isAborted()) return
+      ctx.setPhase('failed')
+      ctx.setError(errorText(err))
     }
   }, [])
 

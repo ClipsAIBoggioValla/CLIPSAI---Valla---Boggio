@@ -27,6 +27,11 @@ class UploadUrlRequest(BaseModel):
     file_type: str
 
 
+def _texto_no_vacio(valor: str | None) -> bool:
+    """True si el valor es un string no vacío."""
+    return bool(valor and valor.strip())
+
+
 class ProcessVideoRequest(BaseModel):
     file_key: str | None = None
     video_url: str | None = None
@@ -36,9 +41,7 @@ class ProcessVideoRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_source(self) -> "ProcessVideoRequest":
-        has_file_key = bool(self.file_key and self.file_key.strip())
-        has_video_url = bool(self.video_url and self.video_url.strip())
-        if has_file_key == has_video_url:
+        if _texto_no_vacio(self.file_key) == _texto_no_vacio(self.video_url):
             raise ValueError("Envía exactamente uno de file_key o video_url")
         if self.transcription_url and self.transcription_text is not None:
             raise ValueError("Envía transcription_url o transcription_text, no ambos")
@@ -88,30 +91,30 @@ async def generate_upload_url(payload: UploadUrlRequest) -> dict[str, str]:
         ) from exc
 
 
-@upload_url_router.post("/process", summary="Procesar un video almacenado en R2 mediante RunPod")
-def process_video(payload: ProcessVideoRequest) -> dict[str, Any]:
-    video_url = payload.video_url.strip() if payload.video_url else ""
+def _presigned_get_url(payload: ProcessVideoRequest) -> str:
+    """URL prefirmada de lectura del file_key; HTTPException 500 si falla."""
+    try:
+        s3_client = get_s3_client()
+        return s3_client.generate_presigned_url(
+            ClientMethod="get_object",
+            Params={
+                "Bucket": os.getenv("BUCKET_NAME", "clipsai-videos"),
+                "Key": payload.file_key.strip(),
+            },
+            ExpiresIn=3600,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error al generar la presigned URL de lectura: {str(exc)}",
+        ) from exc
 
-    if payload.file_key:
-        try:
-            s3_client = get_s3_client()
-            video_url = s3_client.generate_presigned_url(
-                ClientMethod="get_object",
-                Params={
-                    "Bucket": os.getenv("BUCKET_NAME", "clipsai-videos"),
-                    "Key": payload.file_key.strip(),
-                },
-                ExpiresIn=3600,
-            )
-        except Exception as exc:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error al generar la presigned URL de lectura: {str(exc)}",
-            ) from exc
+
+def _procesar_via_runpod(payload: ProcessVideoRequest, video_url: str) -> dict[str, Any]:
+    """Llama a RunPod; HTTPException 504/502 ante RunPodError."""
+    from ..services.runpod_service import RunPodError, process_video_via_runpod
 
     try:
-        from ..services.runpod_service import RunPodError, process_video_via_runpod
-
         return process_video_via_runpod(
             video_url,
             transcription_url=payload.transcription_url,
@@ -122,6 +125,16 @@ def process_video(payload: ProcessVideoRequest) -> dict[str, Any]:
         message = str(exc)
         status_code = 504 if "timeout" in message.lower() or "no terminó" in message.lower() else 502
         raise HTTPException(status_code=status_code, detail=f"Error al procesar con RunPod: {message}") from exc
+
+
+@upload_url_router.post("/process", summary="Procesar un video almacenado en R2 mediante RunPod")
+def process_video(payload: ProcessVideoRequest) -> dict[str, Any]:
+    video_url = payload.video_url.strip() if payload.video_url else ""
+
+    if payload.file_key:
+        video_url = _presigned_get_url(payload)
+
+    return _procesar_via_runpod(payload, video_url)
 
 ALLOWED_VIDEO_EXTS = {".mp4", ".mov", ".avi"}
 ALLOWED_TRANSCRIPT_EXTS = {".txt", ".srt"}
@@ -192,13 +205,31 @@ def _garantizar_espacio(upload_dir: Path) -> None:
         logger.warning("[upload] ensure_disk_space falló (non-fatal): %s", disk_err)
 
 
+async def _cerrar_uploads(video, transcription) -> None:
+    """Cierra los uploads ignorando errores."""
+    try:
+        await video.close()
+    except Exception:
+        pass
+    if transcription is not None:
+        try:
+            await transcription.close()
+        except Exception:
+            pass
+
+
+async def _guardar_sin_limpieza(video: UploadFile, video_dest: Path, transcription: UploadFile | None, transcript_dest: Path | None) -> None:
+    """Guarda video y transcripción en disco (lanza si falla)."""
+    await _save_upload_file(video, video_dest)
+    if transcription is not None and transcript_dest is not None:
+        await _save_upload_file(transcription, transcript_dest)
+
+
 async def _guardar_archivos(video: UploadFile, video_dest: Path, transcription: UploadFile | None, transcript_dest: Path | None) -> None:
     """Guarda video (+ transcripción) en disco y limpia los parciales si falla."""
     _garantizar_espacio(video_dest.parent)
     try:
-        await _save_upload_file(video, video_dest)
-        if transcription is not None and transcript_dest is not None:
-            await _save_upload_file(transcription, transcript_dest)
+        await _guardar_sin_limpieza(video, video_dest, transcription, transcript_dest)
     except HTTPException:
         _limpiar_archivos_subida(video_dest, transcript_dest)
         raise
@@ -206,15 +237,7 @@ async def _guardar_archivos(video: UploadFile, video_dest: Path, transcription: 
         _limpiar_archivos_subida(video_dest, transcript_dest)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Error al guardar archivos: {exc}") from exc
     finally:
-        try:
-            await video.close()
-        except Exception:
-            pass
-        if transcription is not None:
-            try:
-                await transcription.close()
-            except Exception:
-                pass
+        await _cerrar_uploads(video, transcription)
 
 
 def _leer_transcript(transcript_dest: Path | None) -> str | None:
@@ -241,6 +264,26 @@ def _borrar_transcript_local(transcript_dest: Path | None) -> None:
         pass
 
 
+def _destinos_de_subida(upload_dir: Path, video_ext: str, transcript_ext: str | None) -> tuple[Path, Path | None]:
+    """Rutas destino del video y de la transcripción (esta última solo si hay archivo)."""
+    video_dest = upload_dir / f"{uuid.uuid4().hex}{video_ext}"
+    transcript_dest: Path | None = None
+    if transcript_ext is not None:
+        transcript_dest = upload_dir / f"{uuid.uuid4().hex}{transcript_ext}"
+    return video_dest, transcript_dest
+
+
+def _entidad_video(current_user, video: UploadFile, video_dest: Path, transcript_dest: Path | None) -> Video:
+    """Entidad Video persistible desde los archivos subidos."""
+    return Video(
+        user_id=current_user.id,
+        filename=video.filename or video_dest.name,
+        filepath=str(video_dest),
+        transcription_filepath=str(transcript_dest) if transcript_dest else None,
+        transcript=_leer_transcript(transcript_dest),
+    )
+
+
 @router.post(
     "",
     response_model=VideoResponse,
@@ -262,20 +305,11 @@ async def upload_video(
         transcript_ext = _validate_extension(transcription.filename, ALLOWED_TRANSCRIPT_EXTS, "transcription")
 
     upload_dir = _get_upload_dir()
-    video_dest = upload_dir / f"{uuid.uuid4().hex}{video_ext}"
-    transcript_dest: Path | None = None
-    if transcription is not None and transcript_ext is not None:
-        transcript_dest = upload_dir / f"{uuid.uuid4().hex}{transcript_ext}"
+    video_dest, transcript_dest = _destinos_de_subida(upload_dir, video_ext, transcript_ext)
 
     await _guardar_archivos(video, video_dest, transcription, transcript_dest)
 
-    entity = Video(
-        user_id=current_user.id,
-        filename=video.filename or video_dest.name,
-        filepath=str(video_dest),
-        transcription_filepath=str(transcript_dest) if transcript_dest else None,
-        transcript=_leer_transcript(transcript_dest),
-    )
+    entity = _entidad_video(current_user, video, video_dest, transcript_dest)
     db.add(entity)
     db.commit()
     db.refresh(entity)

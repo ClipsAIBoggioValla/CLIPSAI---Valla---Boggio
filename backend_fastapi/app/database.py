@@ -28,25 +28,52 @@ def _is_docker() -> bool:
         return False
 
 
-def _fallback_db_url(url: str) -> str:
-    # Normalizar esquemas de nube (postgres://, postgresql://) al dialecto explicito.
+def _esquema_normalizado(url: str) -> str:
+    """Normaliza esquemas de nube (postgres://, postgresql://) al dialecto explicito."""
     if url.startswith("postgres://"):
-        url = "postgresql+psycopg2://" + url[len("postgres://") :]
-    elif url.startswith("postgresql://"):
-        url = "postgresql+psycopg2://" + url[len("postgresql://") :]
-    is_docker = _is_docker()
-    has_db = "@db:" in url or "@db/" in url
-    has_local = "@127.0.0.1:" in url or "@localhost:" in url
-    if is_docker and has_local:
-        return url.replace("@127.0.0.1:", "@db:").replace("@localhost:", "@db:").replace("@127.0.0.1/", "@db/")
-    if not is_docker and has_db:
-        try:
-            import socket
+        return "postgresql+psycopg2://" + url[len("postgres://") :]
+    if url.startswith("postgresql://"):
+        return "postgresql+psycopg2://" + url[len("postgresql://") :]
+    return url
 
-            socket.getaddrinfo("db", 5432)
-            return url
-        except Exception:
-            return url.replace("@db:", "@127.0.0.1:").replace("@db/", "@127.0.0.1/")
+
+def _db_resuelve() -> bool:
+    """True si el host 'db' resuelve a nivel DNS."""
+    try:
+        import socket
+
+        socket.getaddrinfo("db", 5432)
+        return True
+    except Exception:
+        return False
+
+
+def _url_para_docker(url: str) -> str | None:
+    """Dentro de docker: host local reescrito a 'db'; None si no aplica."""
+    if _is_docker() and ("@127.0.0.1:" in url or "@localhost:" in url):
+        return url.replace("@127.0.0.1:", "@db:").replace("@localhost:", "@db:").replace("@127.0.0.1/", "@db/")
+    return None
+
+
+def _host_local_de_db(url: str) -> bool:
+    """True si la URL apunta al host 'db'."""
+    return "@db:" in url or "@db/" in url
+
+
+def _url_para_host(url: str) -> str | None:
+    """Fuera de docker: ajusta el host 'db' segun si resuelve; None si no aplica."""
+    if _is_docker() or not _host_local_de_db(url):
+        return None
+    if _db_resuelve():
+        return url
+    return url.replace("@db:", "@127.0.0.1:").replace("@db/", "@127.0.0.1/")
+
+
+def _fallback_db_url(url: str) -> str:
+    """Normaliza esquema y host de la URL de base de datos segun el entorno."""
+    url = _esquema_normalizado(url)
+    url = _url_para_docker(url) or url
+    url = _url_para_host(url) or url
     return url
 
 

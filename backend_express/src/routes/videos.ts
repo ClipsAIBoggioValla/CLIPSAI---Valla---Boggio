@@ -57,6 +57,32 @@ function isValidUuid(v: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)
 }
 
+function discardUploadedFile(pathValue: string | undefined): void {
+  if (!pathValue) return
+  try { fs.unlinkSync(pathValue) } catch {}
+}
+
+function readTranscriptText(transcriptFile: Express.Multer.File | undefined): string | null {
+  if (!transcriptFile) return null
+  try {
+    return fs.readFileSync(transcriptFile.path, 'utf-8').slice(0, 50000)
+  } catch {
+    return null
+  }
+}
+
+async function insertVideo(userId: string, videoFile: Express.Multer.File, transcriptFile: Express.Multer.File | undefined, transcriptText: string | null): Promise<Record<string, unknown>> {
+  const r = await pool.query(
+    'INSERT INTO videos (usuario_id, original_filename, file_path, transcription_filepath, transcript) VALUES ($1,$2,$3,$4,$5) RETURNING id, original_filename AS filename, created_at',
+    [userId, videoFile.originalname || videoFile.filename, videoFile.path, transcriptFile?.path ?? null, transcriptText]
+  )
+  return r.rows[0] as Record<string, unknown>
+}
+
+function videoResponse(row: Record<string, unknown>): Record<string, unknown> {
+  return { id: row.id, filename: row.filename, created_at: new Date(row.created_at as string).toISOString() }
+}
+
 videosRouter.post(
   '/',
   authMiddleware,
@@ -73,30 +99,18 @@ videosRouter.post(
     const transcriptFile = files?.transcription?.[0]
 
     if (!videoFile) {
-      if (transcriptFile?.path) try { fs.unlinkSync(transcriptFile.path) } catch {}
+      discardUploadedFile(transcriptFile?.path)
       return res.status(400).json({ detail: 'Se requiere archivo de video' })
     }
 
-    let transcriptText: string | null = null
-    if (transcriptFile) {
-      try {
-        const raw = fs.readFileSync(transcriptFile.path, 'utf-8')
-        transcriptText = raw.slice(0, 50000)
-      } catch {
-        transcriptText = null
-      }
-    }
+    const transcriptText = readTranscriptText(transcriptFile)
 
     try {
-      const r = await pool.query(
-        'INSERT INTO videos (usuario_id, original_filename, file_path, transcription_filepath, transcript) VALUES ($1,$2,$3,$4,$5) RETURNING id, original_filename AS filename, created_at',
-        [userId, videoFile.originalname || videoFile.filename, videoFile.path, transcriptFile?.path ?? null, transcriptText]
-      )
-      const row = r.rows[0] as Record<string, unknown>
-      return res.status(201).json({ id: row.id, filename: row.filename, created_at: new Date(row.created_at as string).toISOString() })
+      const row = await insertVideo(userId, videoFile, transcriptFile, transcriptText)
+      return res.status(201).json(videoResponse(row))
     } catch (err) {
-      try { fs.unlinkSync(videoFile.path) } catch {}
-      if (transcriptFile?.path) try { fs.unlinkSync(transcriptFile.path) } catch {}
+      discardUploadedFile(videoFile.path)
+      discardUploadedFile(transcriptFile?.path)
       console.error('POST /videos error', err)
       return res.status(500).json({ detail: 'Error interno' })
     }
@@ -108,6 +122,103 @@ videosRouter.post(
  * Copia el video de muestra al directorio de uploads, crea video + job y lo ejecuta en background.
  * Responde 202 con JobResponse (id, video_id, status, progress, ...).
  */
+function sampleVideoCandidates(): string[] {
+  return [
+    path.join(process.cwd(), 'backend_fastapi', 'storage', 'sample', 'sample.mp4'),
+    path.join(process.cwd(), '..', 'backend_fastapi', 'storage', 'sample', 'sample.mp4'),
+    path.join(process.cwd(), 'storage', 'sample', 'sample.mp4'),
+    path.join(process.cwd(), '..', 'storage', 'sample', 'sample.mp4'),
+  ]
+}
+
+function existingSamplePath(candidates: string[]): string | null {
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c
+  }
+  return null
+}
+
+/** Resolver ruta del video de muestra (igual que FastAPI) */
+function resolveSamplePath(): string | null {
+  const envPath = (process.env.SAMPLE_VIDEO_PATH || '').trim()
+  if (envPath) {
+    const p = path.resolve(envPath)
+    if (fs.existsSync(p)) return p
+  }
+  const candidates = sampleVideoCandidates()
+  return existingSamplePath(candidates) ?? candidates[0]
+}
+
+function missingSampleError(samplePath: string | null): { status: number; detail: string } | null {
+  if (samplePath && fs.existsSync(samplePath)) return null
+  return {
+    status: 404,
+    detail: `Video de muestra no encontrado en ${samplePath}. Colocá un archivo sample.mp4 en esa ubicación o configurá SAMPLE_VIDEO_PATH.`,
+  }
+}
+
+function copySampleVideo(samplePath: string): string | null {
+  const uploadDir = getUploadDir()
+  const dest = path.join(uploadDir, `sample_${randomUUID().replace(/-/g, '')}.mp4`)
+  try {
+    fs.copyFileSync(samplePath, dest)
+    return dest
+  } catch (err) {
+    console.error('Error copiando video de muestra:', err)
+    return null
+  }
+}
+
+async function insertSampleVideo(userId: string, dest: string): Promise<string | null> {
+  try {
+    const r = await pool.query(
+      'INSERT INTO videos (usuario_id, original_filename, file_path, transcript) VALUES ($1,$2,$3,$4) RETURNING id',
+      [userId, 'sample.mp4', dest, null]
+    )
+    return r.rows[0].id as string
+  } catch (err) {
+    console.error('Error insertando video muestra:', err)
+    try { fs.unlinkSync(dest) } catch {}
+    return null
+  }
+}
+
+async function insertSampleJob(videoId: string): Promise<string | null> {
+  try {
+    const r = await pool.query(
+      'INSERT INTO jobs (video_id, status, progress) VALUES ($1, $2, $3) RETURNING id',
+      [videoId, 'pending', 0]
+    )
+    return r.rows[0].id as string
+  } catch (err) {
+    console.error('Error creando job muestra:', err)
+    // No borramos el video, queda para reintento
+    return null
+  }
+}
+
+function sampleResponse(jobId: string, videoId: string): Record<string, unknown> {
+  // Responder 202 con JobResponse (paridad con FastAPI)
+  return {
+    id: jobId,
+    video_id: videoId,
+    status: 'PENDING',
+    progress: 0,
+    error_message: null,
+    result_metadata: null,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }
+}
+
+async function createSampleVideoJob(userId: string, dest: string): Promise<{ jobId: string; videoId: string } | { status: number; detail: string }> {
+  const videoId = await insertSampleVideo(userId, dest)
+  if (!videoId) return { status: 500, detail: 'Error creando video' }
+  const jobId = await insertSampleJob(videoId)
+  if (!jobId) return { status: 500, detail: 'Error creando job' }
+  return { jobId, videoId }
+}
+
 videosRouter.post(
   '/sample',
   authMiddleware,
@@ -115,86 +226,22 @@ videosRouter.post(
     const userId = req.user!.id
     if (!isValidUuid(userId)) return res.status(401).json({ detail: 'Usuario inválido' })
 
-    // Resolver ruta del video de muestra (igual que FastAPI)
-    function resolveSamplePath(): string | null {
-      const envPath = (process.env.SAMPLE_VIDEO_PATH || '').trim()
-      if (envPath) {
-        const p = path.resolve(envPath)
-        if (fs.existsSync(p)) return p
-      }
-      // Candidatos por defecto
-      const candidates = [
-        path.join(process.cwd(), 'backend_fastapi', 'storage', 'sample', 'sample.mp4'),
-        path.join(process.cwd(), '..', 'backend_fastapi', 'storage', 'sample', 'sample.mp4'),
-        path.join(process.cwd(), 'storage', 'sample', 'sample.mp4'),
-        path.join(process.cwd(), '..', 'storage', 'sample', 'sample.mp4'),
-      ]
-      for (const c of candidates) {
-        if (fs.existsSync(c)) return c
-      }
-      // Retornar la ruta esperada para error descriptivo
-      return candidates[0]
-    }
-
     const samplePath = resolveSamplePath()
-    if (!samplePath || !fs.existsSync(samplePath)) {
-      return res.status(404).json({
-        detail: `Video de muestra no encontrado en ${samplePath}. Colocá un archivo sample.mp4 en esa ubicación o configurá SAMPLE_VIDEO_PATH.`,
-      })
-    }
+    const missing = missingSampleError(samplePath)
+    if (missing) return res.status(missing.status).json({ detail: missing.detail })
 
     // Copiar el video de muestra al directorio de uploads
-    const uploadDir = getUploadDir()
-    const dest = path.join(uploadDir, `sample_${randomUUID().replace(/-/g, '')}.mp4`)
-    try {
-      fs.copyFileSync(samplePath, dest)
-    } catch (err) {
-      console.error('Error copiando video de muestra:', err)
-      return res.status(500).json({ detail: 'Error copiando video de muestra' })
-    }
+    const dest = copySampleVideo(samplePath as string)
+    if (!dest) return res.status(500).json({ detail: 'Error copiando video de muestra' })
 
-    // Crear registro de video
-    let videoId: string
-    try {
-      const r = await pool.query(
-        'INSERT INTO videos (usuario_id, original_filename, file_path, transcript) VALUES ($1,$2,$3,$4) RETURNING id',
-        [userId, 'sample.mp4', dest, null]
-      )
-      videoId = r.rows[0].id as string
-    } catch (err) {
-      console.error('Error insertando video muestra:', err)
-      try { fs.unlinkSync(dest) } catch {}
-      return res.status(500).json({ detail: 'Error creando video' })
-    }
-
-    // Crear job
-    let jobId: string
-    try {
-      const r = await pool.query(
-        'INSERT INTO jobs (video_id, status, progress) VALUES ($1, $2, $3) RETURNING id',
-        [videoId, 'pending', 0]
-      )
-      jobId = r.rows[0].id as string
-    } catch (err) {
-      console.error('Error creando job muestra:', err)
-      // No borramos el video, queda para reintento
-      return res.status(500).json({ detail: 'Error creando job' })
-    }
+    // Crear video + job y ejecutar en background
+    const created = await createSampleVideoJob(userId, dest)
+    if ('status' in created) return res.status(created.status).json({ detail: created.detail })
 
     // Ejecutar job en background (no await)
-    runJob(jobId).catch((err) => console.error(`[sample] job ${jobId} falló:`, err))
+    runJob(created.jobId).catch((err) => console.error(`[sample] job ${created.jobId} falló:`, err))
 
-    // Responder 202 con JobResponse (paridad con FastAPI)
-    return res.status(202).json({
-      id: jobId,
-      video_id: videoId,
-      status: 'PENDING',
-      progress: 0,
-      error_message: null,
-      result_metadata: null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
+    return res.status(202).json(sampleResponse(created.jobId, created.videoId))
   }
 )
 

@@ -22,6 +22,44 @@ function getToken(): string | null {
   }
 }
 
+type ParsedPublishPayload = {
+  status?: string
+  publication_status?: string
+  social_post_url?: string | null
+}
+
+function isTerminalPublishStatus(status: string): boolean {
+  return status === 'PUBLISHED' || status === 'FAILED'
+}
+
+function nextStatusFrom(data: ParsedPublishPayload): PublishStatus {
+  return (data.publication_status ?? data.status ?? '') as PublishStatus
+}
+
+interface PublishStateRefs {
+  status: Ref<PublishStatus | null>
+  socialPostUrl: Ref<string | null>
+  isPublishing: Ref<boolean>
+  close: () => void
+}
+
+function applyPublishStatus(next: PublishStatus, refs: PublishStateRefs): void {
+  if (!next) return
+  refs.status.value = next.toUpperCase() as PublishStatus
+  refs.isPublishing.value = next.toUpperCase() === 'PUBLISHING'
+}
+
+function applyPublishPayload(data: ParsedPublishPayload, refs: PublishStateRefs): void {
+  const next = nextStatusFrom(data)
+  applyPublishStatus(next, refs)
+  const urlVal = (data.social_post_url as string | null) ?? null
+  if (urlVal) refs.socialPostUrl.value = urlVal
+  if (isTerminalPublishStatus(next)) {
+    refs.close()
+    refs.isPublishing.value = false
+  }
+}
+
 export function usePublishStream(clipId: string | null | Ref<string | null> | (() => string | null)) {
   const status = ref<PublishStatus | null>(null)
   const socialPostUrl = ref<string | null>(null)
@@ -51,23 +89,7 @@ export function usePublishStream(clipId: string | null | Ref<string | null> | ((
 
     const handleMessage = (event: MessageEvent) => {
       try {
-        const data = JSON.parse(event.data) as {
-          status?: string
-          publication_status?: string
-          social_post_url?: string | null
-        }
-        const next = (data.publication_status ?? data.status ?? '') as PublishStatus
-        if (next) {
-          status.value = next.toUpperCase() as PublishStatus
-          isPublishing.value = next.toUpperCase() === 'PUBLISHING'
-        }
-        const urlVal = (data.social_post_url as string | null) ?? null
-        if (urlVal) socialPostUrl.value = urlVal
-        const term = (next ?? '').toUpperCase()
-        if (term === 'PUBLISHED' || term === 'FAILED') {
-          close()
-          isPublishing.value = false
-        }
+        applyPublishPayload(JSON.parse(event.data) as ParsedPublishPayload, { status, socialPostUrl, isPublishing, close })
       } catch (e) {
         console.warn('[usePublishStream] parse error', e)
       }

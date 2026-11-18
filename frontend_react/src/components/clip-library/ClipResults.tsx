@@ -2,6 +2,51 @@ import { formatScore, formatDuration, formatTimeRange, scoreBadgeClass, publishB
 import ClipCard from './ClipCard'
 import type { ClipListItem, ClipListResponse } from '@/types/api'
 
+type ClipFlags = {
+  isRerendering: boolean
+  isPublishing: boolean
+  isBusy: boolean
+  isPublished: boolean
+}
+
+function isPublishingFlag(
+  clipId: string,
+  publishing: string | null,
+  ssePublishing: boolean,
+  activePublishId: string | null,
+): boolean {
+  if (publishing === clipId) return true
+  return ssePublishing && activePublishId === clipId
+}
+
+function isPublishedFlag(
+  clip: ClipListItem,
+  sseStatus: string | null,
+  activePublishId: string | null,
+): boolean {
+  if (clip.status === 'PUBLISHED') return true
+  return sseStatus === 'PUBLISHED' && activePublishId === clip.id
+}
+
+function clipFlags(
+  clip: ClipListItem,
+  rerendering: string | null,
+  publishing: string | null,
+  ssePublishing: boolean,
+  sseStatus: string | null,
+  activePublishId: string | null,
+): ClipFlags {
+  const isRerendering = rerendering === clip.id
+  const isPublishing = isPublishingFlag(clip.id, publishing, ssePublishing, activePublishId)
+  const isPublished = isPublishedFlag(clip, sseStatus, activePublishId)
+  return {
+    isRerendering,
+    isPublishing,
+    isPublished,
+    isBusy: isRerendering || isPublishing,
+  }
+}
+
 interface ClipResultsProps {
   data: ClipListResponse | null
   loading: boolean
@@ -74,12 +119,10 @@ export default function ClipResults(props: ClipResultsProps) {
         {viewMode === 'grid' ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {data.items.map((clip) => {
-              const isRerendering = rerendering === clip.id
-              const isPublishing = publishing === clip.id || (ssePublishing && activePublishId === clip.id)
-              const isBusy = isRerendering || isPublishing || clip.status === 'PUBLISHING'
-              const isPublished = clip.status === 'PUBLISHED' || (sseStatus === 'PUBLISHED' && activePublishId === clip.id)
+              const flags = clipFlags(clip, rerendering, publishing, ssePublishing, sseStatus, activePublishId)
+              const isBusy = flags.isBusy || clip.status === 'PUBLISHING'
               return (
-                <ClipCard key={clip.id} clip={clip} isRerendering={isRerendering} isPublishing={isPublishing} isBusy={isBusy} isPublished={isPublished} sseUrl={sseUrl} onPreview={setPreviewClip} onDownload={handleDownload} onToggle={handleToggle} onOpenPublish={openPublish} />
+                <ClipCard key={clip.id} clip={clip} isRerendering={flags.isRerendering} isPublishing={flags.isPublishing} isBusy={isBusy} isPublished={flags.isPublished} sseUrl={sseUrl} onPreview={setPreviewClip} onDownload={handleDownload} onToggle={handleToggle} onOpenPublish={openPublish} />
               )
             })}
           </div>
@@ -93,10 +136,11 @@ export default function ClipResults(props: ClipResultsProps) {
                 <tbody>
                   {data.items.map((clip) => {
                     const pb = publishBadge(clip.status)
-                    const isRerendering = rerendering === clip.id
-                    const isPublishing = publishing === clip.id || (ssePublishing && activePublishId === clip.id)
-                    const isBusy = isRerendering || isPublishing
-                    const isPublished = clip.status === 'PUBLISHED' || (sseStatus === 'PUBLISHED' && activePublishId === clip.id)
+                    const flags = clipFlags(clip, rerendering, publishing, ssePublishing, sseStatus, activePublishId)
+                    const isRerendering = flags.isRerendering
+                    const isPublishing = flags.isPublishing
+                    const isBusy = flags.isBusy
+                    const isPublished = flags.isPublished
                     return (
                       <tr key={clip.id} className={isRerendering ? 'opacity-60' : ''}>
                         <td>

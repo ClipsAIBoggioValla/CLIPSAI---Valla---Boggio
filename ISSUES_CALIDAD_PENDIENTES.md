@@ -6,6 +6,55 @@
 
 ---
 
+## Fase 5 — Compl 352 → <135 y cobertura del pipeline raíz (13/14-nov, rama `fix/quality-cob-compl-final`)
+
+### Por qué la cifra subió a 352 y cómo se resolvió
+
+El informe de la cátedra del 13-nov midió **352 bloques** (tope 135,6): los helpers CC 6-8
+de la Fase 4 **contaban como bloques** — dividir 1 gigante en 5 helpers de CC 8 convertía
+1 bloque en 5. **Regla de la Fase 5: todo helper extraído con CC ≤ 4** (máx. 2-3
+bifurcaciones; `and`/`or` suman +1 c/u, `except` +1, comprensión +1, ternario +1).
+
+### Resultado
+
+| Métrica | Antes (13-nov) | Después (14-nov) |
+|---|---|---|
+| **Compl** | 352 bloques ❌ | **47** ✅ — 0 funciones CC>5 en producción (medición local AST/regex, script abajo); residuo = 1-2 bloques por archivo (ternarios) |
+| **Cobertura raíz** | `main.py`/`engine.py`/`video_processor.py` ≈ 0 % | **43 tests nuevos** (`tests/test_root_pipeline_coverage.py`) |
+| Builds | — | `npm run build` (React, Vue) ✅ · `typecheck`+`build` (Express) ✅ |
+
+### Scripts de medición (no commiteados, en `Temp/opencode/`)
+
+- `ranking_cc.py` — AST para `.py` (If/For/While/Except/BoolOp N→N-1/comprensiones/Match,
+  umbral CC>5) + segmentación heurística para `.ts/.tsx/.vue`; lista top-30 archivos.
+- `cc_ast.mjs` (del agente de Express) — AST TypeScript preciso con ternarios incluidos.
+
+### Alcance refactorizado (~100 funciones, ~50 archivos)
+
+- **backend_fastapi**: `routers/jobs.py` (34 bloques → 0), `services/engine.py` (16 → 0), `services/publish_service.py` (25 → 0), `routers/clips.py`, `claude_service`, `hook_service` ×2, `whisper_service`, `social_auth`, `instagram_service`, `ffmpeg_service`, `videos.py`, `runpod_service`, `subtitle_pipeline`, `config.py`, `routers/publish.py`/`stream.py`, `main.py` lifespan, `database.py`, `editor.py`, `storage_cleanup`, `social_common`, schemas/usuario, export/metrics/sample/stats/users.
+- **backend_express**: `routes/clips.ts` (runReRender CC 64), `socialAuth.ts` (14), `jobs.ts` (9, runJob 33/runClipEngine 30), `subtitles.ts` (9), `publish.ts`, `users.ts` (PUT handler CC 43), `export.ts`, `auth.ts`, `videos.ts`/`apiVideos.ts`, `db/index.ts`, `services/runpod.ts` (30), `services/s3.ts`, `metrics.ts` (handleMetrics 21).
+- **Pipeline raíz y `backend/`**: `main.py` (16), `engine.py` (6), `video_processor.py`, `whisper_transcriber.py`, `audio_analyzer.py`, `engine_subprocess.py`, `backend/handler.py`, `backend/services/ai_viral/analyzer.py`, `backend/services/video_editor/renderer.py`, `backend/track_a/ingestion/service.py`, `backend/track_b/virality/engine.py`, `backend/api/routes/retrim.py` (retrim_clip 22), `backend/core/security/ssrf_guard.py`.
+- **Frontend**: React (`Avatar`, `JobStatusPage`, `ClipResults`, `apiClient`, `services/api`, `usePublishSSE`) y Vue (`useClipLibrary`: watchers SSE deduplicados).
+- **Tests**: 9 archivos de test refactorizados con helpers `_aux_*` (aserciones/mocks intactos).
+
+### Cobertura del pipeline raíz (nuevo)
+
+`tests/test_root_pipeline_coverage.py` — 43 tests: `cargar_env`, `verificar_ffmpeg`,
+`formatear/preparar/enriquecer transcripción`, `llamar_claude`/`llamar_openai_compatible`
+(mocks HTTP), `_post_con_retry` (retry + fallo final), `obtener_clips_ia` (proveedores,
+fences, objeto `{"clips": [...]}`, objetos sueltos, sin JSON), `parsear_json_tolerante`,
+`validar_clips` (30-90s), `cortar_clip`/`procesar_clips` (FFmpeg mockeado),
+`engine.procesar_video` (validación, dependencias, éxito, IAError, AudioError, 0 clips),
+`video_processor` (ASS con hook, reframe exitoso/fallo/timeout, flujo vertical completo).
+
+**2 bugs reales detectados y corregidos por estos tests:**
+1. `engine._transcribir_con_whisper` usaba `transcribir_audio` sin importarlo → el fallback
+   a Whisper del engine raíz estaba **roto** desde la Fase 4 (NameError en runtime).
+2. `_paso_datos_ia` devolvía una 3-tupla donde `_ejecutar_pipeline_interno` desempaquetaba 4
+   → `procesar_video` (raíz) fallaba con "not enough values to unpack" en toda ejecución local.
+
+---
+
 ## Fase 4 — DBG 0, Coh 0 y reducción de complejidad (12-nov, rama `fix/quality-index-100`)
 
 ### Resultado

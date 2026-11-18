@@ -1,14 +1,76 @@
 import { useIntegrations } from '@/hooks/useIntegrations'
 import PlatformCard from '@/components/integrations/PlatformCard'
 
+type SocialEntryLike = { connected: boolean; username: string | null }
+type SocialStatusLike = { youtube: SocialEntryLike; instagram: SocialEntryLike }
+
+function platformConnected(
+  social: SocialStatusLike | null,
+  integration: string | null,
+  status: string | null,
+  platform: 'youtube' | 'instagram',
+): boolean | undefined {
+  return social?.[platform].connected || (integration === platform && status === 'success')
+}
+
+function platformUsername(social: SocialStatusLike | null, platform: 'youtube' | 'instagram'): string | null {
+  return social?.[platform].username ?? null
+}
+
+function renderConnectedAlert(displayName: string, code: string, publishText: string) {
+  return (
+    <div role="alert" className="alert-custom alert-custom-success mb-4">
+      <i className="bi bi-check-circle-fill alert-custom-icon" />
+      <div className="alert-custom-content"><strong>{displayName} conectado correctamente</strong> — integración <code>{code}</code> vinculada a tu cuenta. {publishText}</div>
+    </div>
+  )
+}
+
+function renderConnectErrorAlert(displayName: string, errorDetail: string | null) {
+  return (
+    <div role="alert" className="alert-custom alert-custom-danger mb-4">
+      <i className="bi bi-exclamation-triangle-fill alert-custom-icon" />
+      <div className="alert-custom-content"><strong>Error al conectar {displayName}</strong> {errorDetail ? `— ${errorDetail}` : ''}. Intenta nuevamente.</div>
+    </div>
+  )
+}
+
+function renderYouTubeAlert(status: string | null, errorDetail: string | null) {
+  if (status === 'success') return renderConnectedAlert('YouTube', 'youtube', 'Ya puedes publicar clips en YouTube.')
+  if (status === 'error') return renderConnectErrorAlert('YouTube', errorDetail)
+  return null
+}
+
+function renderInstagramAlert(status: string | null, errorDetail: string | null) {
+  if (status === 'success') return renderConnectedAlert('Instagram', 'instagram', 'Ya puedes publicar Reels en Instagram.')
+  if (status === 'error') return renderConnectErrorAlert('Instagram', errorDetail)
+  return null
+}
+
+function renderIntegrationAlert(integration: string | null, status: string | null, errorDetail: string | null) {
+  if (integration === 'youtube') return renderYouTubeAlert(status, errorDetail)
+  if (integration === 'instagram') return renderInstagramAlert(status, errorDetail)
+  return null
+}
+
+function renderErrorAlert(error: string | null) {
+  if (!error) return null
+  return (
+    <div role="alert" className="alert-custom alert-custom-danger mb-4">
+      <i className="bi bi-exclamation-triangle-fill alert-custom-icon" />
+      <div className="alert-custom-content">{error}</div>
+    </div>
+  )
+}
+
 export default function IntegrationsPage() {
   const {
     integration, status, errorDetail, loading, error, social,
     handleConnectYoutube, handleConnectInstagram,
   } = useIntegrations()
 
-  const youtubeConnected = social?.youtube.connected || (integration === 'youtube' && status === 'success')
-  const instagramConnected = social?.instagram.connected || (integration === 'instagram' && status === 'success')
+  const youtubeConnected = platformConnected(social, integration, status, 'youtube')
+  const instagramConnected = platformConnected(social, integration, status, 'instagram')
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -24,36 +86,8 @@ export default function IntegrationsPage() {
         </div>
       </div>
 
-      {integration === 'youtube' && status === 'success' && (
-        <div role="alert" className="alert-custom alert-custom-success mb-4">
-          <i className="bi bi-check-circle-fill alert-custom-icon" />
-          <div className="alert-custom-content"><strong>YouTube conectado correctamente</strong> — integración <code>youtube</code> vinculada a tu cuenta. Ya puedes publicar clips en YouTube.</div>
-        </div>
-      )}
-      {integration === 'youtube' && status === 'error' && (
-        <div role="alert" className="alert-custom alert-custom-danger mb-4">
-          <i className="bi bi-exclamation-triangle-fill alert-custom-icon" />
-          <div className="alert-custom-content"><strong>Error al conectar YouTube</strong> {errorDetail ? `— ${errorDetail}` : ''}. Intenta nuevamente.</div>
-        </div>
-      )}
-      {integration === 'instagram' && status === 'success' && (
-        <div role="alert" className="alert-custom alert-custom-success mb-4">
-          <i className="bi bi-check-circle-fill alert-custom-icon" />
-          <div className="alert-custom-content"><strong>Instagram conectado correctamente</strong> — integración <code>instagram</code> vinculada a tu cuenta. Ya puedes publicar Reels en Instagram.</div>
-        </div>
-      )}
-      {integration === 'instagram' && status === 'error' && (
-        <div role="alert" className="alert-custom alert-custom-danger mb-4">
-          <i className="bi bi-exclamation-triangle-fill alert-custom-icon" />
-          <div className="alert-custom-content"><strong>Error al conectar Instagram</strong> {errorDetail ? `— ${errorDetail}` : ''}. Intenta nuevamente.</div>
-        </div>
-      )}
-      {error && (
-        <div role="alert" className="alert-custom alert-custom-danger mb-4">
-          <i className="bi bi-exclamation-triangle-fill alert-custom-icon" />
-          <div className="alert-custom-content">{error}</div>
-        </div>
-      )}
+      {renderIntegrationAlert(integration, status, errorDetail)}
+      {renderErrorAlert(error)}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <PlatformCard
@@ -61,7 +95,7 @@ export default function IntegrationsPage() {
           icon="bi bi-youtube"
           iconWrapClass="h-10 w-10 rounded-xl bg-[#FF0000]/10 border border-[#FF0000]/20 flex items-center justify-center text-[#FF0000] text-xl"
           connected={!!youtubeConnected}
-          username={social?.youtube.username ?? null}
+          username={platformUsername(social, 'youtube')}
           description="Google Data API v3 — upload + readonly"
           descriptionLong="Conecta tu canal para subir clips directamente como Shorts. Scopes: youtube.readonly + youtube.upload"
           endpointHint="GET /auth/social/youtube/connect → redirect Google OAuth (offline + consent)"
@@ -77,7 +111,7 @@ export default function IntegrationsPage() {
           icon="bi bi-instagram"
           iconWrapClass="h-10 w-10 rounded-xl bg-[#E1306C]/10 border border-[#E1306C]/20 flex items-center justify-center text-[#E1306C] text-xl"
           connected={!!instagramConnected}
-          username={social?.instagram.username ?? null}
+          username={platformUsername(social, 'instagram')}
           description="Meta Graph API — instagram_basic + content_publish"
           descriptionLong="Conecta tu cuenta para publicar Reels automáticamente. Scopes: instagram_basic + instagram_content_publish + pages_show_list"
           endpointHint="GET /auth/social/instagram/connect → redirect Meta OAuth (long-lived 60 días)"
