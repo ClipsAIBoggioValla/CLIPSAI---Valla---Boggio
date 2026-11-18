@@ -38,10 +38,19 @@ const { status: sseStatus, socialPostUrl: sseUrl, isPublishing: ssePublishing } 
 
 const RAW = (import.meta.env.VITE_API_URL as string | undefined ?? '').trim()
 const API_BASE_URL = (RAW || 'http://localhost:8000').replace(/\/$/, '')
+function cacheBustDe(clip: ClipListItem): string {
+  return clip.updated_at ? `?t=${new Date(clip.updated_at as unknown as string).getTime()}` : `?t=${Date.now()}`
+}
+
+function streamUrlBase(stream: string): string {
+  if (stream.startsWith('http')) return stream
+  return `${API_BASE_URL}${stream.startsWith('/') ? '' : '/'}${stream}`
+}
+
 function getVideoSrc(clip: ClipListItem): string {
-  const bust = clip.updated_at ? `?t=${new Date(clip.updated_at as unknown as string).getTime()}` : `?t=${Date.now()}`
+  const bust = cacheBustDe(clip)
   if (clip.stream_url) {
-    const base = clip.stream_url.startsWith('http') ? clip.stream_url : `${API_BASE_URL}${clip.stream_url.startsWith('/') ? '' : '/'}${clip.stream_url}`
+    const base = streamUrlBase(clip.stream_url)
     return `${base}${base.includes('?') ? '&' : '?'}t=${bust.slice(1)}`
   }
   return `${API_BASE_URL}/clips/${clip.id}/descarga${bust}`
@@ -54,25 +63,55 @@ watch([debouncedQ, minScore, sortBy], () => {
   page.value = 1
 })
 
-watch(() => sseStatus.value, (term) => {
-  if (!activePublishId.value || !term) return
-  const upper = term.toUpperCase()
-  if (upper === 'PUBLISHED') {
-    if (data.value) data.value.items = data.value.items.map((c) => c.id === activePublishId.value ? { ...c, status: 'PUBLISHED', social_post_url: sseUrl.value || c.social_post_url } : c)
-    toast.value = `Publicado ✅ ${sseUrl.value ?? ''}`.trim()
-    publishing.value = null
-    activePublishId.value = null
-    setTimeout(() => (toast.value = null), 4000)
-    fetchClips()
-  } else if (upper === 'FAILED') {
-    if (data.value) data.value.items = data.value.items.map((c) => c.id === activePublishId.value ? { ...c, status: 'FAILED' } : c)
-    toast.value = 'Error al publicar — FAILED'
-    publishing.value = null
-    activePublishId.value = null
-    setTimeout(() => (toast.value = null), 4000)
-  } else if (upper === 'PUBLISHING') {
+function hayPublicacionActiva(term: unknown): boolean {
+  return !!activePublishId.value && !!term
+}
+
+function marcarItemsSse(status: string, conUrl: boolean) {
+  if (!data.value) return
+  data.value.items = data.value.items.map((c) => {
+    if (c.id !== activePublishId.value) return c
+    return conUrl
+      ? { ...c, status, social_post_url: sseUrl.value || c.social_post_url }
+      : { ...c, status }
+  })
+}
+
+function terminarPublicacionSse() {
+  publishing.value = null
+  activePublishId.value = null
+  setTimeout(() => (toast.value = null), 4000)
+}
+
+function aplicarEstadoSsePublicado() {
+  marcarItemsSse('PUBLISHED', true)
+  toast.value = `Publicado ✅ ${sseUrl.value ?? ''}`.trim()
+  terminarPublicacionSse()
+  fetchClips()
+}
+
+function aplicarEstadoSseFallido() {
+  marcarItemsSse('FAILED', false)
+  toast.value = 'Error al publicar — FAILED'
+  terminarPublicacionSse()
+}
+
+function aplicarEstadoSseNoPublicado(upper: string) {
+  if (upper === 'FAILED') return aplicarEstadoSseFallido()
+  if (upper === 'PUBLISHING') {
     if (data.value) data.value.items = data.value.items.map((c) => c.id === activePublishId.value ? { ...c, status: 'PUBLISHING' } : c)
   }
+}
+
+function aplicarEstadoSse(term: string) {
+  if (!hayPublicacionActiva(term)) return
+  const upper = term.toUpperCase()
+  if (upper === 'PUBLISHED') return aplicarEstadoSsePublicado()
+  aplicarEstadoSseNoPublicado(upper)
+}
+
+watch(() => sseStatus.value, (term) => {
+  aplicarEstadoSse(term)
 })
 
 function scoreBadge(score: number | null) {
@@ -104,25 +143,37 @@ function formatDuration(item: ClipListItem): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
+function paramsFetchClips() {
+  return {
+    q: debouncedQ.value || undefined,
+    min_score: minScore.value ? Number(minScore.value) : undefined,
+    sort_by: sortBy.value,
+    page: page.value,
+    limit,
+    job_id: (route.query.job_id as string) || undefined,
+  }
+}
+
+function ordenarPorScore(items: ClipListItem[]): ClipListItem[] {
+  return [...items].sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+}
+
+function errorDeCarga(err: unknown): string {
+  if (err instanceof ApiError) return err.detail
+  if (err instanceof Error) return err.message
+  return 'Error al cargar clips'
+}
+
 async function fetchClips() {
   loading.value = true
   error.value = null
   try {
-    data.value = await clipService.getClips({
-      q: debouncedQ.value || undefined,
-      min_score: minScore.value ? Number(minScore.value) : undefined,
-      sort_by: sortBy.value,
-      page: page.value,
-      limit,
-      job_id: (route.query.job_id as string) || undefined,
-    })
+    data.value = await clipService.getClips(paramsFetchClips())
     if (data.value) {
-      data.value.items = [...data.value.items].sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+      data.value.items = ordenarPorScore(data.value.items)
     }
   } catch (err: unknown) {
-    if (err instanceof ApiError) error.value = err.detail
-    else if (err instanceof Error) error.value = err.message
-    else error.value = 'Error al cargar clips'
+    error.value = errorDeCarga(err)
   } finally {
     loading.value = false
   }
@@ -152,6 +203,26 @@ function openPublish(clip: ClipListItem) {
   webhookUrl.value = ''
 }
 
+function toastErrorPublicar(e: unknown): string {
+  if (e instanceof ApiError) return e.detail
+  if (e instanceof Error) return e.message
+  return 'Error al publicar'
+}
+
+function payloadPublicar(plat: PublishPlatform, cap: string, wh: string) {
+  return {
+    platform: plat,
+    caption: cap || undefined,
+    webhook_override_url: plat === 'webhook' && wh ? wh : undefined,
+  }
+}
+
+function marcarPublicando(clipId: string, plat: PublishPlatform) {
+  if (data.value) {
+    data.value.items = data.value.items.map((c) => c.id === clipId ? { ...c, status: 'PUBLISHING', published_platform: plat } : c)
+  }
+}
+
 async function submitPublish() {
   if (!publishClip.value) return
   const clipId = publishClip.value.id
@@ -161,20 +232,14 @@ async function submitPublish() {
   publishing.value = clipId
   activePublishId.value = clipId
   try {
-    const res = await clipService.publishClip(clipId, {
-      platform: plat,
-      caption: cap || undefined,
-      webhook_override_url: plat === 'webhook' && wh ? wh : undefined,
-    })
+    await clipService.publishClip(clipId, payloadPublicar(plat, cap, wh))
     toast.value = `Publicación en ${plat} encolada — PUBLISHING`
     publishClip.value = null
-    if (data.value) {
-      data.value.items = data.value.items.map((c) => c.id === clipId ? { ...c, status: 'PUBLISHING', published_platform: plat } : c)
-    }
+    marcarPublicando(clipId, plat)
     setTimeout(() => (toast.value = null), 4000)
   } catch (e: unknown) {
     console.error('[publish] error', e)
-    toast.value = e instanceof ApiError ? e.detail : e instanceof Error ? e.message : 'Error al publicar'
+    toast.value = toastErrorPublicar(e)
     publishing.value = null
     activePublishId.value = null
     setTimeout(() => (toast.value = null), 4000)
@@ -196,24 +261,7 @@ async function handleToggle(clip: ClipListItem, enable_ass: boolean, enable_hook
   }
 }
 watch(() => sseStatus.value, (term) => {
-  if (!activePublishId.value || !term) return
-  const upper = term.toUpperCase()
-  if (upper === 'PUBLISHED') {
-    if (data.value) data.value.items = data.value.items.map((c) => c.id === activePublishId.value ? { ...c, status: 'PUBLISHED', social_post_url: sseUrl.value || c.social_post_url } : c)
-    toast.value = `Publicado ✅ ${sseUrl.value ?? ''}`.trim()
-    publishing.value = null
-    activePublishId.value = null
-    setTimeout(() => (toast.value = null), 4000)
-    fetchClips()
-  } else if (upper === 'FAILED') {
-    if (data.value) data.value.items = data.value.items.map((c) => c.id === activePublishId.value ? { ...c, status: 'FAILED' } : c)
-    toast.value = 'Error al publicar — FAILED'
-    publishing.value = null
-    activePublishId.value = null
-    setTimeout(() => (toast.value = null), 4000)
-  } else if (upper === 'PUBLISHING') {
-    if (data.value) data.value.items = data.value.items.map((c) => c.id === activePublishId.value ? { ...c, status: 'PUBLISHING' } : c)
-  }
+  aplicarEstadoSse(term)
 })
 
 watch([debouncedQ, minScore, sortBy], () => { page.value = 1 })

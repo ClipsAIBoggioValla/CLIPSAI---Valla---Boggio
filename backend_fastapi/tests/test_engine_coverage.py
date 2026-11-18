@@ -83,11 +83,8 @@ class TestHelpers:
         ]
         candidato = {"start_sentence_id": "S_1", "end_sentence_id": "S_1"}
         ventana = engine._resolve_hook_candidate_window(candidato, mapa)
-        assert ventana is not None
-        # 1.4s <= 2.5 → expande a S_1..S_2 (2.8s, dentro del rango 2.5-5.5)
-        assert ventana["duration"] == pytest.approx(2.8)
-        assert ventana["start_sentence_id"] == "S_1"
-        assert ventana["end_sentence_id"] == "S_2"
+        _aux_assert_hook_window_existe(ventana)
+        _aux_assert_hook_window_ids(ventana)
 
         # ids desconocidos -> None
         assert engine._resolve_hook_candidate_window({"start_sentence_id": "X", "end_sentence_id": "S_1"}, mapa) is None
@@ -283,6 +280,29 @@ class TestEnsureWavAudio:
 # ------------------------------------------------------------------ run_clip_engine
 
 
+def _aux_assert_hook_window_existe(ventana) -> None:
+    assert ventana is not None
+    # 1.4s <= 2.5 → expande a S_1..S_2 (2.8s, dentro del rango 2.5-5.5)
+    assert ventana["duration"] == pytest.approx(2.8)
+
+
+def _aux_assert_hook_window_ids(ventana) -> None:
+    assert ventana["start_sentence_id"] == "S_1"
+    assert ventana["end_sentence_id"] == "S_2"
+
+
+def _aux_assert_local_claude_basico(result) -> None:
+    assert result["engine"] == "native_claude"
+    assert len(result["clips"]) == 1
+    assert result["transcription_segments"] == _segs_con_palabras()
+
+
+def _aux_assert_local_claude_rango(clip) -> None:
+    assert clip["criterio_principal"] == "claude_semantico"
+    assert clip["start_time"] == pytest.approx(0.0)
+    assert clip["end_time"] == pytest.approx(30.35)
+
+
 def _wav_grande(tmp_path: Path) -> str:
     wav = tmp_path / "audio.wav"
     wav.write_bytes(b"W" * 20000)  # >10KB para el diagnóstico
@@ -377,14 +397,10 @@ class TestRunClipEngine:
         callback = Mock()
         result = engine.run_clip_engine(str(video), str(tp), callback, allow_runpod=False)
 
-        assert result["engine"] == "native_claude"
-        assert len(result["clips"]) == 1
+        _aux_assert_local_claude_basico(result)
         clip = result["clips"][0]
-        assert clip["criterio_principal"] == "claude_semantico"
-        assert clip["start_time"] == pytest.approx(0.0)
-        assert clip["end_time"] == pytest.approx(30.35)
+        _aux_assert_local_claude_rango(clip)
         assert clip["hook_selection"]["mode"] == "in_clip"   # sin teaser válido
-        assert result["transcription_segments"] == _segs_con_palabras()
         callback.assert_called_once_with(35)
 
     def test_local_teaser_aplicado(self, tmp_path, monkeypatch) -> None:

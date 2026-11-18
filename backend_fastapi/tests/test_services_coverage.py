@@ -103,6 +103,10 @@ class TestTranscriptUtils:
 # ---------------------------------------------------------------- ass_generator
 
 
+def _aux_dialogues_de(partes: list[str]) -> list[str]:
+    return [l for l in partes if l.startswith("Dialogue")]
+
+
 class TestAssGenerator:
     def test_generate_ass_content_tiene_dialogues(self) -> None:
         from backend_fastapi.app.services.ass_generator import generate_ass_content
@@ -160,7 +164,7 @@ class TestAssGenerator:
             output_path=destino,
         )
         partes = destino.read_text(encoding="utf-8").splitlines()
-        dialogues = [l for l in partes if l.startswith("Dialogue")]
+        dialogues = _aux_dialogues_de(partes)
         assert "FRASE HOOK" in dialogues[0]  # el hook va primero
         assert any("CUERPO" in line for line in dialogues)
 
@@ -393,26 +397,48 @@ class TestHookService:
 # ---------------------------------------------------------------- ffmpeg_service
 
 
+def _ffprobe_stdout(cmd) -> bytes:
+    # burn/cut preguntan dimensiones; build_hook consulta el stream de audio
+    return b"12.5\n" if "format=duration" in " ".join(cmd) else b"0\n"
+
+
+def _ffprobe_respuesta(cmd):
+    if cmd and cmd[0] == "ffprobe":
+        return Mock(returncode=0, stdout=_ffprobe_stdout(cmd), stderr=b"")
+    return None
+
+
+def _es_salida_media(ultimo) -> bool:
+    return ultimo is not None and ultimo.suffix.lower() in {".mp4", ".wav", ".ass"} and not ultimo.exists()
+
+
+def _simula_archivo_salida(cmd) -> None:
+    ultimo = Path(str(cmd[-1])) if cmd else None
+    if _es_salida_media(ultimo):
+        ultimo.parent.mkdir(parents=True, exist_ok=True)
+        ultimo.write_bytes(b"mp4-simulado")
+
+
+def _run_side_effect_ffmpeg_simulado(cmd, **kwargs):
+    rapido = _ffprobe_respuesta(cmd)
+    if rapido is not None:
+        return rapido
+    _simula_archivo_salida(cmd)
+    return Mock(returncode=0, stdout=b"", stderr=b"")
+
+
+def _patch_subprocess_ffmpeg():
+    """Mockea subprocess.run del módulo: ffprobe devuelve duración "12.5"/audio "0";
+    cada render 'crea' su archivo de salida (último argumento con sufijo de media)."""
+    from backend_fastapi.app.services import ffmpeg_service as fs
+
+    runner = Mock(side_effect=_run_side_effect_ffmpeg_simulado)
+    return patch.object(fs.subprocess, "run", runner), runner, fs
+
+
 class TestFFmpegService:
     def _patch_subprocess(self):
-        """Mockea subprocess.run del módulo: ffprobe devuelve duración "12.5"/audio "0";
-        cada render 'crea' su archivo de salida (último argumento con sufijo de media)."""
-        from backend_fastapi.app.services import ffmpeg_service as fs
-
-        def run_side_effect(cmd, **kwargs):
-            if cmd and cmd[0] == "ffprobe":
-                # burn/cut preguntan dimensiones; build_hook consulta el stream de audio
-                stdout = b"12.5\n" if "format=duration" in " ".join(cmd) else b"0\n"
-                return Mock(returncode=0, stdout=stdout, stderr=b"")
-            ultimo = Path(str(cmd[-1])) if cmd else None
-            if ultimo and ultimo.suffix.lower() in {".mp4", ".wav", ".ass"} and not ultimo.exists():
-                ultimo.parent.mkdir(parents=True, exist_ok=True)
-                ultimo.write_bytes(b"mp4-simulado")
-            return Mock(returncode=0, stdout=b"", stderr=b"")
-
-        runner = Mock(side_effect=run_side_effect)
-        patcher = patch.object(fs.subprocess, "run", runner)
-        return patcher, runner, fs
+        return _patch_subprocess_ffmpeg()
 
     def test_escape_rutas_para_filtro_ass(self, tmp_path) -> None:
         from backend_fastapi.app.services.ffmpeg_service import escape_subtitles_path

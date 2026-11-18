@@ -110,9 +110,8 @@ class TestSettings:
         _env_runpod(monkeypatch)
         monkeypatch.setenv("RUNPOD_API_BASE_URL", "https://api.runpod.ai/v2/")
         api_key, eid, req_t, total_t, poll, base = _settings("otro-endpoint")
-        assert eid == "otro-endpoint"
-        assert base == "https://api.runpod.ai/v2"
-        assert req_t == 95 and total_t == 1800 and poll > 0
+        _aux_assert_settings_endpoint_url(eid, base)
+        _aux_assert_settings_tiempos(req_t, total_t, poll)
 
     def test_is_runpod_configured(self, monkeypatch) -> None:
         monkeypatch.delenv("RUNPOD_API_KEY", raising=False)
@@ -479,6 +478,39 @@ class TestProcessLocalVideo:
 # ------------------------------------------------------------------- main.py
 
 
+def _aux_assert_settings_endpoint_url(eid, base) -> None:
+    assert eid == "otro-endpoint"
+    assert base == "https://api.runpod.ai/v2"
+
+
+def _aux_assert_settings_tiempos(req_t, total_t, poll) -> None:
+    assert req_t == 95 and total_t == 1800 and poll > 0
+
+
+def _aux_assert_options_origen_lista(tc) -> None:
+    # OPTIONS con origen permitido por lista
+    r = tc.options("/health", headers={"Origin": "http://localhost:3000"})
+    assert r.status_code == 200
+    assert r.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert r.headers["access-control-allow-credentials"] == "true"
+
+
+def _aux_assert_options_regex_y_malo(tc) -> None:
+    # OPTIONS con origen permitido por regex
+    r2 = tc.options("/health", headers={"Origin": "https://mi-app.vercel.app"})
+    assert r2.headers["access-control-allow-origin"] == "https://mi-app.vercel.app"
+    # OPTIONS con origen NO permitido → 200 sin ACAO
+    r3 = tc.options("/health", headers={"Origin": "https://malo.example.com"})
+    assert r3.status_code == 200
+    assert "access-control-allow-origin" not in r3.headers
+
+
+def _aux_assert_get_health(tc) -> None:
+    # GET normal atraviesa el middleware (call_next)
+    r4 = tc.get("/health")
+    assert r4.status_code == 200 and r4.json() == {"status": "ok"}
+
+
 class TestMainApp:
     def test_lifespan_db_less_cleanup_y_options_middleware(self) -> None:
         """Un solo arranque con lifespan cubre migraciones salteadas + cleanup + log de rutas."""
@@ -492,21 +524,9 @@ class TestMainApp:
             fastapi_app.dependency_overrides[get_db] = lambda: FakeSession()
             try:
                 with TestClient(fastapi_app) as tc:
-                    # OPTIONS con origen permitido por lista
-                    r = tc.options("/health", headers={"Origin": "http://localhost:3000"})
-                    assert r.status_code == 200
-                    assert r.headers["access-control-allow-origin"] == "http://localhost:3000"
-                    assert r.headers["access-control-allow-credentials"] == "true"
-                    # OPTIONS con origen permitido por regex
-                    r2 = tc.options("/health", headers={"Origin": "https://mi-app.vercel.app"})
-                    assert r2.headers["access-control-allow-origin"] == "https://mi-app.vercel.app"
-                    # OPTIONS con origen NO permitido → 200 sin ACAO
-                    r3 = tc.options("/health", headers={"Origin": "https://malo.example.com"})
-                    assert r3.status_code == 200
-                    assert "access-control-allow-origin" not in r3.headers
-                    # GET normal atraviesa el middleware (call_next)
-                    r4 = tc.get("/health")
-                    assert r4.status_code == 200 and r4.json() == {"status": "ok"}
+                    _aux_assert_options_origen_lista(tc)
+                    _aux_assert_options_regex_y_malo(tc)
+                    _aux_assert_get_health(tc)
             finally:
                 fastapi_app.dependency_overrides.pop(get_db, None)
         cleanup.assert_called_once()

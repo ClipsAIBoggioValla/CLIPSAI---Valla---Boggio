@@ -45,6 +45,49 @@ VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 TRANSCRIPT_EXTENSIONS = {".txt", ".srt", ".vtt"}
 
 
+def _credenciales_r2() -> tuple:
+    """Claves AWS del entorno; aborta si falta alguna."""
+    access_key = os.getenv("AWS_ACCESS_KEY_ID", "").strip()
+    secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "").strip()
+
+    if not access_key or not secret_key:
+        raise RuntimeError("Faltan AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY para subir a R2")
+    return access_key, secret_key
+
+
+def _cliente_s3():
+    """Cliente S3 apuntando a R2 según el entorno."""
+    try:
+        import boto3
+        from botocore.config import Config
+    except ImportError as exc:
+        raise RuntimeError(f"boto3 no está instalado: {exc}") from exc
+
+    access_key, secret_key = _credenciales_r2()
+    endpoint_url = os.getenv("AWS_ENDPOINT_URL", "").strip() or None
+
+    return boto3.client(
+        "s3",
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        endpoint_url=endpoint_url,
+        region_name=os.getenv("AWS_REGION", "auto"),
+        config=Config(signature_version="s3v4"),
+    )
+
+
+def _url_publica_r2(key: str) -> str:
+    """URL pública del objeto vía custom domain del bucket."""
+    # Construir URL PÚBLICA vía custom domain del bucket.
+    # R2_PUBLIC_URL (ej: https://videos.clipsai.xyz o el bucket r2.dev para dev).
+    # El custom domain ya apunta al bucket: la key va SIN el nombre del bucket.
+    # Las URLs *.r2.cloudflarestorage.com son PRIVADAS (403 sin firma) — no se usan.
+    public_base_url = os.getenv("R2_PUBLIC_URL", "").strip().rstrip("/")
+    if not public_base_url:
+        public_base_url = "https://videos.clipsai.xyz"
+    return f"{public_base_url}/{key.lstrip('/')}"
+
+
 def _upload_to_r2(file_path: str, bucket: str, key: str) -> str:
     """Sube un archivo a R2 y devuelve la URL pública.
     
@@ -59,66 +102,55 @@ def _upload_to_r2(file_path: str, bucket: str, key: str) -> str:
     Raises:
         RuntimeError: Si falla el upload
     """
-    try:
-        import boto3
-        from botocore.config import Config
-    except ImportError as exc:
-        raise RuntimeError(f"boto3 no está instalado: {exc}") from exc
-    
-    access_key = os.getenv("AWS_ACCESS_KEY_ID", "").strip()
-    secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "").strip()
-    endpoint_url = os.getenv("AWS_ENDPOINT_URL", "").strip() or None
-    
-    if not access_key or not secret_key:
-        raise RuntimeError("Faltan AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY para subir a R2")
-    
-    s3 = boto3.client(
-        "s3",
-        aws_access_key_id=access_key,
-        aws_secret_access_key=secret_key,
-        endpoint_url=endpoint_url,
-        region_name=os.getenv("AWS_REGION", "auto"),
-        config=Config(signature_version="s3v4"),
-    )
-    
+    s3 = _cliente_s3()
+
     try:
         logger.info("Subiendo a R2 %s -> %s/%s", file_path, bucket, key)
         s3.upload_file(file_path, bucket, key)
-        
-        # Construir URL PÚBLICA vía custom domain del bucket.
-        # R2_PUBLIC_URL (ej: https://videos.clipsai.xyz o el bucket r2.dev para dev).
-        # El custom domain ya apunta al bucket: la key va SIN el nombre del bucket.
-        # Las URLs *.r2.cloudflarestorage.com son PRIVADAS (403 sin firma) — no se usan.
-        public_base_url = os.getenv("R2_PUBLIC_URL", "").strip().rstrip("/")
-        if not public_base_url:
-            public_base_url = "https://videos.clipsai.xyz"
-        url = f"{public_base_url}/{key.lstrip('/')}"
-        
+
+        url = _url_publica_r2(key)
+
         logger.info("Subido a R2: %s", url)
         return url
-        
+
     except Exception as exc:
         raise RuntimeError(f"Error subiendo a R2: {exc}") from exc
+
+
+def _validar_content_length(response, max_bytes: int) -> None:
+    """Aborta si el Content-Length del response supera el máximo."""
+    content_length = response.headers.get("Content-Length")
+    if content_length and int(content_length) > max_bytes:
+        raise ValueError(f"El archivo supera el maximo permitido de {max_bytes // (1024 * 1024)} MB")
+
+
+def _copiar_chunks(response, output, max_bytes: int) -> int:
+    """Escribe los chunks del response en el archivo y devuelve el total."""
+    total = 0
+    for chunk in response.iter_content(chunk_size=DOWNLOAD_CHUNK_BYTES):
+        if not chunk:
+            continue
+        total += len(chunk)
+        if total > max_bytes:
+            raise ValueError(f"El archivo supera el maximo permitido de {max_bytes // (1024 * 1024)} MB")
+        output.write(chunk)
+    return total
+
+
+def _descargar_stream(url: str, destination: Path, max_bytes: int) -> int:
+    """Descarga el stream a destino y devuelve la cantidad de bytes escritos."""
+    with requests.get(url, stream=True, timeout=(10, 120), allow_redirects=True) as response:
+        response.raise_for_status()
+        _validar_content_length(response, max_bytes)
+        with destination.open("wb") as output:
+            return _copiar_chunks(response, output, max_bytes)
 
 
 def _download_file(url: str, destination: Path, max_bytes: int) -> None:
     """Descarga un archivo desde una URL sin cargarlo todo en memoria."""
     total = 0
     try:
-        with requests.get(url, stream=True, timeout=(10, 120), allow_redirects=True) as response:
-            response.raise_for_status()
-            content_length = response.headers.get("Content-Length")
-            if content_length and int(content_length) > max_bytes:
-                raise ValueError(f"El archivo supera el maximo permitido de {max_bytes // (1024 * 1024)} MB")
-
-            with destination.open("wb") as output:
-                for chunk in response.iter_content(chunk_size=DOWNLOAD_CHUNK_BYTES):
-                    if not chunk:
-                        continue
-                    total += len(chunk)
-                    if total > max_bytes:
-                        raise ValueError(f"El archivo supera el maximo permitido de {max_bytes // (1024 * 1024)} MB")
-                    output.write(chunk)
+        total = _descargar_stream(url, destination, max_bytes)
     except requests.RequestException as exc:
         raise RuntimeError(f"No se pudo descargar el archivo de entrada: {exc}") from exc
 
@@ -146,6 +178,169 @@ def _serialize_clip(clip: Any) -> dict[str, Any]:
         return {"value": str(clip)}
 
 
+def _validar_input(job: dict[str, Any]) -> dict[str, Any]:
+    """Valida la forma del job y devuelve su input."""
+    if not isinstance(job, dict):
+        raise ValueError("El job de RunPod debe ser un objeto JSON")
+
+    input_data = job.get("input")
+    if not isinstance(input_data, dict):
+        raise ValueError("Falta job['input'] con los parametros de procesamiento")
+    return input_data
+
+
+def _video_url_de(input_data: dict[str, Any]) -> tuple:
+    """(video_url limpia, extension) validados del input."""
+    # Extraer video_url
+    video_url = input_data.get("video_url")
+    if not isinstance(video_url, str) or not video_url.strip():
+        raise ValueError("Falta el parametro obligatorio input.video_url")
+    video_url = video_url.strip()
+    video_extension = _get_extension(video_url, VIDEO_EXTENSIONS, ".mp4")
+    return video_url, video_extension
+
+
+def _validar_transcript_url(input_data: dict[str, Any]) -> str | None:
+    """Valida transcription_url del input; None si no viene."""
+    transcript_url = input_data.get("transcription_url")
+    if transcript_url is not None and (not isinstance(transcript_url, str) or not transcript_url.strip()):
+        raise ValueError("input.transcription_url debe ser una URL no vacia")
+    return transcript_url
+
+
+def _extension_transcripcion(transcript_url: str | None) -> str:
+    """Extension permitida de la transcripción; '.txt' por defecto."""
+    if transcript_url:
+        return _get_extension(transcript_url, TRANSCRIPT_EXTENSIONS, ".txt")
+    return ".txt"
+
+
+def _validar_tipo_transcript_text(transcript_text: Any) -> None:
+    """Aborta si transcription_text no es texto."""
+    if transcript_text is not None and not isinstance(transcript_text, str):
+        raise ValueError("input.transcription_text debe ser texto")
+
+
+def _validar_tamano_transcript_text(transcript_text: str) -> None:
+    """Aborta si transcription_text supera el máximo permitido."""
+    if transcript_text and len(transcript_text.encode("utf-8")) > MAX_TRANSCRIPT_BYTES:
+        raise ValueError("input.transcription_text supera el maximo de 10 MB")
+
+
+def _transcript_text_de(input_data: dict[str, Any]) -> str | None:
+    """Valida y devuelve transcription_text del input."""
+    transcript_text = input_data.get("transcription_text")
+    _validar_tipo_transcript_text(transcript_text)
+    _validar_tamano_transcript_text(transcript_text)
+    return transcript_text
+
+
+def _resultado_fallo(result, video_id: str) -> dict[str, Any]:
+    """Respuesta FAILED a partir del resultado del engine."""
+    error_msg = f"{result.error_tipo}: {result.error}" if result.error_tipo else result.error
+    logger.error("procesar_video fallo: %s", error_msg)
+    return {
+        "status": "FAILED",
+        "video_id": video_id,
+        "error": error_msg,
+        "error_tipo": result.error_tipo,
+        "error_detalle": result.error_detalle,
+        "transcription_segments": [],
+    }
+
+
+def _descargar_transcripcion(transcript_url: str | None, transcript_text: str | None, transcript_path: Path) -> None:
+    """Descarga la transcripción de la URL o escribe el texto provisto."""
+    # Descargar o escribir transcripcion
+    if transcript_url:
+        logger.info("Descargando transcripcion a %s...", transcript_path)
+        _download_file(transcript_url, transcript_path, MAX_TRANSCRIPT_BYTES)
+        logger.info("Transcripcion descargada: %s bytes", transcript_path.stat().st_size)
+    else:
+        logger.info("Escribiendo transcripcion desde texto...")
+        transcript_path.write_text(transcript_text or "", encoding="utf-8")
+
+
+def _ts_a_segundos_handler(ts_str: str) -> float:
+    """Convierte 'HH:MM:SS', 'MM:SS' o segundos sueltos a float."""
+    parts = ts_str.split(":")
+    if len(parts) == 3:
+        return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+    elif len(parts) == 2:
+        return int(parts[0]) * 60 + float(parts[1])
+    return float(ts_str)
+
+
+def _clip_vertical_dict(idx: int, clip: Any, r2_url: str, clip_start: float, clip_end: float) -> dict[str, Any]:
+    """Entrada del clip vertical para la respuesta del handler."""
+    return {
+        "index": idx,
+        "url_r2": r2_url,
+        "titulo": clip.titulo_sugerido,
+        "hook_texto": clip.hook_texto,
+        "score": clip.score,
+        "inicio": clip.inicio,
+        "fin": clip.fin,
+        "duracion": int(clip_end - clip_start),
+        "criterio_principal": clip.criterio_principal,
+        "primer_segundo": clip.primer_segundo,
+        "motivo": clip.motivo,
+    }
+
+
+def _procesar_clip_vertical(video_path: str, transcription_segments: list, clip: Any, idx: int, bucket: str, video_id: str) -> dict[str, Any] | None:
+    """Procesa un clip a vertical 9:16 con subs+hook y lo sube a R2. None si falla."""
+    from video_processor import process_clip_vertical
+
+    # Convertir timestamps de string a segundos
+    clip_start = _ts_a_segundos_handler(clip.inicio)
+    clip_end = _ts_a_segundos_handler(clip.fin)
+
+    # Procesar clip vertical
+    horizontal_path = clip.archivo
+    vertical_path = horizontal_path.replace(".mp4", "_vertical.mp4")
+
+    success = process_clip_vertical(
+        input_video=str(video_path),
+        output_video=vertical_path,
+        segments=transcription_segments,
+        clip_start=clip_start,
+        clip_end=clip_end,
+        hook_text=clip.hook_texto if clip.hook_texto else None
+    )
+
+    if not success or not os.path.exists(vertical_path):
+        logger.warning("Clip %s fallo el procesamiento vertical, saltando", idx + 1)
+        return None
+
+    # Subir a R2
+    try:
+        r2_key = f"clips/{video_id}/{idx}_vertical.mp4"
+        r2_url = _upload_to_r2(vertical_path, bucket, r2_key)
+
+        logger.info("Clip %s subido a R2: %s", idx + 1, r2_url)
+
+        return _clip_vertical_dict(idx, clip, r2_url, clip_start, clip_end)
+
+    except Exception as exc:
+        logger.warning("Error subiendo clip %s a R2: %s", idx + 1, exc)
+        return None
+
+
+def _procesar_clips_verticales(video_path: str, transcription_segments: list, clips: list, bucket: str, video_id: str) -> list:
+    """Procesa todos los clips horizontales a verticales 9:16 y los sube a R2."""
+    clips_verticales = []
+
+    for idx, clip in enumerate(clips):
+        logger.info("Procesando clip %s/%s...", idx + 1, len(clips))
+
+        vertical = _procesar_clip_vertical(video_path, transcription_segments, clip, idx, bucket, video_id)
+        if vertical is not None:
+            clips_verticales.append(vertical)
+
+    return clips_verticales
+
+
 def process_video_job(job: dict[str, Any]) -> dict[str, Any]:
     """Handler principal de RunPod.
 
@@ -165,38 +360,18 @@ def process_video_job(job: dict[str, Any]) -> dict[str, Any]:
         }}
     """
     logger.info("Iniciando procesamiento...")
-    
-    if not isinstance(job, dict):
-        raise ValueError("El job de RunPod debe ser un objeto JSON")
-    
-    input_data = job.get("input")
-    if not isinstance(input_data, dict):
-        raise ValueError("Falta job['input'] con los parametros de procesamiento")
 
-    # Extraer video_url
-    video_url = input_data.get("video_url")
-    if not isinstance(video_url, str) or not video_url.strip():
-        raise ValueError("Falta el parametro obligatorio input.video_url")
-    video_url = video_url.strip()
-    video_extension = _get_extension(video_url, VIDEO_EXTENSIONS, ".mp4")
+    input_data = _validar_input(job)
+
+    video_url, video_extension = _video_url_de(input_data)
 
     # Extraer transcription_url o transcription_text
-    transcript_url = input_data.get("transcription_url")
-    if transcript_url is not None and (not isinstance(transcript_url, str) or not transcript_url.strip()):
-        raise ValueError("input.transcription_url debe ser una URL no vacia")
-    if transcript_url:
-        transcript_extension = _get_extension(transcript_url, TRANSCRIPT_EXTENSIONS, ".txt")
-    else:
-        transcript_extension = ".txt"
-
-    transcript_text = input_data.get("transcription_text")
-    if transcript_text is not None and not isinstance(transcript_text, str):
-        raise ValueError("input.transcription_text debe ser texto")
-    if transcript_text and len(transcript_text.encode("utf-8")) > MAX_TRANSCRIPT_BYTES:
-        raise ValueError("input.transcription_text supera el maximo de 10 MB")
+    transcript_url = _validar_transcript_url(input_data)
+    transcript_extension = _extension_transcripcion(transcript_url)
+    transcript_text = _transcript_text_de(input_data)
 
     video_id = str(input_data.get("video_id") or uuid.uuid4())
-    
+
     logger.info("video_id=%s | video_url=%s...", video_id, video_url[:80])
 
     with tempfile.TemporaryDirectory(prefix="clipsai_runpod_") as work_dir:
@@ -209,14 +384,7 @@ def process_video_job(job: dict[str, Any]) -> dict[str, Any]:
         _download_file(video_url, video_path, MAX_VIDEO_BYTES)
         logger.info("Video descargado: %s bytes", video_path.stat().st_size)
 
-        # Descargar o escribir transcripcion
-        if transcript_url:
-            logger.info("Descargando transcripcion a %s...", transcript_path)
-            _download_file(transcript_url, transcript_path, MAX_TRANSCRIPT_BYTES)
-            logger.info("Transcripcion descargada: %s bytes", transcript_path.stat().st_size)
-        else:
-            logger.info("Escribiendo transcripcion desde texto...")
-            transcript_path.write_text(transcript_text or "", encoding="utf-8")
+        _descargar_transcripcion(transcript_url, transcript_text, transcript_path)
 
         # Importar SOLO engine.py (sin FastAPI, sin DB)
         logger.info("Importando engine.py...")
@@ -227,16 +395,7 @@ def process_video_job(job: dict[str, Any]) -> dict[str, Any]:
         result = procesar_video(str(video_path), str(transcript_path))
 
         if not result.exito:
-            error_msg = f"{result.error_tipo}: {result.error}" if result.error_tipo else result.error
-            logger.error("procesar_video fallo: %s", error_msg)
-            return {
-                "status": "FAILED",
-                "video_id": video_id,
-                "error": error_msg,
-                "error_tipo": result.error_tipo,
-                "error_detalle": result.error_detalle,
-                "transcription_segments": [],
-            }
+            return _resultado_fallo(result, video_id)
 
         clips = result.clips
         transcription_segments = getattr(result, 'transcription_segments', None) or []
@@ -249,67 +408,10 @@ def process_video_job(job: dict[str, Any]) -> dict[str, Any]:
         # Procesar clips horizontales a verticales 9:16 con subs+hook y subir a R2
         logger.info("Procesando clips verticales 9:16 + subs + hook...")
         from video_processor import process_clip_vertical
-        
+
         bucket = os.getenv("BUCKET_NAME", "clipsai-videos").strip()
-        clips_verticales = []
-        
-        for idx, clip in enumerate(clips):
-            logger.info("Procesando clip %s/%s...", idx + 1, len(clips))
-            
-            # Convertir timestamps de string a segundos
-            def ts_to_seconds(ts_str: str) -> float:
-                parts = ts_str.split(":")
-                if len(parts) == 3:
-                    return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
-                elif len(parts) == 2:
-                    return int(parts[0]) * 60 + float(parts[1])
-                return float(ts_str)
-            
-            clip_start = ts_to_seconds(clip.inicio)
-            clip_end = ts_to_seconds(clip.fin)
-            
-            # Procesar clip vertical
-            horizontal_path = clip.archivo
-            vertical_path = horizontal_path.replace(".mp4", "_vertical.mp4")
-            
-            success = process_clip_vertical(
-                input_video=str(video_path),
-                output_video=vertical_path,
-                segments=transcription_segments,
-                clip_start=clip_start,
-                clip_end=clip_end,
-                hook_text=clip.hook_texto if clip.hook_texto else None
-            )
-            
-            if not success or not os.path.exists(vertical_path):
-                logger.warning("Clip %s fallo el procesamiento vertical, saltando", idx + 1)
-                continue
-            
-            # Subir a R2
-            try:
-                r2_key = f"clips/{video_id}/{idx}_vertical.mp4"
-                r2_url = _upload_to_r2(vertical_path, bucket, r2_key)
-                
-                clips_verticales.append({
-                    "index": idx,
-                    "url_r2": r2_url,
-                    "titulo": clip.titulo_sugerido,
-                    "hook_texto": clip.hook_texto,
-                    "score": clip.score,
-                    "inicio": clip.inicio,
-                    "fin": clip.fin,
-                    "duracion": int(clip_end - clip_start),
-                    "criterio_principal": clip.criterio_principal,
-                    "primer_segundo": clip.primer_segundo,
-                    "motivo": clip.motivo,
-                })
-                
-                logger.info("Clip %s subido a R2: %s", idx + 1, r2_url)
-                
-            except Exception as exc:
-                logger.warning("Error subiendo clip %s a R2: %s", idx + 1, exc)
-                continue
-        
+        clips_verticales = _procesar_clips_verticales(video_path, transcription_segments, clips, bucket, video_id)
+
         logger.info("%s clips verticales procesados y subidos a R2", len(clips_verticales))
 
         response = {
@@ -321,11 +423,11 @@ def process_video_job(job: dict[str, Any]) -> dict[str, Any]:
             "output_folder": result.carpeta_salida,
             "transcription_segments": transcription_segments,
         }
-        
+
         # Mensaje informativo si no hay clips
         if len(clips_verticales) == 0:
             response["message"] = "No se pudieron procesar clips verticales. Revisa los logs para más detalles."
-        
+
         return response
 
 

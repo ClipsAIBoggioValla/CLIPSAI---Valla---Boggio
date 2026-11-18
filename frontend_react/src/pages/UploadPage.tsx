@@ -15,6 +15,65 @@ function fileErrorMessage(err: unknown): string {
   return 'Error inesperado. Intenta nuevamente.'
 }
 
+function resolveJobId(job: { job_id?: string; id: string }): string {
+  return job.job_id ?? job.id
+}
+
+function persistActiveJobId(jobId: string): void {
+  try { localStorage.setItem('clipsai_active_job_id', jobId) } catch {}
+}
+
+function renderActiveJobBanner(activeJobId: string | null) {
+  if (!activeJobId) return null
+  return (
+    <div className="rounded-xl border border-[rgba(180,241,5,0.22)] bg-[rgba(180,241,5,0.08)] px-4 py-3 flex items-center justify-between gap-3 mb-6">
+      <span className="text-sm font-bold text-[#B4F105] flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-[#B4F105] animate-pulse" /> Procesamiento activo detectado</span>
+      <Link to={`/jobs/${activeJobId}`} className="btn-custom btn-custom-primary btn-custom-sm">Ver progreso {activeJobId.slice(0, 8)} →</Link>
+    </div>
+  )
+}
+
+function renderErrorAlert(error: string | null) {
+  if (!error) return null
+  return (
+    <div role="alert" className="alert-custom alert-custom-danger">
+      <i className="bi bi-exclamation-triangle-fill alert-custom-icon" />
+      <div className="alert-custom-content">{error}</div>
+    </div>
+  )
+}
+
+function transcriptDropzoneClass(transcriptFile: File | null): string {
+  return `dropzone-neon flex flex-col items-center justify-center rounded-xl p-6 sm:p-8 cursor-pointer ${transcriptFile ? 'has-file' : ''}`
+}
+
+function transcriptLabel(transcriptFile: File | null): string {
+  return transcriptFile ? transcriptFile.name : 'Arrastra o selecciona tu transcripción'
+}
+
+function transcriptBadge(transcriptFile: File | null) {
+  if (!transcriptFile) return null
+  return (
+    <span className="inline-flex items-center gap-1.5 mt-2 px-2.5 py-1 rounded-full text-xs font-bold bg-[rgba(180,241,5,0.14)] text-[#B4F105] border border-[rgba(180,241,5,0.25)]"><i className="bi bi-check-circle-fill" /> {(transcriptFile.size / 1024).toFixed(0)} KB</span>
+  )
+}
+
+function submitButtonContent(isUploading: boolean, status: UploadState) {
+  if (!isUploading) {
+    return (<><i className="bi bi-lightning-charge-fill" /> Subir y procesar</>)
+  }
+  return (
+    <>
+      <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#080C14]/30 border-t-[#080C14]" />
+      {status === 'uploading' ? 'Subiendo archivos...' : 'Iniciando procesamiento...'}
+    </>
+  )
+}
+
+function submitDisabled(isUploading: boolean, isDirectUploadBusy: boolean, hasVideo: boolean): boolean {
+  return isUploading || isDirectUploadBusy || !hasVideo
+}
+
 export default function UploadPage() {
   const navigate = useNavigate()
   const [videoFile, setVideoFile] = useState<File | null>(null)
@@ -63,8 +122,8 @@ export default function UploadPage() {
     setSampleState('loading'); setSampleError(null)
     try {
       const job = await videoService.createSampleJob()
-      const jobId = job.job_id ?? job.id
-      try { localStorage.setItem('clipsai_active_job_id', jobId) } catch {}
+      const jobId = resolveJobId(job)
+      persistActiveJobId(jobId)
       navigate(`/jobs/${jobId}`, { replace: false })
     } catch (err: unknown) {
       setSampleError(fileErrorMessage(err)); setSampleState('error')
@@ -80,8 +139,8 @@ export default function UploadPage() {
       const video = await videoService.upload(videoFile, transcriptFile ?? null)
       setStatus('creating_job')
       const job = await jobService.createJob(video.id)
-      const jobId = job.job_id ?? job.id
-      try { localStorage.setItem('clipsai_active_job_id', jobId) } catch {}
+      const jobId = resolveJobId(job)
+      persistActiveJobId(jobId)
       navigate(`/jobs/${jobId}`, { replace: false })
     } catch (err: unknown) {
       setStatus('idle'); setError(fileErrorMessage(err))
@@ -90,12 +149,7 @@ export default function UploadPage() {
 
   return (
     <div className="max-w-3xl mx-auto">
-      {activeJobId && (
-        <div className="rounded-xl border border-[rgba(180,241,5,0.22)] bg-[rgba(180,241,5,0.08)] px-4 py-3 flex items-center justify-between gap-3 mb-6">
-          <span className="text-sm font-bold text-[#B4F105] flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-[#B4F105] animate-pulse" /> Procesamiento activo detectado</span>
-          <Link to={`/jobs/${activeJobId}`} className="btn-custom btn-custom-primary btn-custom-sm">Ver progreso {activeJobId.slice(0, 8)} →</Link>
-        </div>
-      )}
+      {renderActiveJobBanner(activeJobId)}
       <div className="page-header" style={{ marginBottom: '2rem' }}>
         <div>
           <div className="flex flex-wrap items-center gap-3 mb-4">
@@ -107,12 +161,7 @@ export default function UploadPage() {
         </div>
       </div>
 
-      {error && (
-        <div role="alert" className="alert-custom alert-custom-danger">
-          <i className="bi bi-exclamation-triangle-fill alert-custom-icon" />
-          <div className="alert-custom-content">{error}</div>
-        </div>
-      )}
+      {renderErrorAlert(error)}
 
       <form onSubmit={handleSubmit} className="card-spark space-y-6">
         <div>
@@ -122,19 +171,19 @@ export default function UploadPage() {
 
         <div>
           <label className="form-label-custom">Archivo de Transcripción <span className="text-[#94A3B8] font-normal">(opcional)</span></label>
-          <label className={`dropzone-neon flex flex-col items-center justify-center rounded-xl p-6 sm:p-8 cursor-pointer ${transcriptFile ? 'has-file' : ''}`}>
+          <label className={transcriptDropzoneClass(transcriptFile)}>
             <span className="dropzone-icon-neon mb-3"><i className="bi bi-file-earmark-text" /></span>
-            <span className="text-sm font-bold" style={{ color: '#F1F5F9' }}>{transcriptFile ? transcriptFile.name : 'Arrastra o selecciona tu transcripción'}</span>
+            <span className="text-sm font-bold" style={{ color: '#F1F5F9' }}>{transcriptLabel(transcriptFile)}</span>
             <span className="text-xs mt-1" style={{ color: '#94A3B8' }}>.txt, .srt (UTF-8)</span>
-            {transcriptFile && (<span className="inline-flex items-center gap-1.5 mt-2 px-2.5 py-1 rounded-full text-xs font-bold bg-[rgba(180,241,5,0.14)] text-[#B4F105] border border-[rgba(180,241,5,0.25)]"><i className="bi bi-check-circle-fill" /> {(transcriptFile.size / 1024).toFixed(0)} KB</span>)}
+            {transcriptBadge(transcriptFile)}
             <input type="file" accept=".txt,.srt,text/plain" onChange={onTranscriptChange} className="hidden" disabled={isUploading} />
           </label>
         </div>
 
         <DirectUploadPanel videoFile={videoFile} directUploadState={directUploadState} directUploadError={directUploadError} directUploadKey={directUploadKey} directUploadResult={directUploadResult} isUploading={isUploading} onUpload={handleFileUpload} />
 
-        <button type="submit" disabled={isUploading || isDirectUploadBusy || !videoFile} className="btn-custom btn-custom-primary w-full justify-center btn-custom-lg shadow-[0_0_28px_rgba(180,241,5,0.35)]">
-          {isUploading ? (<><span className="h-4 w-4 animate-spin rounded-full border-2 border-[#080C14]/30 border-t-[#080C14]" />{status === 'uploading' ? 'Subiendo archivos...' : 'Iniciando procesamiento...'}</>) : (<><i className="bi bi-lightning-charge-fill" /> Subir y procesar</>)}
+        <button type="submit" disabled={submitDisabled(isUploading, isDirectUploadBusy, !!videoFile)} className="btn-custom btn-custom-primary w-full justify-center btn-custom-lg shadow-[0_0_28px_rgba(180,241,5,0.35)]">
+          {submitButtonContent(isUploading, status)}
         </button>
 
         {isUploading && (

@@ -23,27 +23,51 @@ from ..schemas import JobResponse
 router = APIRouter(prefix="/videos", tags=["videos"])
 
 
-def _get_sample_video_path() -> Path:
-    """Resuelve la ruta del video de muestra."""
+def _muestra_de_entorno() -> Path | None:
+    """Ruta de SAMPLE_VIDEO_PATH si apunta a un archivo existente."""
     env_path = os.getenv("SAMPLE_VIDEO_PATH", "").strip()
     if env_path:
         p = Path(env_path)
         if p.is_file():
             return p
+    return None
 
-    # Ruta por defecto: backend_fastapi/storage/sample/sample.mp4
+
+def _muestra_de_parents() -> Path | None:
+    """sample.mp4 buscado en backend_fastapi/storage/sample desde los parents."""
     cur = Path(__file__).resolve()
     for parent in cur.parents:
         candidate = parent / "backend_fastapi" / "storage" / "sample" / "sample.mp4"
         if candidate.is_file():
             return candidate
+    return None
 
-    # Fallback: buscar en el directorio de trabajo actual
+
+def _muestra_de_fallback() -> Path | None:
+    """sample.mp4 bajo el directorio de trabajo actual, si existe."""
     fallback = Path.cwd() / "backend_fastapi" / "storage" / "sample" / "sample.mp4"
     if fallback.is_file():
         return fallback
+    return None
 
-    return candidate  # Retorna la ruta esperada aunque no exista (para error descriptivo)
+
+def _muestra_esperada() -> Path:
+    """Ruta esperada del sample (raíz del sistema de archivos) para el error descriptivo."""
+    return Path(__file__).resolve().parents[-1] / "backend_fastapi" / "storage" / "sample" / "sample.mp4"
+
+
+def _get_sample_video_path() -> Path:
+    """Resuelve la ruta del video de muestra."""
+    por_entorno = _muestra_de_entorno()
+    if por_entorno is not None:
+        return por_entorno
+    por_parents = _muestra_de_parents()
+    if por_parents is not None:
+        return por_parents
+    por_fallback = _muestra_de_fallback()
+    if por_fallback is not None:
+        return por_fallback
+    return _muestra_esperada()
 
 
 @router.post(

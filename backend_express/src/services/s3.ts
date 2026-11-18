@@ -23,18 +23,22 @@ function hmac(key: Buffer | string, data: string): Buffer {
 }
 
 /** RFC 3986 URI encoding (encodeSlash=false preserva `/`). */
+function percentEncodeChar(ch: string): string {
+  const bytes = Buffer.from(ch, 'utf-8')
+  let out = ''
+  for (const b of bytes) out += '%' + b.toString(16).toUpperCase().padStart(2, '0')
+  return out
+}
+
+function uriEncodeChar(ch: string, encodeSlash: boolean): string {
+  if (/[A-Za-z0-9\-_.~]/.test(ch)) return ch
+  if (ch === '/' && !encodeSlash) return ch
+  return percentEncodeChar(ch)
+}
+
 function uriEncode(input: string, encodeSlash = true): string {
   let out = ''
-  for (const ch of input) {
-    if (/[A-Za-z0-9\-_.~]/.test(ch)) {
-      out += ch
-    } else if (ch === '/' && !encodeSlash) {
-      out += ch
-    } else {
-      const bytes = Buffer.from(ch, 'utf-8')
-      for (const b of bytes) out += '%' + b.toString(16).toUpperCase().padStart(2, '0')
-    }
-  }
+  for (const ch of input) out += uriEncodeChar(ch, encodeSlash)
   return out
 }
 
@@ -58,15 +62,19 @@ export interface S3Config {
   endpoint: string
 }
 
+function envTrim(name: string, fallback: string): string {
+  return (process.env[name] || fallback).trim()
+}
+
 export function getS3Config(): S3Config {
-  const accessKeyId = (process.env.AWS_ACCESS_KEY_ID || '').trim()
-  const secretAccessKey = (process.env.AWS_SECRET_ACCESS_KEY || '').trim()
+  const accessKeyId = envTrim('AWS_ACCESS_KEY_ID', '')
+  const secretAccessKey = envTrim('AWS_SECRET_ACCESS_KEY', '')
   if (!accessKeyId || !secretAccessKey) {
     throw new Error('AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY no están configuradas')
   }
-  const region = (process.env.AWS_REGION || 'auto').trim() || 'auto'
-  const bucket = (process.env.BUCKET_NAME || 'clipsai-videos').trim()
-  const endpoint = (process.env.AWS_ENDPOINT_URL || '').trim().replace(/\/+$/, '')
+  const region = envTrim('AWS_REGION', 'auto') || 'auto'
+  const bucket = envTrim('BUCKET_NAME', 'clipsai-videos')
+  const endpoint = envTrim('AWS_ENDPOINT_URL', '').replace(/\/+$/, '')
   return { accessKeyId, secretAccessKey, region, bucket, endpoint }
 }
 

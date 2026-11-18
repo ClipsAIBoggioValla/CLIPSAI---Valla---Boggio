@@ -30,6 +30,30 @@ interface Segment {
 }
 
 // ----------------------------------------------------------------------------
+// Helpers de coerción
+// ----------------------------------------------------------------------------
+
+function secondsOrZero(v: unknown): number {
+  return Number(v) || 0
+}
+
+function toStrOrNull(v: unknown): string | null {
+  return (v as string | null) ?? null
+}
+
+function toNumberOrNull(v: unknown): number | null {
+  return v !== null && v !== undefined ? Number(v) : null
+}
+
+function toIsoOrNull(v: unknown): string | null {
+  return v ? new Date(v as string).toISOString() : null
+}
+
+function isoOrNow(v: unknown): string {
+  return v ? new Date(v as string).toISOString() : new Date().toISOString()
+}
+
+// ----------------------------------------------------------------------------
 // ASS generator (port de services/ass_generator.py)
 // ----------------------------------------------------------------------------
 
@@ -50,25 +74,40 @@ function sanitizeText(text: string): string {
   return t
 }
 
+function pushWrappedWord(cur: string[], word: string, maxChars: number, curLen: number, lines: string[]): number {
+  const add = word.length + (cur.length ? 1 : 0)
+  if (curLen + add > maxChars && cur.length) {
+    lines.push(cur.join(' '))
+    return word.length
+  }
+  cur.push(word)
+  return curLen + add
+}
+
 function wrapText(text: string, maxChars = 28): string {
   const words = text.split(/\s+/).filter(Boolean)
   if (!words.length) return text
   const lines: string[] = []
-  let cur: string[] = []
+  const cur: string[] = []
   let curLen = 0
-  for (const w of words) {
-    const add = w.length + (cur.length ? 1 : 0)
-    if (curLen + add > maxChars && cur.length) {
-      lines.push(cur.join(' '))
-      cur = [w]
-      curLen = w.length
-    } else {
-      cur.push(w)
-      curLen += add
-    }
-  }
+  for (const word of words) curLen = pushWrappedWord(cur, word, maxChars, curLen, lines)
   if (cur.length) lines.push(cur.join(' '))
   return lines.join('\\N')
+}
+
+function clampAssEnd(start: number, end: number): number {
+  const dur = end - start
+  if (dur < 0.8) return start + 0.8
+  if (dur > 6.0) return start + 6.0
+  return end
+}
+
+function assDialogueTimes(seg: Segment): { start: number; end: number } | null {
+  const start = secondsOrZero(seg.start)
+  let end = secondsOrZero(seg.end)
+  if (end <= start) end = start + 0.8
+  if (end - start < 0.15) return null
+  return { start, end: clampAssEnd(start, end) }
 }
 
 function generateAssContent(segments: Segment[], title: string): string {
@@ -93,16 +132,10 @@ function generateAssContent(segments: Segment[], title: string): string {
 
   const lines: string[] = []
   for (const seg of segments) {
-    let start = Number(seg.start) || 0
-    let end = Number(seg.end) || 0
-    if (end <= start) end = start + 0.8
-    let dur = end - start
-    if (dur < 0.15) continue
-    if (dur < 0.8) end = start + 0.8
-    if (dur > 6.0) end = start + 6.0
+    const times = assDialogueTimes(seg)
     const text = sanitizeText(seg.text)
-    if (!text) continue
-    lines.push(`Dialogue: 0,${formatAssTime(start)},${formatAssTime(end)},Default,,0,0,0,,${wrapText(text, 28)}`)
+    if (times === null || !text) continue
+    lines.push(`Dialogue: 0,${formatAssTime(times.start)},${formatAssTime(times.end)},Default,,0,0,0,,${wrapText(text, 28)}`)
   }
   return header + lines.join('\n')
 }
@@ -127,21 +160,39 @@ function hasAudioTrack(videoPath: string): boolean {
   return types.includes('audio')
 }
 
-function extractAudioWav(videoPath: string, wavPath: string): void {
+function requireAudioTrack(videoPath: string): void {
   if (!hasAudioTrack(videoPath)) {
     throw new Error('El video subido no contiene audio o no se detectó voz interpretable para generar subtítulos.')
   }
+}
+
+function isNonEmptyFile(filePath: string): boolean {
+  return fs.existsSync(filePath) && fs.statSync(filePath).size > 0
+}
+
+function fileMissingOrEmpty(filePath: string): boolean {
+  return !isNonEmptyFile(filePath)
+}
+
+function audioExtractError(firstStderr: string, fbStderr: string): string {
+  return `Fallo en FFmpeg al extraer audio WAV: ${firstStderr.slice(-500) || fbStderr.slice(-500)} (0 bytes)`
+}
+
+function wavAttemptFailed(res: { ok: boolean }, wavPath: string): boolean {
+  return !res.ok || fileMissingOrEmpty(wavPath)
+}
+
+function extractAudioWav(videoPath: string, wavPath: string): void {
+  requireAudioTrack(videoPath)
   const first = run(
     'ffmpeg',
     ['-y', '-i', videoPath, '-vn', '-map', '0:a:0?', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', wavPath],
     180000
   )
-  if (!first.ok || !fs.existsSync(wavPath) || fs.statSync(wavPath).size === 0) {
-    const fb = run('ffmpeg', ['-y', '-i', videoPath, '-vn', '-ac', '1', '-ar', '16000', wavPath], 180000)
-    if (!fb.ok || !fs.existsSync(wavPath) || fs.statSync(wavPath).size === 0) {
-      throw new Error(`Fallo en FFmpeg al extraer audio WAV: ${first.stderr.slice(-500) || fb.stderr.slice(-500)} (0 bytes)`)
-    }
-  }
+  if (!wavAttemptFailed(first, wavPath)) return
+  const fb = run('ffmpeg', ['-y', '-i', videoPath, '-vn', '-ac', '1', '-ar', '16000', wavPath], 180000)
+  if (!wavAttemptFailed(fb, wavPath)) return
+  throw new Error(audioExtractError(first.stderr, fb.stderr))
 }
 
 const WHISPER_SCRIPT = `
@@ -161,15 +212,25 @@ except Exception as e:
     sys.exit(1)
 `
 
+function whisperErrorOrEmpty(parsed: unknown): boolean {
+  if (!Array.isArray(parsed)) return true
+  const first = parsed[0] as { __error__?: unknown } | undefined
+  return Boolean(first && first.__error__)
+}
+
+function parseWhisperSegments(stdout: string): Segment[] {
+  const parsed = JSON.parse(stdout.trim() || '[]')
+  if (whisperErrorOrEmpty(parsed)) return []
+  return (parsed as any[])
+    .filter((s: any) => s && typeof s.start === 'number' && typeof s.end === 'number' && s.text)
+    .map((s: any) => ({ start: Number(s.start), end: Number(s.end), text: String(s.text) }))
+}
+
 function transcribeWav(wavPath: string): Segment[] {
   const res = run('python3', ['-c', WHISPER_SCRIPT, wavPath], 900000)
   if (!res.ok) return []
   try {
-    const parsed = JSON.parse(res.stdout.trim() || '[]')
-    if (!Array.isArray(parsed) || (parsed[0] && parsed[0].__error__)) return []
-    return parsed
-      .filter((s: any) => s && typeof s.start === 'number' && typeof s.end === 'number' && s.text)
-      .map((s: any) => ({ start: Number(s.start), end: Number(s.end), text: String(s.text) }))
+    return parseWhisperSegments(res.stdout)
   } catch {
     return []
   }
@@ -188,20 +249,44 @@ function segmentsFromStoredTranscript(transcript: string, duration: number): Seg
   return parts.map((t, i) => ({ start: i * per, end: (i + 1) * per, text: t }))
 }
 
-function resolveSourceVideo(clip: Row): string | null {
+function storedTranscriptSegments(clip: Row): Segment[] {
+  const clipStart = secondsOrZero(clip.start_time)
+  const clipEnd = secondsOrZero(clip.end_time)
+  return segmentsFromStoredTranscript(String(clip.video_transcript || ''), Math.max(0, clipEnd - clipStart))
+}
+
+function transcribedOrStoredSegments(wavPath: string, clip: Row): Segment[] {
+  const segments = transcribeWav(wavPath)
+  return segments.length ? segments : storedTranscriptSegments(clip)
+}
+
+function sourceCandidatesForClip(clip: Row): string[] {
   const candidates: string[] = []
   if (clip.storage_path) candidates.push(String(clip.storage_path))
   if (clip.file_path) candidates.push(String(clip.file_path))
   if (clip.video_filepath) candidates.push(String(clip.video_filepath))
+  return candidates
+}
+
+function isReadableFile(p: string): boolean {
+  try {
+    return fs.existsSync(p) && fs.statSync(p).isFile()
+  } catch {
+    /* ignorar */
+    return false
+  }
+}
+
+function existingFilePath(candidates: string[]): string | null {
   for (const c of candidates) {
-    try {
-      const p = path.resolve(c)
-      if (fs.existsSync(p) && fs.statSync(p).isFile()) return p
-    } catch {
-      /* ignorar */
-    }
+    const p = path.resolve(c)
+    if (isReadableFile(p)) return p
   }
   return null
+}
+
+function resolveSourceVideo(clip: Row): string | null {
+  return existingFilePath(sourceCandidatesForClip(clip))
 }
 
 function outputPathFor(source: string, clipId: string): string {
@@ -230,90 +315,126 @@ async function markFailed(clipId: string, errorLog: string): Promise<void> {
   }
 }
 
+// ----------------------------------------------------------------------------
+// Pipeline
+// ----------------------------------------------------------------------------
+
+async function clearErrorLog(client: import('pg').PoolClient, clipId: string): Promise<void> {
+  try {
+    await client.query(`UPDATE clips SET error_log=NULL WHERE id=$1`, [clipId])
+  } catch {
+    /* columna ausente */
+  }
+}
+
+async function loadSubtitleClip(client: import('pg').PoolClient, clipId: string): Promise<Row | null> {
+  const r = await client.query(
+    `SELECT c.*, v.usuario_id AS owner_id, v.file_path AS video_filepath, v.transcript AS video_transcript
+     FROM clips c JOIN jobs j ON c.job_id = j.id JOIN videos v ON j.video_id = v.id
+     WHERE c.id = $1`,
+    [clipId]
+  )
+  if (r.rows.length === 0) return null
+  return r.rows[0] as Row
+}
+
+function outsideClipRange(s: number, e: number, clipStart: number, clipEnd: number): boolean {
+  return e < clipStart || s > clipEnd
+}
+
+function clippedSegment(seg: Segment, clipStart: number, clipEnd: number): Segment | null {
+  const s = Number(seg.start)
+  const e = Number(seg.end)
+  if (e <= s) return null
+  if (outsideClipRange(s, e, clipStart, clipEnd)) return null
+  const cs = Math.max(s, clipStart)
+  const ce = Math.min(e, clipEnd)
+  if (ce > cs) return { start: cs - clipStart, end: ce - clipStart, text: String(seg.text) }
+  return null
+}
+
+function clipSegments(segments: Segment[], clip: Row): Segment[] {
+  // Recortar al rango del clip y desplazar a 0 (idéntico a subtitle_pipeline.py).
+  const clipStart = secondsOrZero(clip.start_time)
+  const clipEnd = secondsOrZero(clip.end_time)
+  const clipped: Segment[] = []
+  for (const seg of segments) {
+    const piece = clippedSegment(seg, clipStart, clipEnd)
+    if (piece) clipped.push(piece)
+  }
+  return clipped
+}
+
+function subtitleBurnArgs(source: string, assPath: string, outPath: string): string[] {
+  return ['-y', '-i', source, '-vf', `ass=${assPath.replace(/\\/g, '/')}`, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '18', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', outPath]
+}
+
+function burnOk(burn: { ok: boolean }, outPath: string): boolean {
+  return burn.ok && isNonEmptyFile(outPath)
+}
+
+function burnSubtitles(source: string, assPath: string, outPath: string): void {
+  const burn = run('ffmpeg', subtitleBurnArgs(source, assPath, outPath), 300000)
+  if (!burnOk(burn, outPath)) {
+    throw new Error(`FFmpeg burned-in falló: ${burn.stderr.slice(-600)}`)
+  }
+}
+
+async function executeSubtitlePipeline(client: import('pg').PoolClient, clipId: string, clip: Row, source: string, wavPath: string, assPath: string): Promise<void> {
+  extractAudioWav(source, wavPath)
+  const segments = transcribedOrStoredSegments(wavPath, clip)
+  if (!segments.length) throw new Error('Transcripcion vacia: no se generaron segmentos')
+  const clipped = clipSegments(segments, clip)
+  const target = clipped.length ? clipped : segments
+  fs.writeFileSync(assPath, generateAssContent(target, String(clip.title || clip.id)), 'utf-8')
+  const outPath = outputPathFor(source, clipId)
+  burnSubtitles(source, assPath, outPath)
+  await client.query(`UPDATE clips SET status='COMPLETED', file_path=$1, updated_at=NOW() WHERE id=$2`, [outPath, clipId])
+  await clearErrorLog(client, clipId)
+}
+
+function subtitleErrorLog(err: unknown): string {
+  const e = err as Error
+  return `${e?.name || 'Error'}: ${e?.message || String(err)}\n${e?.stack || ''}`
+}
+
+function subtitleErrorMessage(err: unknown): unknown {
+  return (err as Error)?.message || err
+}
+
+async function failSubtitlePipeline(clipId: string, err: unknown): Promise<void> {
+  console.error(`[subtitles] pipeline falló para clip ${clipId}:`, subtitleErrorMessage(err))
+  await markFailed(clipId, subtitleErrorLog(err))
+}
+
+function removeTempFile(p: string | null): void {
+  if (!p) return
+  try {
+    if (fs.existsSync(p)) fs.unlinkSync(p)
+  } catch {
+    /* ignorar */
+  }
+}
+
 export async function runSubtitlePipeline(clipId: string): Promise<void> {
   const client = await pool.connect()
   let wavPath: string | null = null
   let assPath: string | null = null
   try {
-    const r = await client.query(
-      `SELECT c.*, v.usuario_id AS owner_id, v.file_path AS video_filepath, v.transcript AS video_transcript
-       FROM clips c JOIN jobs j ON c.job_id = j.id JOIN videos v ON j.video_id = v.id
-       WHERE c.id = $1`,
-      [clipId]
-    )
-    if (r.rows.length === 0) return
-    const clip = r.rows[0] as Row
-
+    const clip = await loadSubtitleClip(client, clipId)
+    if (!clip) return
     await client.query(`UPDATE clips SET status='PROCESSING', updated_at=NOW() WHERE id=$1`, [clipId])
-    try {
-      await client.query(`UPDATE clips SET error_log=NULL WHERE id=$1`, [clipId])
-    } catch {
-      /* columna ausente */
-    }
-
+    await clearErrorLog(client, clipId)
     const source = resolveSourceVideo(clip)
     if (!source) throw new Error(`Video fuente no encontrado para clip ${clipId}`)
-
     wavPath = path.join(os.tmpdir(), `subtitle_${clipId}_${Date.now()}.wav`)
     assPath = path.join(os.tmpdir(), `subtitle_${clipId}_${Date.now()}.ass`)
-
-    extractAudioWav(source, wavPath)
-    let segments = transcribeWav(wavPath)
-    if (!segments.length) {
-      const clipStart = Number(clip.start_time) || 0
-      const clipEnd = Number(clip.end_time) || 0
-      segments = segmentsFromStoredTranscript(String(clip.video_transcript || ''), Math.max(0, clipEnd - clipStart))
-    }
-    if (!segments.length) throw new Error('Transcripcion vacia: no se generaron segmentos')
-
-    // Recortar al rango del clip y desplazar a 0 (idéntico a subtitle_pipeline.py).
-    const clipStart = Number(clip.start_time) || 0
-    const clipEnd = Number(clip.end_time) || 0
-    const clipped: Segment[] = []
-    for (const seg of segments) {
-      const s = Number(seg.start)
-      const e = Number(seg.end)
-      if (e <= s) continue
-      if (e < clipStart || s > clipEnd) continue
-      const cs = Math.max(s, clipStart)
-      const ce = Math.min(e, clipEnd)
-      if (ce > cs) clipped.push({ start: cs - clipStart, end: ce - clipStart, text: String(seg.text) })
-    }
-    const target = clipped.length ? clipped : segments
-
-    fs.writeFileSync(assPath, generateAssContent(target, String(clip.title || clip.id)), 'utf-8')
-
-    const outPath = outputPathFor(source, clipId)
-    const burn = run(
-      'ffmpeg',
-      ['-y', '-i', source, '-vf', `ass=${assPath.replace(/\\/g, '/')}`, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '18', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', outPath],
-      300000
-    )
-    if (!burn.ok || !fs.existsSync(outPath) || fs.statSync(outPath).size === 0) {
-      throw new Error(`FFmpeg burned-in falló: ${burn.stderr.slice(-600)}`)
-    }
-
-    await client.query(`UPDATE clips SET status='COMPLETED', file_path=$1, updated_at=NOW() WHERE id=$2`, [outPath, clipId])
-    try {
-      await client.query(`UPDATE clips SET error_log=NULL WHERE id=$1`, [clipId])
-    } catch {
-      /* columna ausente */
-    }
+    await executeSubtitlePipeline(client, clipId, clip, source, wavPath, assPath)
   } catch (err: unknown) {
-    const e = err as Error
-    const errorLog = `${e?.name || 'Error'}: ${e?.message || String(err)}\n${e?.stack || ''}`
-    console.error(`[subtitles] pipeline falló para clip ${clipId}:`, e?.message || err)
-    await markFailed(clipId, errorLog)
+    await failSubtitlePipeline(clipId, err)
   } finally {
-    for (const p of [wavPath, assPath]) {
-      if (p) {
-        try {
-          if (fs.existsSync(p)) fs.unlinkSync(p)
-        } catch {
-          /* ignorar */
-        }
-      }
-    }
+    removeTempFile(wavPath)
+    removeTempFile(assPath)
     client.release()
   }
 }
@@ -339,31 +460,46 @@ async function requireOwnedClip(clipId: string, userId: string, client: import('
   return row
 }
 
+type ClipAccess = { kind: 'ok'; row: Row } | { kind: 'error'; status: number; detail: string }
+
+async function clipAccessFor(client: import('pg').PoolClient, clipId: string, userId: string): Promise<ClipAccess> {
+  // Verifica existencia (404) y ownership (403), como _get_clip_or_404 + _assert_ownership.
+  const exists = await client.query('SELECT id FROM clips WHERE id = $1', [clipId])
+  if (exists.rows.length === 0) return { kind: 'error', status: 404, detail: 'Clip no encontrado' }
+  const row = await requireOwnedClip(clipId, userId, client)
+  if (!row) return { kind: 'error', status: 403, detail: 'No autorizado para este clip' }
+  return { kind: 'ok', row }
+}
+
+function isProcessing(row: Row): boolean {
+  return String(row.status) === 'PROCESSING'
+}
+
 function clipResponse(row: Row): Record<string, unknown> {
   return {
     id: row.id,
     video_id: row.video_id ?? null,
     job_id: row.job_id,
-    title: row.title ?? null,
-    start_time: Number(row.start_time) || 0,
-    end_time: Number(row.end_time) || 0,
-    score: row.score !== null && row.score !== undefined ? Number(row.score) : null,
+    title: toStrOrNull(row.title),
+    start_time: secondsOrZero(row.start_time),
+    end_time: secondsOrZero(row.end_time),
+    score: toNumberOrNull(row.score),
     tags: row.tags ?? null,
-    storage_path: (row.file_path as string) ?? null,
+    storage_path: toStrOrNull(row.file_path),
     file_path: null,
     stream_url: null,
     duration: null,
     has_ass: false,
     has_hook: false,
     status: (row.status as string) || 'ready',
-    published_platform: (row.published_platform as string | null) ?? null,
-    social_post_id: (row.social_post_id as string | null) ?? null,
-    social_post_url: (row.social_post_url as string | null) ?? null,
-    published_at: row.published_at ? new Date(row.published_at as string).toISOString() : null,
-    publication_status: (row.publication_status as string | null) ?? null,
-    social_network: (row.social_network as string | null) ?? null,
-    created_at: row.created_at ? new Date(row.created_at as string).toISOString() : new Date().toISOString(),
-    updated_at: row.updated_at ? new Date(row.updated_at as string).toISOString() : new Date().toISOString(),
+    published_platform: toStrOrNull(row.published_platform),
+    social_post_id: toStrOrNull(row.social_post_id),
+    social_post_url: toStrOrNull(row.social_post_url),
+    published_at: toIsoOrNull(row.published_at),
+    publication_status: toStrOrNull(row.publication_status),
+    social_network: toStrOrNull(row.social_network),
+    created_at: isoOrNow(row.created_at),
+    updated_at: isoOrNow(row.updated_at),
   }
 }
 
@@ -373,14 +509,10 @@ subtitlesRouter.post('/:clipId/subtitles', authMiddleware, async (req: AuthReque
 
   const client = await pool.connect()
   try {
-    // Verifica existencia (404) y ownership (403), como _get_clip_or_404 + _assert_ownership.
-    const exists = await client.query('SELECT id FROM clips WHERE id = $1', [clipId])
-    if (exists.rows.length === 0) return res.status(404).json({ detail: 'Clip no encontrado' })
+    const access = await clipAccessFor(client, clipId, String(req.user!.id))
+    if (access.kind === 'error') return res.status(access.status).json({ detail: access.detail })
 
-    const row = await requireOwnedClip(clipId, String(req.user!.id), client)
-    if (!row) return res.status(403).json({ detail: 'No autorizado para este clip' })
-
-    if (String(row.status) === 'PROCESSING') {
+    if (isProcessing(access.row)) {
       return res.status(409).json({ detail: 'Clip ya en procesamiento' })
     }
 
@@ -408,13 +540,10 @@ subtitlesRouter.get('/:clipId/subtitles/status', authMiddleware, async (req: Aut
 
   const client = await pool.connect()
   try {
-    const exists = await client.query('SELECT id FROM clips WHERE id = $1', [clipId])
-    if (exists.rows.length === 0) return res.status(404).json({ detail: 'Clip no encontrado' })
+    const access = await clipAccessFor(client, clipId, String(req.user!.id))
+    if (access.kind === 'error') return res.status(access.status).json({ detail: access.detail })
 
-    const row = await requireOwnedClip(clipId, String(req.user!.id), client)
-    if (!row) return res.status(403).json({ detail: 'No autorizado para este clip' })
-
-    return res.json(clipResponse(row))
+    return res.json(clipResponse(access.row))
   } catch (err) {
     console.error('GET /clips/:clipId/subtitles/status error', err)
     return res.status(500).json({ detail: 'Error interno' })

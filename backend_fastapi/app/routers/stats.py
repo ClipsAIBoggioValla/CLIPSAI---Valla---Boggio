@@ -5,6 +5,7 @@ from __future__ import annotations
 from sqlalchemy import and_, case, func, select
 
 from fastapi import APIRouter
+from typing import Any
 
 from ..deps import CurrentUser, DbSession
 from ..models import Clip, Job, Video
@@ -13,21 +14,29 @@ from ..schemas.stats import RecentJobSummary, ScoreDistributionItem, StatsSummar
 router = APIRouter(prefix="/stats", tags=["stats"])
 
 
-@router.get(
-    "/summary",
-    response_model=StatsSummaryResponse,
-    summary="Resumen de estadísticas del usuario autenticado",
-)
-def get_stats_summary(
-    current_user: CurrentUser,
-    db: DbSession,
-) -> StatsSummaryResponse:
-    user_id = current_user.id
+def _total_de_videos(db: DbSession, user_id: Any) -> int:
+    """Cantidad de videos del usuario."""
+    return db.scalar(select(func.count(Video.id)).where(Video.user_id == user_id)) or 0
 
-    total_videos: int = db.scalar(
-        select(func.count(Video.id)).where(Video.user_id == user_id)
-    ) or 0
 
+def _conteo_or0(valor: Any) -> int:
+    """Conteo seguro de una fila agregada (None → 0)."""
+    return int(valor or 0)
+
+
+def _fila_a_resumen(row: Any) -> tuple[int, float, list[ScoreDistributionItem]]:
+    """Convierte la fila agregada en (total_clips, avg_score, distribución)."""
+    avg_score: float = round(float(row.avg_score), 1) if row.avg_score is not None else 0.0
+    score_distribution = [
+        ScoreDistributionItem(range="0-40", count=_conteo_or0(row.low), label="Bajo"),
+        ScoreDistributionItem(range="41-70", count=_conteo_or0(row.medium), label="Medio"),
+        ScoreDistributionItem(range="71-100", count=_conteo_or0(row.high), label="Alto"),
+    ]
+    return _conteo_or0(row.total_clips), avg_score, score_distribution
+
+
+def _resumen_de_clips(db: DbSession, user_id: Any) -> tuple[int, float, list[ScoreDistributionItem]]:
+    """(total_clips, avg_score, distribución) de los clips del usuario."""
     video_ids_subq = select(Video.id).where(Video.user_id == user_id)
 
     agg_stmt = select(
@@ -40,22 +49,11 @@ def get_stats_summary(
 
     row = db.execute(agg_stmt).one()
 
-    total_clips: int = int(row.total_clips or 0)
-    raw_avg = row.avg_score
-    avg_score: float = round(float(raw_avg), 1) if raw_avg is not None else 0.0
+    return _fila_a_resumen(row)
 
-    low: int = int(row.low or 0)
-    medium: int = int(row.medium or 0)
-    high: int = int(row.high or 0)
 
-    score_distribution = [
-        ScoreDistributionItem(range="0-40", count=low, label="Bajo"),
-        ScoreDistributionItem(range="41-70", count=medium, label="Medio"),
-        ScoreDistributionItem(range="71-100", count=high, label="Alto"),
-    ]
-
-    estimated_time_saved_minutes: int = total_clips * 15
-
+def _job_reciente(db: DbSession, user_id: Any) -> RecentJobSummary | None:
+    """Resumen del último job del usuario, o None si no tiene."""
     recent_job_row = db.execute(
         select(Job)
         .join(Video, Job.video_id == Video.id)
@@ -63,16 +61,31 @@ def get_stats_summary(
         .order_by(Job.created_at.desc())
         .limit(1)
     ).scalar_one_or_none()
+    if recent_job_row is None:
+        return None
+    return RecentJobSummary.model_validate(recent_job_row)
 
-    recent_job: RecentJobSummary | None = None
-    if recent_job_row is not None:
-        recent_job = RecentJobSummary.model_validate(recent_job_row)
+
+@router.get(
+    "/summary",
+    response_model=StatsSummaryResponse,
+    summary="Resumen de estadísticas del usuario autenticado",
+)
+def get_stats_summary(
+    current_user: CurrentUser,
+    db: DbSession,
+) -> StatsSummaryResponse:
+    """Resumen de estadísticas del usuario autenticado."""
+    user_id = current_user.id
+
+    total_videos: int = _total_de_videos(db, user_id)
+    total_clips, avg_score, score_distribution = _resumen_de_clips(db, user_id)
 
     return StatsSummaryResponse(
         total_videos=total_videos,
         total_clips=total_clips,
         avg_score=avg_score,
-        estimated_time_saved_minutes=estimated_time_saved_minutes,
+        estimated_time_saved_minutes=total_clips * 15,
         score_distribution=score_distribution,
-        recent_job=recent_job,
+        recent_job=_job_reciente(db, user_id),
     )

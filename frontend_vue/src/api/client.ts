@@ -1,4 +1,5 @@
 import axios from 'axios'
+import type { AxiosHeaders } from 'axios'
 import type { ApiErrorDetail } from '@/types/api'
 import { ApiError } from '@/types/api'
 
@@ -14,19 +15,27 @@ export const apiClient = axios.create({
   withCredentials: true,
 })
 
-apiClient.interceptors.request.use((config) => {
-  config.headers.set('ngrok-skip-browser-warning', 'true')
-  if (config.url?.includes('/login') || config.url?.includes('/me') || config.url?.includes('/auth')) {
-    config.withCredentials = true
-  }
+function shouldForceCredentials(url: string | undefined): boolean {
+  return !!url && (url.includes('/login') || url.includes('/me') || url.includes('/auth'))
+}
+
+function attachStoredToken(headers: AxiosHeaders): void {
   try {
     const tok = localStorage.getItem(TOKEN_KEY)
     if (tok) {
-      config.headers.Authorization = `Bearer ${tok}`
+      headers.Authorization = `Bearer ${tok}`
     }
   } catch {
     /* ignore */
   }
+}
+
+apiClient.interceptors.request.use((config) => {
+  config.headers.set('ngrok-skip-browser-warning', 'true')
+  if (shouldForceCredentials(config.url)) {
+    config.withCredentials = true
+  }
+  attachStoredToken(config.headers)
   return config
 })
 
@@ -55,15 +64,45 @@ function isSessionFailure(status: number, detail: string): boolean {
   return status === 401 || (status === 403 && /not authenticated/i.test(detail))
 }
 
+function redirectToLoginIfOutside(): void {
+  if (typeof window !== 'undefined' && window.location.pathname !== '/login' && window.location.pathname !== '/auth') {
+    window.location.href = '/login'
+  }
+}
+
 function handleUnauthorized(url: string, status: number, detail: string): void {
   if (!shouldRedirectOn401(url)) return
   if (!isSessionFailure(status, detail)) return
   try {
     localStorage.removeItem(TOKEN_KEY)
   } catch {}
-  if (typeof window !== 'undefined' && window.location.pathname !== '/login' && window.location.pathname !== '/auth') {
-    window.location.href = '/login'
-  }
+  redirectToLoginIfOutside()
+}
+
+function joinDetailList(details: Array<{ loc: Array<string | number>; msg: string }>): string {
+  return details.map((e) => `${e.loc.join('.')}: ${e.msg}`).join(' | ')
+}
+
+function detailFromString(data: ApiErrorDetail | undefined): string | null {
+  if (data && typeof data.detail === 'string') return data.detail
+  return null
+}
+
+function detailFromList(data: ApiErrorDetail | undefined): string | null {
+  if (data && Array.isArray(data.detail) && data.detail.length > 0) return joinDetailList(data.detail)
+  return null
+}
+
+function detailFromText(rawData: unknown): string | null {
+  if (typeof rawData === 'string' && rawData) return (rawData as string).slice(0, 500)
+  return null
+}
+
+function extractErrorDetail(status: number, data: ApiErrorDetail | undefined, rawData: unknown): string {
+  return detailFromString(data)
+    ?? detailFromList(data)
+    ?? detailFromText(rawData)
+    ?? `HTTP ${status}`
 }
 
 apiClient.interceptors.response.use(
@@ -72,12 +111,7 @@ apiClient.interceptors.response.use(
     if (axios.isAxiosError(error) && error.response) {
       const status: number = error.response.status
       const data = error.response.data as ApiErrorDetail | undefined
-      let detail = `HTTP ${status}`
-      if (data && typeof data.detail === 'string') detail = data.detail
-      else if (data && Array.isArray(data.detail) && data.detail.length > 0)
-        detail = data.detail.map((e) => `${e.loc.join('.')}: ${e.msg}`).join(' | ')
-      else if (typeof error.response.data === 'string' && error.response.data)
-        detail = (error.response.data as string).slice(0, 500)
+      const detail = extractErrorDetail(status, data, error.response.data)
 
       // Política única de fallo de sesión (idéntica al cliente de React).
       handleUnauthorized(error.config?.url ?? '', status, detail)

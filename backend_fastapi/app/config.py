@@ -30,21 +30,45 @@ def _is_docker() -> bool:
         return False
 
 
+def _redirect_uri_desactualizada(uri: str) -> bool:
+    """True si la URL de callback still apunta a un túnel temporal (ngrok)."""
+    return "decorator" in uri or "guns-camps" in uri or "ngrok" in uri
+
+
+def _normalizar_redirect_uri(uri: str, base: str, path: str) -> str:
+    """Fuerza que el callback use PUBLIC_BACKEND_URL como base si aún contiene URLs temporales."""
+    if _redirect_uri_desactualizada(uri):
+        return f"{base}{path}"
+    return uri
+
+
+def _apunta_a_local(url: str) -> bool:
+    """True si la URL apunta al host local."""
+    return "@127.0.0.1:" in url or "@localhost:" in url
+
+
+def _apunta_a_db(url: str) -> bool:
+    """True si la URL apunta al host 'db' de Docker."""
+    return "@db:" in url or "@db/" in url
+
+
 def _resolve_db_host(url: str) -> str:
-    is_docker = _is_docker()
-    has_db = "@db:" in url or "@db/" in url
-    has_local = "@127.0.0.1:" in url or "@localhost:" in url
-    if is_docker and has_local:
+    if _is_docker() and _apunta_a_local(url):
         return url.replace("@127.0.0.1:", "@db:").replace("@localhost:", "@db:").replace("@127.0.0.1/", "@db/")
-    if not is_docker and has_db:
-        try:
-            socket.getaddrinfo("db", 5432)
-            return url
-        except socket.gaierror:
-            return url.replace("@db:", "@127.0.0.1:").replace("@db/", "@127.0.0.1/")
-        except Exception:
-            return url.replace("@db:", "@127.0.0.1:").replace("@db/", "@127.0.0.1/")
+    if not _is_docker() and _apunta_a_db(url):
+        return _db_url_fuera_de_docker(url)
     return url
+
+
+def _db_url_fuera_de_docker(url: str) -> str:
+    """Fuera de Docker: si el host 'db' resuelve DNS se conserva; si no, fallback a localhost."""
+    try:
+        socket.getaddrinfo("db", 5432)
+        return url
+    except socket.gaierror:
+        return url.replace("@db:", "@127.0.0.1:").replace("@db/", "@127.0.0.1/")
+    except Exception:
+        return url.replace("@db:", "@127.0.0.1:").replace("@db/", "@127.0.0.1/")
 
 from functools import lru_cache
 
@@ -72,12 +96,13 @@ class Settings(BaseSettings):
         object.__setattr__(self, "database_url", _resolve_db_host(self.database_url))
         # Forzar que callbacks usen PUBLIC_BACKEND_URL como base si aún contienen URLs temporales antiguas
         base = self.public_backend_url.rstrip("/") if self.public_backend_url else "https://api.clipsai.xyz"
-        if "decorator" in self.google_redirect_uri or "guns-camps" in self.google_redirect_uri or "ngrok" in self.google_redirect_uri:
-            object.__setattr__(self, "google_redirect_uri", f"{base}/auth/social/youtube/callback")
-        if "decorator" in self.tiktok_redirect_uri or "guns-camps" in self.tiktok_redirect_uri or "ngrok" in self.tiktok_redirect_uri:
-            object.__setattr__(self, "tiktok_redirect_uri", f"{base}/auth/social/tiktok/callback")
-        if "decorator" in self.instagram_redirect_uri or "guns-camps" in self.instagram_redirect_uri or "ngrok" in self.instagram_redirect_uri:
-            object.__setattr__(self, "instagram_redirect_uri", f"{base}/auth/social/instagram/callback")
+        self._normalizar_callbacks(base)
+
+    def _normalizar_callbacks(self, base: str) -> None:
+        """Reescribe los callbacks de OAuth que apunten a túneles temporales."""
+        object.__setattr__(self, "google_redirect_uri", _normalizar_redirect_uri(self.google_redirect_uri, base, "/auth/social/youtube/callback"))
+        object.__setattr__(self, "tiktok_redirect_uri", _normalizar_redirect_uri(self.tiktok_redirect_uri, base, "/auth/social/tiktok/callback"))
+        object.__setattr__(self, "instagram_redirect_uri", _normalizar_redirect_uri(self.instagram_redirect_uri, base, "/auth/social/instagram/callback"))
 
     # ---- JWT ----
     jwt_secret: str = Field(

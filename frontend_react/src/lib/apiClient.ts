@@ -26,19 +26,28 @@ function buildHeaders(extra?: HeadersInit, includeAuth = true): Headers {
   return h
 }
 
+function detailFromStringJson(raw: ApiErrorDetail, fallback: string): string {
+  if (typeof raw.detail === 'string') return raw.detail
+  if (Array.isArray(raw.detail) && raw.detail.length > 0) {
+    return raw.detail.map((e) => `${e.loc.join('.')}: ${e.msg}`).join(' | ')
+  }
+  return fallback
+}
+
+async function detailFromText(res: Response): Promise<string> {
+  const text = await res.text().catch(() => '')
+  if (text) return text.slice(0, 500)
+  return ''
+}
+
 async function parseError(res: Response): Promise<ApiError> {
   let raw: ApiErrorDetail | undefined
   let detail = `HTTP ${res.status}`
   try {
     raw = (await res.json()) as ApiErrorDetail
-    if (typeof raw.detail === 'string') {
-      detail = raw.detail
-    } else if (Array.isArray(raw.detail) && raw.detail.length > 0) {
-      detail = raw.detail.map((e) => `${e.loc.join('.')}: ${e.msg}`).join(' | ')
-    }
+    detail = detailFromStringJson(raw, detail)
   } catch {
-    const text = await res.text().catch(() => '')
-    if (text) detail = text.slice(0, 500)
+    detail = await detailFromText(res)
   }
   return new ApiError(res.status, detail, raw)
 }
@@ -68,6 +77,12 @@ function isSessionFailure(status: number, detail: string): boolean {
   return status === 401 || (status === 403 && /not authenticated/i.test(detail))
 }
 
+function redirectToLoginIfOutside(): void {
+  if (typeof window !== 'undefined' && window.location.pathname !== '/login' && window.location.pathname !== '/auth') {
+    window.location.href = '/login'
+  }
+}
+
 function handleUnauthorized(path: string, status: number, detail: string): void {
   if (!shouldRedirectOn401(path)) return
   if (!isSessionFailure(status, detail)) return
@@ -76,9 +91,7 @@ function handleUnauthorized(path: string, status: number, detail: string): void 
   } catch {
     /* ignore */
   }
-  if (typeof window !== 'undefined' && window.location.pathname !== '/login' && window.location.pathname !== '/auth') {
-    window.location.href = '/login'
-  }
+  redirectToLoginIfOutside()
 }
 
 interface RequestOptions {
@@ -89,43 +102,65 @@ interface RequestOptions {
   timeout?: number
 }
 
+function isAbortError(e: unknown): boolean {
+  if (e instanceof DOMException && e.name === 'AbortError') return true
+  return e instanceof Error && e.name === 'AbortError'
+}
+
+function startAbortTimer(controller: AbortController, timeout: number): number | undefined {
+  // timeout=0 desactiva el límite para operaciones largas como la subida de videos.
+  return timeout > 0 ? window.setTimeout(() => controller.abort(), timeout) : undefined
+}
+
+function stopAbortTimer(timeoutId: number | undefined): void {
+  if (timeoutId !== undefined) window.clearTimeout(timeoutId)
+}
+
+function abortMessageFor(timeout: number): string {
+  return timeout > 0 ? `Timeout ${Math.round(timeout / 1000)}s: backend no responde` : 'La solicitud fue cancelada'
+}
+
+async function fetchWithTimeout(
+  url: string,
+  init: Omit<RequestInit, 'signal'>,
+  timeout: number,
+  abortMessage: string,
+): Promise<Response> {
+  const controller = new AbortController()
+  const timeoutId = startAbortTimer(controller, timeout)
+  try {
+    return await fetch(url, { ...init, signal: controller.signal })
+  } catch (e: unknown) {
+    if (isAbortError(e)) throw new ApiError(0, abortMessage)
+    throw e
+  } finally {
+    stopAbortTimer(timeoutId)
+  }
+}
+
+async function parseSuccess<T>(res: Response): Promise<T> {
+  if (res.status === 204) return undefined as unknown as T
+  const text = await res.text()
+  if (!text) return undefined as unknown as T
+  return JSON.parse(text) as T
+}
+
 export async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, headers, noAuth = false, timeout = 10000 } = opts
   const finalHeaders = buildHeaders(headers, !noAuth)
-  const useCredentials = path.includes('/login') || path.includes('/me') || path.includes('/auth')
-  const controller = new AbortController()
-  // timeout=0 desactiva el límite para operaciones largas como la subida de videos.
-  const timeoutId = timeout > 0 ? window.setTimeout(() => controller.abort(), timeout) : undefined
-  const abortMessage = timeout > 0 ? `Timeout ${Math.round(timeout / 1000)}s: backend no responde` : 'La solicitud fue cancelada'
-  let res: Response
-  try {
-    res = await fetch(`${BASE_URL}${path}`, {
-      method,
-      headers: finalHeaders,
-      body: body ?? null,
-      credentials: useCredentials ? 'include' : 'include',
-      signal: controller.signal,
-    })
-  } catch (e: unknown) {
-    if (e instanceof DOMException && e.name === 'AbortError') {
-      throw new ApiError(0, abortMessage)
-    }
-    if (e instanceof Error && e.name === 'AbortError') {
-      throw new ApiError(0, abortMessage)
-    }
-    throw e
-  } finally {
-    if (timeoutId !== undefined) window.clearTimeout(timeoutId)
-  }
+  const abortMessage = abortMessageFor(timeout)
+  const res = await fetchWithTimeout(`${BASE_URL}${path}`, {
+    method,
+    headers: finalHeaders,
+    body: body ?? null,
+    credentials: 'include',
+  }, timeout, abortMessage)
   if (!res.ok) {
     const apiError = await parseError(res)
     if (isSessionFailure(res.status, apiError.detail)) handleUnauthorized(path, res.status, apiError.detail)
     throw apiError
   }
-  if (res.status === 204) return undefined as unknown as T
-  const text = await res.text()
-  if (!text) return undefined as unknown as T
-  return JSON.parse(text) as T
+  return parseSuccess<T>(res)
 }
 
 export const http = {

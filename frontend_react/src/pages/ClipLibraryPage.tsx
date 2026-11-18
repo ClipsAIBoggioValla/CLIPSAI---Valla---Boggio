@@ -17,6 +17,10 @@ const RAW_BASE: string =
   ((import.meta as unknown as { env?: Record<string, string> })?.env?.VITE_API_URL ?? '').trim()
 const API_BASE_URL = (RAW_BASE || 'https://clipsai-backend.onrender.com').replace(/\/$/, '')
 
+function computeHasFilters(q: string, minScore: string, sortBy: ClipSortBy, jobId: string | undefined): boolean {
+  return q !== '' || minScore !== '' || sortBy !== 'created_at_desc' || !!jobId
+}
+
 export default function ClipLibraryPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const urlQ = searchParams.get('q') ?? ''
@@ -81,7 +85,7 @@ export default function ClipLibraryPage() {
 
   useEffect(() => { if (ssePublishing && activePublishId) setPublishing(activePublishId) }, [ssePublishing, activePublishId])
 
-  const hasFilters = debouncedQ !== '' || minScore !== '' || sortBy !== 'created_at_desc' || !!jobId
+  const hasFilters = computeHasFilters(debouncedQ, minScore, sortBy, jobId)
   const totalPages = data?.total_pages ?? 0
 
   function resetFilters() {

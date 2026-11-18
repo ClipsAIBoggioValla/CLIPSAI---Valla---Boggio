@@ -43,19 +43,16 @@ def glow(base: Image.Image, center: tuple[int, int], radius: int, color: tuple[i
     base.alpha_composite(blurred)
 
 
-def build() -> Image.Image:
-    image = Image.new("RGBA", (WIDTH, HEIGHT), BG)
-    glow(image, (200, 90), 420, (180, 241, 5), 46)
-    glow(image, (1080, 600), 360, (16, 185, 129), 34)
-
-    draw = ImageDraw.Draw(image)
-
-    # Grilla de fondo
+def _dibujar_grilla(draw) -> None:
+    """Grilla de fondo en pasos de 64px."""
     for x in range(0, WIDTH, 64):
         draw.line([(x, 0), (x, HEIGHT)], fill=(255, 255, 255, 6), width=1)
     for y in range(0, HEIGHT, 64):
         draw.line([(0, y), (WIDTH, y)], fill=(255, 255, 255, 6), width=1)
 
+
+def _dibujar_marca_y_textos(draw) -> None:
+    """Marca, badge, titular, bajada y CTA de la imagen."""
     # Marca: asterisco dibujado (no depende del glifo de la fuente) + wordmark
     draw.line([(108, 58), (108, 106)], fill=LIME, width=6)
     draw.line([(83, 72), (133, 92)], fill=LIME, width=6)
@@ -78,6 +75,24 @@ def build() -> Image.Image:
     draw.rounded_rectangle([80, 452, 348, 524], radius=16, fill=LIME)
     draw.text((112, 472), "Probar gratis →", font=font(28, bold=True), fill="#080C14")
 
+
+def _fill_de_barra(index: int) -> tuple:
+    """Color de la barra de la forma de onda, alternando intensidad."""
+    return (180, 241, 5, 200 if index % 2 else 120)
+
+
+def _dibujar_forma_de_onda(draw, card_x: int, card_y: int) -> None:
+    """Barras de la forma de onda del clip vertical mock."""
+    heights = [26, 44, 62, 38, 74, 96, 58, 82, 46, 68, 100, 54, 36, 72, 88, 42, 64, 30]
+    bar_x = card_x + 22
+    for index, height in enumerate(heights):
+        y0 = card_y + 250 - height
+        draw.rounded_rectangle([bar_x, y0, bar_x + 8, card_y + 250], radius=4, fill=_fill_de_barra(index))
+        bar_x += 11
+
+
+def _dibujar_card_mock(draw) -> None:
+    """Mock de clip vertical: card, score, forma de onda, subtítulo y progreso."""
     # Mock de clip vertical
     card_x, card_y, card_w, card_h = 880, 96, 240, 428
     draw.rounded_rectangle([card_x, card_y, card_x + card_w, card_y + card_h], radius=28, fill=CARD, outline=(180, 241, 5, 90), width=2)
@@ -86,12 +101,7 @@ def build() -> Image.Image:
     draw.text((card_x + 150, card_y + 30), "0:46", font=font(18, bold=True), fill=SECONDARY)
 
     # Forma de onda
-    heights = [26, 44, 62, 38, 74, 96, 58, 82, 46, 68, 100, 54, 36, 72, 88, 42, 64, 30]
-    bar_x = card_x + 22
-    for index, height in enumerate(heights):
-        y0 = card_y + 250 - height
-        draw.rounded_rectangle([bar_x, y0, bar_x + 8, card_y + 250], radius=4, fill=(180, 241, 5, 200 if index % 2 else 120))
-        bar_x += 11
+    _dibujar_forma_de_onda(draw, card_x, card_y)
 
     # Subtítulo quemado
     draw.rounded_rectangle([card_x + 22, card_y + 286, card_x + card_w - 22, card_y + 340], radius=10, fill=(8, 12, 20, 220))
@@ -105,6 +115,20 @@ def build() -> Image.Image:
     for row in range(3):
         y = card_y + 388 + row * 14
         draw.rounded_rectangle([card_x + 22, y, card_x + 40, y + 6], radius=3, fill=(180, 241, 5, 220))
+
+
+def build() -> Image.Image:
+    image = Image.new("RGBA", (WIDTH, HEIGHT), BG)
+    glow(image, (200, 90), 420, (180, 241, 5), 46)
+    glow(image, (1080, 600), 360, (16, 185, 129), 34)
+
+    draw = ImageDraw.Draw(image)
+
+    _dibujar_grilla(draw)
+
+    _dibujar_marca_y_textos(draw)
+
+    _dibujar_card_mock(draw)
 
     return image.convert("RGB")
 

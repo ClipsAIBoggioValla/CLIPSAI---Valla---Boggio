@@ -41,97 +41,7 @@ def generate_ass_from_segments(
     Returns:
         Ruta del archivo ASS generado
     """
-def _recortar_segmentos_ass(segments: List[Dict[str, Any]], clip_start: float, clip_end: float) -> list[dict]:
-    """Filtra segmentos dentro del clip y shiftea tiempos a 0."""
-    clipped = []
-    for s in segments:
-        try:
-            st = float(s.get("start", 0))
-            en = float(s.get("end", 0))
-            txt = str(s.get("text", "")).strip()
-            if not txt or en <= st:
-                continue
-            if en < clip_start or st > clip_end:
-                continue
-            cs = max(st, clip_start)
-            ce = min(en, clip_end)
-            if ce > cs:
-                clipped.append({
-                    "start": cs - clip_start,
-                    "end": ce - clip_start,
-                    "text": txt
-                })
-        except Exception:
-            continue
-    return clipped
-
-
-def _evento_hook_ass(hook_text: str, clip_start: float, clip_end: float) -> str:
-    """Hook como PRIMER evento (0-3s, estilo grande arriba). drawtext no: ffmpeg
-    estático de RunPod carece de libfreetype."""
-    hook_clean = " ".join(str(hook_text).upper().split())
-    hook_clean = hook_clean.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
-    hook_clean = hook_clean[:100]
-    if not hook_clean:
-        return ""
-    hook_dur = min(3.0, max(0.5, clip_end - clip_start))
-    eh = int(hook_dur // 3600)
-    em = int((hook_dur % 3600) // 60)
-    es = hook_dur % 60
-    return f"Dialogue: 0,0:00:00.00,{eh}:{em:02d}:{es:05.2f},Hook,,0,0,0,,{hook_clean}\n"
-
-
-def _evento_dialogue_ass(seg: dict) -> str:
-    """Evento Dialogue de un segmento (escape ffmpeg + uppercase)."""
-    start_h = int(seg["start"] // 3600)
-    start_m = int((seg["start"] % 3600) // 60)
-    start_s = seg["start"] % 60
-    end_h = int(seg["end"] // 3600)
-    end_m = int((seg["end"] % 3600) // 60)
-    end_s = seg["end"] % 60
-
-    text = seg["text"].upper().replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
-    text = " ".join(text.split())
-
-    return f"Dialogue: 0,{start_h}:{start_m:02d}:{start_s:05.2f},{end_h}:{end_m:02d}:{end_s:05.2f},Default,,0,0,0,,{text}\n"
-
-
-def _diagnosticar_ass(output_path: str, ass_content: str, hook_text: str | None) -> None:
-    """Diagnóstico ASS: validar estructura y volcar contenido (debug subs ausentes)."""
-    written = Path(output_path)
-    try:
-        size = written.stat().st_size if written.exists() else 0
-    except OSError:
-        size = -1
-    lines = ass_content.splitlines()
-    dialogue_lines = [l for l in lines if l.startswith("Dialogue:")]
-    hook_events = [l for l in dialogue_lines if ",Hook," in l]
-    default_events = [l for l in dialogue_lines if ",Default," in l]
-    has_script = "[Script Info]" in ass_content
-    has_styles = "[V4+ Styles]" in ass_content
-    has_events = "[Events]" in ass_content
-    logger.info(
-        "[video_processor] ASS generado: %s (%s bytes, %s líneas, %s Dialogue: hook=%s default=%s)",
-        output_path, size, len(lines), len(dialogue_lines), len(hook_events), len(default_events),
-    )
-    if size <= 0:
-        logger.warning("[video_processor] ERROR: ASS VACÍO o inexistente tras escritura: %s (size=%s)", output_path, size)
-    if not (has_script and has_styles and has_events):
-        logger.warning("[video_processor] ERROR: ASS sin estructura completa: ScriptInfo=%s V4Styles=%s Events=%s", has_script, has_styles, has_events)
-    if not dialogue_lines:
-        logger.warning("[video_processor] ERROR: ASS sin eventos Dialogue — ffmpeg quemará SIN subtítulos (segments fuera de ventana o vacío)")
-    if hook_text:
-        if hook_events:
-            logger.info("[video_processor] OK: Hook presente como evento estilo Hook: %s", hook_events[0][:140])
-        else:
-            logger.warning("[video_processor] ERROR: hook_text pedido ('%s') pero NO hay evento estilo Hook en [Events]", hook_text[:60])
-    logger.info("[video_processor] ---- %s | PRIMERAS 20 LINEAS ----", output_path)
-    for line in lines[:20]:
-        logger.info("[video_processor] ASS| %s", line)
-    logger.info("[video_processor] ---- FIN ASS ----")
-
-
-def _recortar_segmentos_ass(segments: List[Dict[str, Any]], clip_start: float, clip_end: float) -> list[dict]:
+    clipped = _recortar_segmentos_ass(segments, clip_start, clip_end)
 
     # Generar contenido ASS
     ass_content = f"""[Script Info]
@@ -164,6 +74,264 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return output_path
 
 
+def _recortar_segmentos_ass(segments: List[Dict[str, Any]], clip_start: float, clip_end: float) -> list[dict]:
+    """Filtra segmentos dentro del clip y shiftea tiempos a 0."""
+    clipped = []
+    for s in segments:
+        recorte = _segmento_recortado(s, clip_start, clip_end)
+        if recorte is not None:
+            clipped.append(recorte)
+    return clipped
+
+
+def _valores_segmento(s: Dict[str, Any]) -> tuple | None:
+    """(start, end, text) crudos del segmento. None si no se pueden convertir."""
+    try:
+        st = float(s.get("start", 0))
+        en = float(s.get("end", 0))
+        txt = str(s.get("text", "")).strip()
+    except Exception:
+        return None
+    return st, en, txt
+
+
+def _segmento_util(st: float, en: float, txt: str) -> bool:
+    """True si el segmento tiene texto y duración positiva."""
+    return bool(txt) and en > st
+
+
+def _fuera_de_ventana(st: float, en: float, clip_start: float, clip_end: float) -> bool:
+    """True si el segmento queda fuera de la ventana del clip."""
+    return en < clip_start or st > clip_end
+
+
+def _segmento_aplicable(st: float, en: float, txt: str, clip_start: float, clip_end: float) -> bool:
+    """True si el segmento debe aparecer en el ASS del clip."""
+    return _segmento_util(st, en, txt) and not _fuera_de_ventana(st, en, clip_start, clip_end)
+
+
+def _rango_recortado(st: float, en: float, clip_start: float, clip_end: float) -> tuple | None:
+    """(cs, ce) recortado a la ventana del clip. None si queda vacío."""
+    cs = max(st, clip_start)
+    ce = min(en, clip_end)
+    if ce > cs:
+        return cs, ce
+    return None
+
+
+def _segmento_recortado(s: Dict[str, Any], clip_start: float, clip_end: float) -> dict | None:
+    """Segmento shifteado a 0 dentro del clip. None si no aplica."""
+    valores = _valores_segmento(s)
+    if valores is None:
+        return None
+    st, en, txt = valores
+    if not _segmento_aplicable(st, en, txt, clip_start, clip_end):
+        return None
+    rango = _rango_recortado(st, en, clip_start, clip_end)
+    if rango is None:
+        return None
+    cs, ce = rango
+    return {
+        "start": cs - clip_start,
+        "end": ce - clip_start,
+        "text": txt
+    }
+
+
+def _evento_hook_ass(hook_text: str, clip_start: float, clip_end: float) -> str:
+    """Hook como PRIMER evento (0-3s, estilo grande arriba). drawtext no: ffmpeg
+    estático de RunPod carece de libfreetype."""
+    hook_clean = " ".join(str(hook_text).upper().split())
+    hook_clean = hook_clean.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
+    hook_clean = hook_clean[:100]
+    if not hook_clean:
+        return ""
+    hook_dur = min(3.0, max(0.5, clip_end - clip_start))
+    eh = int(hook_dur // 3600)
+    em = int((hook_dur % 3600) // 60)
+    es = hook_dur % 60
+    return f"Dialogue: 0,0:00:00.00,{eh}:{em:02d}:{es:05.2f},Hook,,0,0,0,,{hook_clean}\n"
+
+
+def _evento_dialogue_ass(seg: dict) -> str:
+    """Evento Dialogue de un segmento (escape ffmpeg + uppercase)."""
+    start_h = int(seg["start"] // 3600)
+    start_m = int((seg["start"] % 3600) // 60)
+    start_s = seg["start"] % 60
+    end_h = int(seg["end"] // 3600)
+    end_m = int((seg["end"] % 3600) // 60)
+    end_s = seg["end"] % 60
+
+    text = seg["text"].upper().replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
+    text = " ".join(text.split())
+
+    return f"Dialogue: 0,{start_h}:{start_m:02d}:{start_s:05.2f},{end_h}:{end_m:02d}:{end_s:05.2f},Default,,0,0,0,,{text}\n"
+
+
+def _tamano_ass(written: Path) -> int:
+    """Tamaño del archivo ASS escrito; -1 si la lectura falla, 0 si no existe."""
+    try:
+        return written.stat().st_size if written.exists() else 0
+    except OSError:
+        return -1
+
+
+def _dialogues(lines: list) -> list:
+    """Líneas de eventos Dialogue del ASS."""
+    return [l for l in lines if l.startswith("Dialogue:")]
+
+
+def _eventos_estilo(dialogue_lines: list, estilo: str) -> list:
+    """Eventos Dialogue de un estilo dado (p.ej. 'Hook' o 'Default')."""
+    return [l for l in dialogue_lines if f",{estilo}," in l]
+
+
+def _conteo_dialogues(lines: list) -> tuple:
+    """Cuenta los eventos Dialogue totales, de estilo Hook y de estilo Default."""
+    dialogue_lines = _dialogues(lines)
+    return dialogue_lines, _eventos_estilo(dialogue_lines, "Hook"), _eventos_estilo(dialogue_lines, "Default")
+
+
+def _estructura_ass(ass_content: str) -> tuple:
+    """(completa, script, styles, events) según las secciones presentes."""
+    has_script = "[Script Info]" in ass_content
+    has_styles = "[V4+ Styles]" in ass_content
+    has_events = "[Events]" in ass_content
+    return (has_script and has_styles and has_events, has_script, has_styles, has_events)
+
+
+def _log_estructura(ass_content: str) -> None:
+    """Avisa si el ASS no tiene las tres secciones completas."""
+    completa, has_script, has_styles, has_events = _estructura_ass(ass_content)
+    if not completa:
+        logger.warning("[video_processor] ERROR: ASS sin estructura completa: ScriptInfo=%s V4Styles=%s Events=%s", has_script, has_styles, has_events)
+
+
+def _log_dialogues_vacios(dialogue_lines: list) -> None:
+    """Avisa si el ASS no tiene ningún evento Dialogue."""
+    if not dialogue_lines:
+        logger.warning("[video_processor] ERROR: ASS sin eventos Dialogue — ffmpeg quemará SIN subtítulos (segments fuera de ventana o vacío)")
+
+
+def _log_hook_evento(hook_text: str | None, hook_events: list) -> None:
+    """Confirma o avisa la ausencia del evento estilo Hook."""
+    if hook_text:
+        if hook_events:
+            logger.info("[video_processor] OK: Hook presente como evento estilo Hook: %s", hook_events[0][:140])
+        else:
+            logger.warning("[video_processor] ERROR: hook_text pedido ('%s') pero NO hay evento estilo Hook en [Events]", hook_text[:60])
+
+
+def _log_primeras_lineas(output_path: str, lines: list) -> None:
+    """Vuelca al log las primeras 20 líneas del ASS generado."""
+    logger.info("[video_processor] ---- %s | PRIMERAS 20 LINEAS ----", output_path)
+    for line in lines[:20]:
+        logger.info("[video_processor] ASS| %s", line)
+    logger.info("[video_processor] ---- FIN ASS ----")
+
+
+def _diagnosticar_ass(output_path: str, ass_content: str, hook_text: str | None) -> None:
+    """Diagnóstico ASS: validar estructura y volcar contenido (debug subs ausentes)."""
+    written = Path(output_path)
+    size = _tamano_ass(written)
+    lines = ass_content.splitlines()
+    dialogue_lines, hook_events, default_events = _conteo_dialogues(lines)
+    logger.info(
+        "[video_processor] ASS generado: %s (%s bytes, %s líneas, %s Dialogue: hook=%s default=%s)",
+        output_path, size, len(lines), len(dialogue_lines), len(hook_events), len(default_events),
+    )
+    if size <= 0:
+        logger.warning("[video_processor] ERROR: ASS VACÍO o inexistente tras escritura: %s (size=%s)", output_path, size)
+    _log_estructura(ass_content)
+    _log_dialogues_vacios(dialogue_lines)
+    _log_hook_evento(hook_text, hook_events)
+    _log_primeras_lineas(output_path, lines)
+
+
+def _filtro_ass(ass_file: str) -> str | None:
+    """Filtro 'ass=' escapado para ffmpeg. None si el archivo no existe."""
+    if os.path.exists(ass_file):
+        ass_size = os.path.getsize(ass_file)
+        # Escape ffmpeg: backslashes a /, y ':' / ',' (separadores de filtro)
+        # escapados con backslash. Sin comillas alrededor del path.
+        ass_escaped = (
+            ass_file.replace("\\", "/").replace(":", "\\:").replace(",", "\\,").replace("'", "\\'")
+        )
+        logger.info("[video_processor] Filtro ASS OK: ass=%s (%s bytes)", ass_escaped, ass_size)
+        if ass_size == 0:
+            logger.warning("[video_processor] ERROR: ASS de 0 bytes — el clip saldrá SIN subtítulos: %s", ass_file)
+        return f"ass={ass_escaped}"
+    logger.warning("[video_processor] ERROR: ass_file indicado pero NO existe: %s — se quema SIN subtítulos", ass_file)
+    return None
+
+
+def _construir_filtergraph(ass_file: str | None) -> list:
+    """Filtergraph de crop + scale + setsar + ass opcional."""
+    filters = []
+
+    # 1. Crop-primero (evita frames gigantes de 3413px)
+    filters.append("crop='if(gt(iw/ih,9/16),ih*9/16,iw)':'if(gt(iw/ih,9/16),ih,iw*16/9)'")
+
+    # 2. Scale a 1080x1920
+    filters.append("scale=1080:1920")
+    filters.append("setsar=1")
+
+    # 3. Quemar subtítulos ASS si existe
+    if ass_file:
+        filtro = _filtro_ass(ass_file)
+        if filtro is not None:
+            filters.append(filtro)
+
+    return filters
+
+
+def _log_filtergraph(vf: str) -> None:
+    """Avisa si el filtergraph final no incluye el filtro de subtítulos."""
+    if "ass=" not in vf:
+        logger.warning("[video_processor] ERROR: Filtergraph SIN filtro ass — el clip saldrá SIN subtítulos")
+    else:
+        logger.info("[video_processor] Filtergraph incluye ass: OK")
+
+
+def _verificar_salida_reframe(result, output_video: str) -> bool:
+    """Valida el returncode y la existencia del output del reframe."""
+    if result.returncode != 0:
+        logger.error("[video_processor] ffmpeg FAILED rc=%s", result.returncode)
+        logger.error("[video_processor] stderr: %s", result.stderr[-1000:])
+        return False
+
+    if not os.path.exists(output_video) or os.path.getsize(output_video) == 0:
+        logger.error("[video_processor] Output no generado o vacío")
+        return False
+
+    logger.info("[video_processor] ✓ Vertical generado: %s (%s bytes)", output_video, os.path.getsize(output_video))
+    return True
+
+
+def _ejecutar_ffmpeg_reframe(command: list, timeout_seconds: int, output_video: str) -> bool:
+    """Corre ffmpeg y loguea stderr completo; valida el output generado."""
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds
+        )
+
+        # stderr SIEMPRE se loguea (no solo al fallar) para ver warnings de libass/ffmpeg
+        stderr_tail = (result.stderr or "")[-3000:]
+        logger.info("[video_processor] ffmpeg stderr (rc=%s):\n%s", result.returncode, stderr_tail if stderr_tail.strip() else "<vacío>")
+
+        return _verificar_salida_reframe(result, output_video)
+
+    except subprocess.TimeoutExpired:
+        logger.error("[video_processor] Timeout después de %ss", timeout_seconds)
+        return False
+    except Exception as e:
+        logger.error("[video_processor] Excepción: %s", e)
+        return False
+
+
 def reframe_and_burn_subtitles(
     input_video: str,
     output_video: str,
@@ -186,38 +354,15 @@ def reframe_and_burn_subtitles(
         True si éxito, False si falla
     """
     # Construir filtergraph
-    filters = []
-    
-    # 1. Crop-primero (evita frames gigantes de 3413px)
-    filters.append("crop='if(gt(iw/ih,9/16),ih*9/16,iw)':'if(gt(iw/ih,9/16),ih,iw*16/9)'")
-    
-    # 2. Scale a 1080x1920
-    filters.append("scale=1080:1920")
-    filters.append("setsar=1")
-    
-    # 3. Quemar subtítulos ASS si existe
-    if ass_file:
-        if os.path.exists(ass_file):
-            ass_size = os.path.getsize(ass_file)
-            # Escape ffmpeg: backslashes a /, y ':' / ',' (separadores de filtro)
-            # escapados con backslash. Sin comillas alrededor del path.
-            ass_escaped = (
-                ass_file.replace("\\", "/").replace(":", "\\:").replace(",", "\\,").replace("'", "\\'")
-            )
-            filters.append(f"ass={ass_escaped}")
-            logger.info("[video_processor] Filtro ASS OK: ass=%s (%s bytes)", ass_escaped, ass_size)
-            if ass_size == 0:
-                logger.warning("[video_processor] ERROR: ASS de 0 bytes — el clip saldrá SIN subtítulos: %s", ass_file)
-        else:
-            logger.warning("[video_processor] ERROR: ass_file indicado pero NO existe: %s — se quema SIN subtítulos", ass_file)
-    
+    filters = _construir_filtergraph(ass_file)
+
     # NOTA: sin drawtext — el ffmpeg estático de RunPod no tiene libfreetype
     # ("No such filter: 'drawtext'", rc=8). El hook se QUEMA VÍA ASS:
     # generate_ass_from_segments lo agrega como primer evento con estilo "Hook"
     # (arriba, 0-3s). Este filtergraph solo usa crop+scale+setsar+ass.
 
     vf = ",".join(filters)
-    
+
     command = [
         "/usr/local/bin/ffmpeg",
         "-y",
@@ -232,45 +377,13 @@ def reframe_and_burn_subtitles(
         "-movflags", "+faststart",
         output_video
     ]
-    
+
     logger.info("[video_processor] Reframe vertical + subs + hook...")
     logger.info("[video_processor] Filtros: %s...", vf[:200])
     logger.info("[video_processor] Comando ffmpeg COMPLETO: %s", " ".join(command))
-    if "ass=" not in vf:
-        logger.warning("[video_processor] ERROR: Filtergraph SIN filtro ass — el clip saldrá SIN subtítulos")
-    else:
-        logger.info("[video_processor] Filtergraph incluye ass: OK")
-    
-    try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=timeout_seconds
-        )
+    _log_filtergraph(vf)
 
-        # stderr SIEMPRE se loguea (no solo al fallar) para ver warnings de libass/ffmpeg
-        stderr_tail = (result.stderr or "")[-3000:]
-        logger.info("[video_processor] ffmpeg stderr (rc=%s):\n%s", result.returncode, stderr_tail if stderr_tail.strip() else "<vacío>")
-
-        if result.returncode != 0:
-            logger.error("[video_processor] ffmpeg FAILED rc=%s", result.returncode)
-            logger.error("[video_processor] stderr: %s", result.stderr[-1000:])
-            return False
-        
-        if not os.path.exists(output_video) or os.path.getsize(output_video) == 0:
-            logger.error("[video_processor] Output no generado o vacío")
-            return False
-        
-        logger.info("[video_processor] ✓ Vertical generado: %s (%s bytes)", output_video, os.path.getsize(output_video))
-        return True
-        
-    except subprocess.TimeoutExpired:
-        logger.error("[video_processor] Timeout después de %ss", timeout_seconds)
-        return False
-    except Exception as e:
-        logger.error("[video_processor] Excepción: %s", e)
-        return False
+    return _ejecutar_ffmpeg_reframe(command, timeout_seconds, output_video)
 
 
 def process_clip_vertical(

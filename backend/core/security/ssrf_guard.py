@@ -38,8 +38,17 @@ def _resolve_ips(hostname: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Ad
 
 def is_ip_blocked(ip: str | ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     addr = ipaddress.ip_address(ip) if isinstance(ip, str) else ip
-    if addr.is_loopback or addr.is_private or addr.is_link_local or addr.is_multicast or addr.is_reserved:
+    if _esta_en_rangos_protectores(addr):
         return True
+    return _esta_en_cidrs_bloqueados(addr)
+
+
+def _esta_en_rangos_protectores(addr) -> bool:
+    """Loopback, privada, link-local, multicast o reservada = bloqueada."""
+    return addr.is_loopback or addr.is_private or addr.is_link_local or addr.is_multicast or addr.is_reserved
+
+
+def _esta_en_cidrs_bloqueados(addr) -> bool:
     for net in BLOCKED_CIDRS:
         if addr in net:
             return True
@@ -52,14 +61,19 @@ def validate_url(url: str) -> str:
         raise SSRFError(f"Scheme not allowed: {parsed.scheme}")
     if not parsed.hostname:
         raise SSRFError("URL without hostname")
-    if parsed.hostname.lower() in {"localhost", "metadata.google.internal"}:
-        raise SSRFError(f"Hostname blocked: {parsed.hostname}")
-    for ip in _resolve_ips(parsed.hostname):
-        if is_ip_blocked(ip):
-            raise SSRFError(f"Resolved IP blocked {ip} for host {parsed.hostname} (SSRF guard)")
-    if parsed.hostname == "169.254.169.254":
-        raise SSRFError("169.254.169.254 blocked (IMDS)")
+    _validar_hostname(parsed.hostname)
     return url
+
+
+def _validar_hostname(hostname: str) -> None:
+    """Bloquea hostnames conocidos, el IMDS y las IPs resueltas privadas."""
+    if hostname.lower() in {"localhost", "metadata.google.internal"}:
+        raise SSRFError(f"Hostname blocked: {hostname}")
+    for ip in _resolve_ips(hostname):
+        if is_ip_blocked(ip):
+            raise SSRFError(f"Resolved IP blocked {ip} for host {hostname} (SSRF guard)")
+    if hostname == "169.254.169.254":
+        raise SSRFError("169.254.169.254 blocked (IMDS)")
 
 
 def assert_safe_url(url: str) -> None:

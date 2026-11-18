@@ -40,6 +40,25 @@ class UsuarioRead(_UsuarioBase):
 ThemePreference = Literal["dark", "light", "system"]
 
 
+def _url_vacia(v: str | None) -> bool:
+    """True si la URL viene presente pero vacía (solo espacios)."""
+    return v is not None and v.strip() == ""
+
+
+def _url_http_valida(v: str | None) -> bool:
+    """True si v es None o una URL http(s)."""
+    return v is None or v.startswith("http://") or v.startswith("https://")
+
+
+def _validar_avatar(v: str | None) -> str | None:
+    """Normaliza avatar_url: vacío → None; exige URL http(s)."""
+    if _url_vacia(v):
+        return None
+    if not _url_http_valida(v):
+        raise ValueError("avatar_url debe ser una URL http(s)")
+    return v
+
+
 class UserResponse(BaseModel):
     id: uuid.UUID
     email: EmailStr
@@ -61,11 +80,8 @@ class UserUpdate(BaseModel):
     @field_validator("avatar_url")
     @classmethod
     def _validate_avatar_url(cls, v: str | None) -> str | None:
-        if v is not None and v.strip() == "":
-            return None
-        if v is not None and not (v.startswith("http://") or v.startswith("https://")):
-            raise ValueError("avatar_url debe ser una URL http(s)")
-        return v
+        """Normaliza avatar_url: vacío → None; exige URL http(s)."""
+        return _validar_avatar(v)
 
 
 class UserUpdateSimple(BaseModel):
@@ -80,11 +96,8 @@ class UserUpdateSimple(BaseModel):
     @field_validator("avatar_url")
     @classmethod
     def _validate_avatar2(cls, v: str | None) -> str | None:
-        if v is not None and v.strip() == "":
-            return None
-        if v is not None and not (v.startswith("http://") or v.startswith("https://")):
-            raise ValueError("avatar_url debe ser una URL http(s)")
-        return v
+        """Normaliza avatar_url: vacío → None; exige URL http(s)."""
+        return _validar_avatar(v)
 
 
 class PasswordChange(BaseModel):

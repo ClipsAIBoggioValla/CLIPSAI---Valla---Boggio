@@ -66,18 +66,27 @@ TIMEOUT = 120
 MAX_RETRIES = 3
 
 
-def _get_provider() -> str:
-    if ANTHROPIC_API_KEY and ANTHROPIC_API_KEY.startswith("sk-ant"):
-        return "anthropic"
-    if ANTHROPIC_API_KEY:
-        return "anthropic"
-    if OPENAI_API_KEY and OPENAI_API_KEY.startswith("sk-"):
+def _key_openai_valida() -> bool:
+    """True si OPENAI_API_KEY parece una key de OpenAI válida."""
+    return bool(OPENAI_API_KEY) and OPENAI_API_KEY.startswith("sk-")
+
+
+def _provider_openai_compatible() -> str:
+    """Proveedor openai/openrouter/deepseek según las keys disponibles; vacío si no hay."""
+    if _key_openai_valida():
         return "openai"
     if OPENROUTER_API_KEY:
         return "openrouter"
     if DEEPSEEK_API_KEY:
         return "deepseek"
-    return "none"
+    return ""
+
+
+def _get_provider() -> str:
+    """Proveedor LLM a usar según las API keys configuradas."""
+    if ANTHROPIC_API_KEY:
+        return "anthropic"
+    return _provider_openai_compatible() or "none"
 
 
 def _format_transcript(segments: list[dict[str, Any]]) -> str:
@@ -155,26 +164,47 @@ VALIDACION:
 """
 
 
+def _esperar_retry_429(resp, attempt: int, retries: int) -> bool:
+    """True si hay que reintentar tras un 429 (aplica Retry-After)."""
+    if resp.status_code == 429 and attempt < retries:
+        retry_after = int(resp.headers.get("Retry-After", 2 * attempt))
+        time.sleep(retry_after)
+        return True
+    return False
+
+
+def _logear_fallo_red(exc: Exception, attempt: int, retries: int, timeout: int) -> None:
+    """TimeoutError/ConnectionError si era el último intento; si no, reintenta."""
+    if isinstance(exc, requests.exceptions.Timeout):
+        if attempt == retries:
+            raise TimeoutError(f"LLM timeout {timeout}s tras {retries} intentos") from exc
+        return
+    if attempt == retries:
+        raise ConnectionError(f"LLM conexion fallo: {exc}") from exc
+
+
 def _post_with_retry(url: str, headers: dict[str, str], body: dict[str, Any], timeout: int = TIMEOUT, retries: int = MAX_RETRIES) -> requests.Response:
     last_exc: Exception | None = None
     for attempt in range(1, retries + 1):
         try:
             resp = requests.post(url, headers=headers, json=body, timeout=timeout)
-            if resp.status_code == 429 and attempt < retries:
-                retry_after = int(resp.headers.get("Retry-After", 2 * attempt))
-                time.sleep(retry_after)
+            if _esperar_retry_429(resp, attempt, retries):
                 continue
             return resp
-        except requests.exceptions.Timeout as exc:
-            last_exc = exc
-            if attempt == retries:
-                raise TimeoutError(f"LLM timeout {timeout}s tras {retries} intentos") from exc
         except requests.exceptions.RequestException as exc:
             last_exc = exc
-            if attempt == retries:
-                raise ConnectionError(f"LLM conexion fallo: {exc}") from exc
+            _logear_fallo_red(exc, attempt, retries, timeout)
         time.sleep(2 * attempt)
     raise ConnectionError(f"LLM fallo tras reintentos: {last_exc}")
+
+
+def _texto_de_contenido(data: dict) -> str:
+    """Texto acumulado de los bloques de texto de la respuesta Anthropic."""
+    txt = ""
+    for blk in data.get("content", []):
+        if blk.get("type") == "text" and blk.get("text"):
+            txt += blk["text"]
+    return txt
 
 
 def _call_anthropic(prompt: str) -> str:
@@ -186,29 +216,33 @@ def _call_anthropic(prompt: str) -> str:
     if resp.status_code != 200:
         raise ConnectionError(f"Anthropic {resp.status_code}: {resp.text[:800]}")
     data = resp.json()
-    txt = ""
-    for blk in data.get("content", []):
-        if blk.get("type") == "text" and blk.get("text"):
-            txt += blk["text"]
+    txt = _texto_de_contenido(data)
     if not txt:
         raise ValueError(f"Anthropic respuesta sin texto: {data}")
     return txt
 
 
+def _key_openai_compatible() -> str:
+    """API key del proveedor OpenAI-compatible (openrouter tiene prioridad)."""
+    if OPENROUTER_API_KEY:
+        return OPENROUTER_API_KEY
+    return OPENAI_API_KEY or DEEPSEEK_API_KEY
+
+
+def _endpoint_y_modelo() -> tuple[str, str]:
+    """Endpoint y modelo según el proveedor OpenAI-compatible configurado."""
+    if OPENROUTER_API_KEY:
+        return OPENROUTER_ENDPOINT, OPENROUTER_MODEL
+    if DEEPSEEK_API_KEY and not OPENAI_API_KEY:
+        return "https://api.deepseek.com/v1/chat/completions", os.getenv("MODEL", "deepseek-chat")
+    return API_ENDPOINT, MODEL
+
+
 def _call_openai_compatible(prompt: str) -> str:
-    key = OPENAI_API_KEY or OPENROUTER_API_KEY or DEEPSEEK_API_KEY
+    key = _key_openai_compatible()
     if not key:
         raise ValueError("OPENAI_API_KEY / OPENROUTER_API_KEY / DEEPSEEK_API_KEY no configurada")
-    if OPENROUTER_API_KEY:
-        endpoint = OPENROUTER_ENDPOINT
-        model = OPENROUTER_MODEL
-        key = OPENROUTER_API_KEY
-    elif DEEPSEEK_API_KEY and not OPENAI_API_KEY:
-        endpoint = "https://api.deepseek.com/v1/chat/completions"
-        model = os.getenv("MODEL", "deepseek-chat")
-    else:
-        endpoint = API_ENDPOINT
-        model = MODEL
+    endpoint, model = _endpoint_y_modelo()
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json", "HTTP-Referer": "https://clipsai.local", "X-Title": "ClipsAI"}
     body = {"model": model, "messages": [{"role": "user", "content": prompt}], "temperature": 0.4, "max_tokens": 4096}
     resp = _post_with_retry(endpoint, headers, body)
@@ -244,70 +278,100 @@ def _parse_json_strict(raw: str) -> dict[str, Any]:
         return json.loads(fixed)
 
 
+def _datos_crudos_de_clip(c) -> tuple:
+    """Convierte los campos crudos del clip LLM a tipos numéricos/texto (puede lanzar)."""
+    title = str(c.get("title", "")).strip()[:80]
+    st = float(c.get("start_time", 0))
+    en = float(c.get("end_time", 0))
+    hook_raw = c.get("hook", {})
+    hk_text = str(hook_raw.get("text", "")).strip()
+    hk_st = float(hook_raw.get("start_time", 0))
+    hk_en = float(hook_raw.get("end_time", 0))
+    hk_dur = float(hook_raw.get("duration", hk_en - hk_st))
+    if abs(hk_dur - (hk_en - hk_st)) > 0.5:
+        hk_dur = hk_en - hk_st
+    score = int(c.get("viral_score", c.get("score", 70)))
+    reasoning = str(c.get("reasoning", c.get("motivo", ""))).strip()
+    return title, st, en, hk_text, hk_st, hk_en, hk_dur, score, reasoning
+
+
+def _datos_no_vacios(title: str, hk_text: str) -> bool:
+    """True si el título y el texto del hook no están vacíos."""
+    return bool(title) and bool(hk_text)
+
+
+def _clip_llm_valido(st: float, en: float, hk_st: float, hk_en: float, title: str, hk_text: str) -> bool:
+    """True si título/hook no vacíos, duraciones 15-60 y 3-6, y hook dentro del clip."""
+    if not _datos_no_vacios(title, hk_text):
+        return False
+    if not (15.0 <= (en - st) <= 60.0):
+        return False
+    if not (3.0 <= (hk_en - hk_st) <= 6.0):
+        return False
+    return st <= hk_st < hk_en <= en
+
+
+def _score_acotado(score: int) -> int:
+    """Score dentro de 0-100 (clamp si vino fuera de rango)."""
+    if 0 <= score <= 100:
+        return score
+    return max(0, min(100, score))
+
+
+def _clip_validado(c) -> HookClip | None:
+    """HookClip validado desde un clip crudo del LLM; None si no cumple el esquema."""
+    try:
+        title, st, en, hk_text, hk_st, hk_en, hk_dur, score, reasoning = _datos_crudos_de_clip(c)
+        if not _clip_llm_valido(st, en, hk_st, hk_en, title, hk_text):
+            return None
+        return HookClip(title=title, start_time=st, end_time=en, hook=HookSegment(text=hk_text, start_time=hk_st, end_time=hk_en, duration=hk_dur), viral_score=_score_acotado(score), reasoning=reasoning)
+    except Exception:
+        return None
+
+
 def _validate_clips(data: dict[str, Any]) -> list[HookClip]:
     clips_raw = data.get("clips", [])
     if not isinstance(clips_raw, list):
         raise ValueError("JSON 'clips' debe ser lista")
     validated: list[HookClip] = []
     for c in clips_raw:
-        try:
-            title = str(c.get("title", "")).strip()[:80]
-            st = float(c.get("start_time", 0))
-            en = float(c.get("end_time", 0))
-            hook_raw = c.get("hook", {})
-            hk_text = str(hook_raw.get("text", "")).strip()
-            hk_st = float(hook_raw.get("start_time", 0))
-            hk_en = float(hook_raw.get("end_time", 0))
-            hk_dur = float(hook_raw.get("duration", hk_en - hk_st))
-            score = int(c.get("viral_score", c.get("score", 70)))
-            reasoning = str(c.get("reasoning", c.get("motivo", ""))).strip()
-            if not title or not hk_text:
-                continue
-            clip_dur = en - st
-            hook_dur = hk_en - hk_st
-            if not (15.0 <= clip_dur <= 60.0):
-                continue
-            if not (3.0 <= hook_dur <= 6.0):
-                continue
-            if abs(hk_dur - hook_dur) > 0.5:
-                hk_dur = hook_dur
-            if not (st <= hk_st < hk_en <= en):
-                continue
-            if not (0 <= score <= 100):
-                score = max(0, min(100, score))
-            validated.append(HookClip(title=title, start_time=st, end_time=en, hook=HookSegment(text=hk_text, start_time=hk_st, end_time=hk_en, duration=hk_dur), viral_score=score, reasoning=reasoning))
-        except Exception:
-            continue
+        valido = _clip_validado(c)
+        if valido is not None:
+            validated.append(valido)
     validated.sort(key=lambda x: x["viral_score"], reverse=True)
     return validated[:3]
+
+
+def _hooks_del_llm_o_mock(segments: list[dict[str, Any]], duration_hint: float | None) -> list[HookClip]:
+    """Resultado del LLM o fallback mock si la validación dejó 0 clips."""
+    transcript_text = _format_transcript(segments)
+    if not transcript_text.strip():
+        raise ValueError("Transcripcion vacia")
+    prompt = _build_hook_prompt(transcript_text, duration_hint)
+    raw = _call_llm(prompt)
+    logger.debug("Respuesta cruda del LLM de hooks: %s chars", len(raw))
+    data = _parse_json_strict(raw)
+    clips = _validate_clips(data)
+    if not clips:
+        logger.warning(
+            "Validacion de hooks dejo 0 clips, usando fallback mock. data=%s", str(data)[:500]
+        )
+        return _mock_hooks(segments)
+    return clips
 
 
 def detect_hooks(segments: list[dict[str, Any]], duration_hint: float | None = None, mock: bool = False) -> list[HookClip]:
     if mock or _get_provider() == "none":
         return _mock_hooks(segments)
     try:
-        transcript_text = _format_transcript(segments)
-        if not transcript_text.strip():
-            raise ValueError("Transcripcion vacia")
-        prompt = _build_hook_prompt(transcript_text, duration_hint)
-        raw = _call_llm(prompt)
-        logger.debug("Respuesta cruda del LLM de hooks: %s chars", len(raw))
-        data = _parse_json_strict(raw)
-        clips = _validate_clips(data)
-        if not clips:
-            logger.warning(
-                "Validacion de hooks dejo 0 clips, usando fallback mock. data=%s", str(data)[:500]
-            )
-            return _mock_hooks(segments)
-        return clips
+        return _hooks_del_llm_o_mock(segments, duration_hint)
     except Exception:
         logger.exception("detect_hooks fallo, fallback a mock")
         return _mock_hooks(segments)
 
 
-def _mock_hooks(segments: list[dict[str, Any]]) -> list[HookClip]:
-    if not segments:
-        return []
+def _ventana_clip_mock(segments: list[dict[str, Any]]) -> tuple[float, float]:
+    """Ventana [clip_start, clip_end] del clip mock."""
     total_start = float(segments[0].get("start", 0))
     total_end = float(segments[-1].get("end", total_start + 30))
     total_dur = total_end - total_start
@@ -315,21 +379,73 @@ def _mock_hooks(segments: list[dict[str, Any]]) -> list[HookClip]:
     clip_end = min(total_end, clip_start + 40)
     if clip_end - clip_start < 15:
         clip_end = clip_start + 15
+    return clip_start, clip_end
+
+
+def _ventana_hook_mock(clip_start: float, clip_end: float) -> tuple[float, float]:
+    """Ventana [hook_start, hook_end] de 5s dentro del clip mock."""
     mid = (clip_start + clip_end) / 2
     hook_start = max(clip_start, mid - 2.5)
     hook_end = hook_start + 5.0
     if hook_end > clip_end:
         hook_end = clip_end
         hook_start = hook_end - 5
-    hook_text = "ESTA ES LA FRASE MAS PICANTE DEL CLIP"
+    return hook_start, hook_end
+
+
+def _texto_hook_mock(segments: list[dict[str, Any]], hook_start: float, hook_default: str) -> str:
+    """Texto del hook mock: frase del segmento más cercano al inicio del hook."""
     for s in segments:
         try:
             if abs(float(s.get("start", 0)) - hook_start) < 2:
-                hook_text = str(s.get("text", hook_text)).strip().upper()[:60]
-                break
+                return str(s.get("text", hook_default)).strip().upper()[:60]
         except Exception:
             continue
+    return hook_default
+
+
+def _mock_hooks(segments: list[dict[str, Any]]) -> list[HookClip]:
+    if not segments:
+        return []
+    clip_start, clip_end = _ventana_clip_mock(segments)
+    hook_start, hook_end = _ventana_hook_mock(clip_start, clip_end)
+    hook_text = _texto_hook_mock(segments, hook_start, "ESTA ES LA FRASE MAS PICANTE DEL CLIP")
     return [HookClip(title="Clip viral detectado (mock)", start_time=round(clip_start, 1), end_time=round(clip_end, 1), hook=HookSegment(text=hook_text, start_time=round(hook_start, 1), end_time=round(hook_end, 1), duration=round(hook_end - hook_start, 1)), viral_score=88, reasoning="Mock hook: frase central con mayor intensidad para teaser")]
+
+
+def _segundo_de_timestamp_linea(ts: str) -> float:
+    """Segundos de un timestamp HH:MM:SS / MM:SS / SS de una línea de transcript."""
+    if ":" in ts:
+        parts = ts.split(":")
+        if len(parts) == 3:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+        return int(parts[0]) * 60 + float(parts[1])
+    return float(ts)
+
+
+def _segmento_de_linea_transcript(line: str) -> dict[str, Any] | None:
+    """Segmento {'start','end','text'} de una línea; None si el timestamp es inválido."""
+    if " - " not in line:
+        return {"start": 0, "end": 3, "text": line}
+    ts, txt = line.split(" - ", 1)
+    try:
+        sec = _segundo_de_timestamp_linea(ts)
+    except Exception:
+        return None
+    return {"start": sec, "end": sec + 3, "text": txt}
+
+
+def _segmentos_de_archivo_transcript(text: str) -> list[dict[str, Any]]:
+    """Segmentos parseados del archivo de transcript."""
+    segs: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        seg = _segmento_de_linea_transcript(line)
+        if seg is not None:
+            segs.append(seg)
+    return segs
 
 
 def detect_hooks_from_transcript_file(transcript_path: str | Path, mock: bool = False) -> list[HookClip]:
@@ -337,25 +453,4 @@ def detect_hooks_from_transcript_file(transcript_path: str | Path, mock: bool = 
     if not p.is_file():
         raise FileNotFoundError(f"Transcripcion no encontrada: {p}")
     text = p.read_text(encoding="utf-8")
-    segs: list[dict[str, Any]] = []
-    for line in text.splitlines():
-        line=line.strip()
-        if not line:
-            continue
-        if " - " in line:
-            ts, txt = line.split(" - ", 1)
-            try:
-                if ":" in ts:
-                    parts=ts.split(":")
-                    if len(parts)==3:
-                        sec=int(parts[0])*3600+int(parts[1])*60+float(parts[2])
-                    else:
-                        sec=int(parts[0])*60+float(parts[1])
-                else:
-                    sec=float(ts)
-                segs.append({"start":sec,"end":sec+3,"text":txt})
-            except Exception:
-                continue
-        else:
-            segs.append({"start":0,"end":3,"text":line})
-    return detect_hooks(segs, mock=mock)
+    return detect_hooks(_segmentos_de_archivo_transcript(text), mock=mock)
