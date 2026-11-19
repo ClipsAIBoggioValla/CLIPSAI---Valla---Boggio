@@ -115,12 +115,46 @@ async function handleConnectInstagram() {
     loading.value = false
   }
 }
+
+async function handleConnectTiktok() {
+  loading.value = true
+  error.value = null
+  try {
+    const headers = socialHeaders()
+    const { data } = await apiClient.get<{ auth_url?: string; url?: string }>('/auth/social/tiktok/connect', { headers })
+    const resolved = resolveSocialAuthUrl(data, 'https://www.tiktok.com/')
+    if ('error' in resolved) {
+      error.value = resolved.error
+      return
+    }
+    window.location.href = resolved.url
+  } catch (e: unknown) {
+    error.value = connectErrorMessage(e, 'Error al conectar con TikTok')
+  } finally {
+    loading.value = false
+  }
+}
+
+async function handleDisconnect(platform: string) {
+  loading.value = true
+  error.value = null
+  try {
+    await apiClient.delete(`/auth/social/${platform}`, { headers: socialHeaders() })
+    await fetchSocialStatus()
+  } catch (e: unknown) {
+    error.value = connectErrorMessage(e, `Error al desconectar ${platform}`)
+  } finally {
+    loading.value = false
+  }
+}
 return {
   error,
   errorDetail,
   fetchSocialStatus,
   handleConnectInstagram,
+  handleConnectTiktok,
   handleConnectYoutube,
+  handleDisconnect,
   integration,
   loading,
   route,

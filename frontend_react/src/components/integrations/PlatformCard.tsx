@@ -51,6 +51,7 @@ export default function PlatformCard(props: PlatformCardProps) {
         )}
       </button>
       <p className="text-xs text-[#64748B] mt-2 text-center">{endpointHint}</p>
+      {props.children}
     </div>
   )
 }
