@@ -4,7 +4,7 @@
 >
 > **Propósito:** describir de arriba a abajo qué es el sistema, qué hace hoy, con qué lo hace, cómo se estructura el código y qué falta — para decidir nuevas issues y onboarding. Está pensado como insumo para tomar decisiones sobre los próximos pasos (ver §17.6).
 >
-> **Última actualización: 14 de noviembre de 2026** — Fases 1-4 **mergeadas a `main`** (PRs #104-#107). **Fase 5 en PR** (rama `fix/quality-cob-compl-final`): la cátedra midió el 13-nov Compl **352** (los helpers CC 6-8 de la Fase 4 contaban como bloques) → refactor integral con **helpers de CC ≤ 4**: **387 → 47 bloques** (medición local AST/regex con el mismo criterio, objetivo de la cátedra ≤135,6); cobertura de los módulos raíz sumada con 43 tests nuevos (`tests/test_root_pipeline_coverage.py`) — **669 tests, 82 %**; builds de React/Vue/Express verificados. Detalle en §17 y `ISSUES_CALIDAD_PENDIENTES.md`.
+> **Última actualización: 18 de noviembre de 2026** — **Fase 5 de calidad MERGEADA a `main`** (PR #108: Compl 352 → 47 bloques con helpers CC ≤ 4; 669 tests, 82 %; detalle en §17.3 y `ISSUES_CALIDAD_PENDIENTES.md`) y **PR #109** (`fix/tiktok-integration`: redirect_uri consistente connect/exchange de TikTok, tarjeta de TikTok restaurada en Integraciones). **Auditoría de código del backlog #110-#127 ejecutada el 18-nov-2026** contra `main` (`85a9bc6`): 0 issues 100 % hechos, **12 PARCIALES, 6 PENDIENTES** — estado real, evidencia y delta por issue en §17.7 (y en el cuerpo de cada issue en GitHub, con sección "🔍 Auditoría de código — 18-nov-2026").
 
 ---
 
@@ -1019,9 +1019,46 @@ Prioridad sugerida, en función de impacto × esfuerzo:
 4. **CI en PRs (MEDIA):** workflow con `typecheck` + `audit:parity` + `pytest` + build de fronts; además evitar pushes directos a `main` (6 detectados).
 5. **Funcionalidad nueva (MEDIA, según objetivos del producto):** multi-idioma i18n, roles admin/editor, paginación cursor para 10k+ clips, índice GIN sobre `tags`, analytics de retención por clip, editor timeline (fuera de alcance actual — requiere decisión de scope).
 
+### 17.7 Backlog #110-#127 — Auditoría de código real (18-nov-2026)
+
+Los 18 issues del nuevo backlog (creados tras la Fase 5 de calidad, con responsables por perfil:
+A = `mboggio912` motor/worker, B = `SantiValla` backend/seguridad/UX) fueron auditados contra el
+código real de `main`. **Ninguno está 100 % implementado**: no se cerró ninguno en GitHub; los 12
+parciales fueron editados con su estado, evidencia `archivo:línea` y delta real; los 6 pendientes
+siguen abiertos sin cambios. Resumen:
+
+| Issue | Estado real | Lo que YA existe | Delta real que falta |
+|---|---|---|---|
+| #110 Archivar Express/Vue + `frontend_common` | ⚠️ PARCIAL | `frontend_common` fijado en `frontend_react/package.json:16`, alias en `vite.config.ts:13`, `publicDir` correcto | No existe `archive/`; compose sigue con servicios `backend_express`/`frontend_vue`; docs en modo dual-stack |
+| #111 Rotar keys + cifrar tokens + rate limit | ⚠️ PARCIAL | `vault.py` (AESGCM, `VAULT_KEY`) + tests; `rate_limiter.py` módulo listo | Vault **sin cablear** (tokens OAuth en texto plano); sin `slowapi`/`express-rate-limit`; `JWT_SECRET` default débil; key `sk-ant` sigue en git history; `.env.example` sin `VAULT_KEY`/`RUNPOD_WEBHOOK_SECRET`/`R2_PUBLIC_URL` |
+| #112 SSRF en worker | ⚠️ PARCIAL | `ssrf_guard.py` completo (IMDS/privadas/DNS) + `TestSSRFGuard` (5+ payloads) | `backend/handler.py` descarga con `requests.get(allow_redirects=True)` sin `validate_url` (0 referencias al guard) |
+| #113 Webhooks RunPod HMAC | ❌ PENDIENTE | — | Sin `routers/webhooks.py`, sin HMAC, sin `/run`+webhook: FastAPI y Express siguen con `/runsync` + polling `/status` |
+| #114 R2 lifecycle + auto-refresh OAuth | ⚠️ PARCIAL | `_ensure_token_fresh` preventivo+reactivo para las 3 plataformas; TikTok desconecta al fallar refresh; `token_expires_at` persiste | YouTube/Instagram no desconectan al fallar refresh; `DELETE /clips/{id}` no purga R2; lifecycle 24h de `uploads/` inexistente |
+| #115 Unificar services + Whisper sin `.txt` | ⚠️ PARCIAL | Gemelos services reducidos a 1 copia (`hook_service`, delta 48+/15-); fallback Whisper por archivo vacío/inválido; backend Whisper usa `word_timestamps=True` | El fallback no detecta "sin timestamps de palabra" → `.txt` plano sigue rompiendo `build_sentence_map`; `whisper_transcriber.py` raíz con `word_timestamps=False`; `hook_service` sin unificar |
+| #116 Hook B&W 5s + zoom | ⚠️ PARCIAL | `build_hook_clip` concatena teaser+cuerpo con fade; ASS desplazado `hook_dur` | Sin `eq=saturation=0`, sin `scale=1.08`; duración inconsistente (2.5-5.5 vs 3-6); `video_processor.py` del worker usa otro enfoque (hook como evento ASS de 3s, sin B&W) |
+| #117 Emojis a color + zoom por RMS | ⚠️ PARCIAL (base RMS) | `audio_analyzer.py` exporta picos/eventos RMS con timestamps | Worker sin `fonts-noto-color-emoji`; LLM no genera emojis (0 matches); sin zoom dinámico; picos RMS sin consumidor |
+| #118 Layouts podcast/gameplay_split | ❌ PENDIENTE | — | 0 código: sin `template` en `RenderConfig` (solo `caption_style`), sin vstack, sin detección facial, sin mediapipe/opencv |
+| #119 Ingesta YouTube/Twitch (yt-dlp) | ⚠️ PARCIAL (stub) | `ingest_ytdlp` con SSRF guard + test | Sin `yt-dlp` en requirements/Dockerfile; sin endpoint `POST /api/videos/from-url`; sin whitelist de dominios ni UI |
+| #120 UX Opus Clip | ⚠️ PARCIAL | Estados amigables en JobStatus; toggles ASS/Hook; subida directa R2 | Sin barra URL, sin galería de plantillas, sin toggles B&W/Emojis/Zoom; jerga técnica ("Jobs", UUID crudo) |
+| #121 Editor ligero | ⚠️ PARCIAL | `POST /clips/{id}/retrim` con `start_time`/`end_time` 5-90s | Retrim no acepta `RenderConfig` ni texto de subs; frontend sin modal de edición (0 matches de retrim/slider) |
+| #122 Network Volume + watermark | ⚠️ PARCIAL | `RenderConfig.watermark_path` (schema); overlay FFmpeg en `video_editor/renderer.py` (track B) | Overlay sin cablear al pipeline activo; Network Volume 0 (cache HF efímero `/app/whisper_model`); RUNPOD.md sin volumen |
+| #123 OAuth App Review | ❌ PENDIENTE | Solo páginas legales genéricas | 0 checklist de App Review en docs; apps en modo testing |
+| #124 Créditos por minuto | ❌ PENDIENTE | — | 0 matches de `credit`/`refund`/ledger en todo el repo |
+| #125 Stripe/MercadoPago | ❌ PENDIENTE | — | 0 matches de `stripe`/`mercadopago`; sin `/billing` |
+| #126 Scheduler de publicaciones | ⚠️ PARCIAL | `ScheduledPost` con `scheduled_at` (schemas); DB acepta `publication_status='scheduled'` | Sin `scheduled_for` en `clips`; sin APScheduler; publish no acepta fecha; UI sin selector ni calendario |
+| #127 Analytics de posts | ❌ PENDIENTE | — | `/metrics` es métricas internas de proceso; sin fetch de vistas/likes por `social_post_id` |
+
+**Descubrimientos de la auditoría (features reales que la hoja de ruta no refleja):**
+- El vault de tokens ya está **implementado con AESGCM** (no Fernet como decía #111) — decisión a ratificar.
+- Existe `ingest_ytdlp` con SSRF guard y tests (#119) — solo falta wiring.
+- Existe overlay de watermark en `backend/services/video_editor/renderer.py` (#122) — solo falta cablearlo al pipeline activo.
+- El auto-refresh OAuth de tokens (#114) está más avanzado de lo que el issue asume (preventivo + reactivo + 3 plataformas).
+- Persiste la deuda de siempre confirmada: tokens OAuth en texto plano (#111), SSRF sin cablear en el worker (#112), polling bloqueante de RunPod (#113), `.txt` plano roto en local (#115).
+
 ---
 
 ## 18. Procesamiento serverless (RunPod + R2), despliegue y CI
+
 
 ### 18.1 Worker en RunPod Serverless (GPU)
 
