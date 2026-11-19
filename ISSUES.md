@@ -8,6 +8,69 @@
 - ❌ **Pendiente** — no iniciado o solo stub/simulado
 - 🆕 **Nuevo** — propuesto a partir del rediseño 2026 y gaps detectados
 
+## Backlog #110–#127 — Auditoría de código real — 18 Nov 2026
+
+> Fuente: auditoría de código ejecutada el **18-nov-2026** contra `main` (`85a9bc6`, incluye PR #108
+> Fase 5 de calidad y PR #109 TikTok). Resultado: **0 issues 100 % implementados** (ninguno cerrado),
+> **12 PARCIALES** (editados en GitHub con sección "🔍 Auditoría de código — 18-nov-2026" que incluye
+> evidencia `archivo:línea` y delta real) y **6 PENDIENTES** (abiertos sin cambios). Detalle completo en
+> `SISTEMA.md` §17.7.
+>
+> **🔄 Recalibración del 18-nov-2026 (post-auditoría):** los cuerpos de **11 issues parciales**
+> (#110, #111, #112, #114, #115, #116, #117, #119, #121, #122, #126) fueron **reemplazados por su
+> delta real limpio** (solo lo pendiente, sin repetir lo ya implementado) y 5 issues antiguos
+> (#113, #118, #120, #123, #124, #125, #127) quedaron sin cambios. El tiempo ganado se reasignó a
+> **5 nuevas features de producto (#128–#132)** — ver sección siguiente.
+
+| # | Título (corto) | Responsable | Semana | Estado real | Delta real pendiente |
+|---|---|---|---|---|---|
+| #110 | Archivar Express/Vue + fijar `frontend_common` | B | 1 | ⚠️ Parcial | Mover `backend_express/`+`frontend_vue/` a `archive/`; limpiar compose/`dev:up`; docs a un solo stack (el lado `frontend_common` ya está hecho) |
+| #111 | Rotar keys + cifrar tokens OAuth + rate limit | B | 1 | ⚠️ Parcial | Cablear `vault.py` (AESGCM) a `social_accounts` (hoy texto plano); `slowapi` en `/auth/*` y presign; `JWT_SECRET` guard en prod; rotar `sk-ant` + purgar historial; `.env.example` (`VAULT_KEY`, `RUNPOD_WEBHOOK_SECRET`, `R2_PUBLIC_URL`) |
+| #112 | SSRF guard en `backend/handler.py` | A | 1 | ⚠️ Parcial | Cablear `validate_url()` en `_descargar_stream`/`_download_file` (guard y tests ya existen); `allow_redirects=True` actual sin validar |
+| #113 | Webhooks RunPod (HMAC) en vez de polling | B | 1 | ❌ Pendiente | Todo: `routers/webhooks.py`, HMAC, disparo `/run`, idempotencia, timeout 30 min, fallback runsync |
+| #114 | R2 lifecycle 24h + auto-refresh OAuth | B | 1 | ⚠️ Parcial | Auto-refresh **hecho** (preventivo+reactivo, 3 plataformas; TikTok desconecta). Falta: disconnect en YouTube/Instagram; borrar objeto R2 en `DELETE /clips/{id}`; lifecycle 24h del bucket |
+| #115 | Unificar services + Whisper automático sin `.txt` | A | 1 | ⚠️ Parcial | Unificar `app/services/hook_service.py` (única copia restante); fallback Whisper por criterio "sin timestamps de palabra" (hoy solo por archivo vacío/<3 líneas); `word_timestamps=True` en `whisper_transcriber.py` raíz; handler con rama Whisper |
+| #116 | Hook teaser B&W (~5s) + zoom | A | 1 | ⚠️ Parcial | `eq=saturation=0`, `scale=1.08`, duración objetivo 5s alineada (hoy 2.5-5.5 vs 3-6); unificar enfoque del worker (`video_processor.py` usa hook como evento ASS de 3s) |
+| #117 | Emojis a color + zoom dinámico por RMS | A | 1 | ⚠️ Parcial | `fonts-noto-color-emoji` en worker; emojis del LLM en prompts/ASS; zoom dinámico 1.0→1.12 consumiendo picos RMS de `audio_analyzer.py` |
+| #118 | Layouts `podcast_split`/`gameplay_split` | A | 2 | ❌ Pendiente | Todo: `RenderConfig.template` (no existe), mediapipe/opencv, vstack, selector en UI |
+| #119 | Ingesta YouTube/Twitch vía yt-dlp | A+B | 2 | ⚠️ Parcial | `ingest_ytdlp` existe con SSRF guard + test. Falta: dependencia `yt-dlp`, endpoint `POST /api/videos/from-url`, whitelist de dominios, pestaña "Pegar enlace" |
+| #120 | UX Opus Clip (Upload/Dashboard sin jerga) | B | 2 | ⚠️ Parcial | Barra única URL+dropzone; galería de plantillas (requiere #118); toggles B&W/Emojis/Zoom; eliminar "Jobs"/UUID de la UI |
+| #121 | Editor ligero sobre `/retrim` | B | 2 | ⚠️ Parcial | Retrim backend existe (start/end). Falta: aceptar `RenderConfig`+texto de subs; modal con slider/editor de subs/plantilla; límite de re-tries |
+| #122 | RunPod Network Volume + watermark por plan | A | 3 | ⚠️ Parcial | Overlay existe en `video_editor/renderer.py` (track B) pero sin cablear al pipeline activo; Network Volume 0 (cache HF efímero); flag `watermark: bool` |
+| #123 | OAuth App Review (Google/Meta/TikTok) | B | 3 | ❌ Pendiente | Todo: checklist en docs, grabaciones de flujo, apps en producción |
+| #124 | Créditos por minuto + reembolso | B | 3 | ❌ Pendiente | Todo: no existe nada de créditos/ledger en el repo |
+| #125 | Stripe Checkout + MercadoPago | B | 3 | ❌ Pendiente | Todo: no existe `stripe`/`mercadopago` ni `/billing` |
+| #126 | Scheduler de publicaciones + calendario | B | 4 | ⚠️ Parcial | `ScheduledPost` (schemas) y estado DB `scheduled` existen. Falta: `scheduled_for` en clips, APScheduler, endpoint con fecha, UI de fecha/calendario |
+| #127 | Analytics de métricas reales de posts | B | 4 | ❌ Pendiente | Todo: `/metrics` es de proceso interno; sin ingesta de vistas/likes por plataforma |
+
+**Resumen:** HECHO 0 · PARCIAL 12 (#110, #111, #112, #114, #115, #116, #117, #119, #120, #121, #122, #126) · PENDIENTE 6 (#113, #118, #123, #124, #125, #127).
+Las semanas objetivo del backlog original (1→4) siguen siendo realistas, pero la Fase 1 tiene hoy
+más avance del asumido en el lado A (stub yt-dlp, guard listo) y cero en la parte crítica de B
+(cifrado de tokens y rate limit sin cablear).
+
+---
+
+## Features nuevas de producto — Issues #128–#132 (creados 18 Nov 2026)
+
+> Nacidas de la recalibración post-auditoría: las piezas ya implementadas liberaron capacidad del
+> backlog y se reasignó a estas 5 features de diferenciación de producto.
+
+| # | Issue | Responsable | Semana | Link |
+|---|---|---|---|---|
+| #128 | feat(video): smooth face-tracking en 9:16 y Active Speaker highlight en podcast_split | Perfil A (`mboggio912`) | 2 | [Issue #128](https://github.com/ClipsAIBoggioValla/CLIPSAI---Valla---Boggio/issues/128) |
+| #129 | feat(ai): generador de títulos, copy y hashtags por plataforma (TikTok/Reels/Shorts) | Perfil A (`mboggio912`) | 2 | [Issue #129](https://github.com/ClipsAIBoggioValla/CLIPSAI---Valla---Boggio/issues/129) |
+| #130 | feat(ui): Brand Kits por usuario (logo, color, fuente y plantilla por defecto) | Perfil B (`SantiValla`) | 3 | [Issue #130](https://github.com/ClipsAIBoggioValla/CLIPSAI---Valla---Boggio/issues/130) |
+| #131 | feat(clips): enlace público de revisión (/share/{token}) y descarga masiva ZIP | Perfil B (`SantiValla`) | 3 | [Issue #131](https://github.com/ClipsAIBoggioValla/CLIPSAI---Valla---Boggio/issues/131) |
+| #132 | feat(growth): estimador previo de minutos, onboarding guiado y códigos promocionales | Perfil B (`SantiValla`) | 4 | [Issue #132](https://github.com/ClipsAIBoggioValla/CLIPSAI---Valla---Boggio/issues/132) |
+
+**Notas de integración con el backlog existente:**
+- #128 depende de #118 (layouts `podcast_split`/`gameplay_split`); el tracking y el highlight se construyen sobre esos layouts.
+- #129 prellena el modal de publicación que hoy solo tiene caption manual (`PublishDialog.tsx`).
+- #130 alimenta el watermark por plan de #122 (logo del Brand Kit en vez del overlay genérico del plan Free).
+- #132 integra el estimador con la fórmula de créditos de #124 (`ceil(duration/60)`) y cupones en el checkout de #125.
+
+
+
 ## Sincronización GitHub — 21 Sep 2026
 
 > Fuente: dos últimos listados GitHub (cerradas vs abiertas). Formato Markdown limpio con PR vinculados.
