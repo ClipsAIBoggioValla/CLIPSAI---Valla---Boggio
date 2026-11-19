@@ -3,20 +3,20 @@
 
 > Documento **generado automáticamente** por la cátedra de Programación III (RepoSense + análisis de calidad + constancia). **No editar a mano**: se regenera en cada evaluación.
 > Rama evaluada: `main`. Análisis **heurístico** (regex + métricas): es una criba para orientar la revisión, **no una nota**.
-> Generado: 2026-11-18.
+> Generado: 2026-11-19.
 
 ## 1. Veredicto
 
 | Aspecto | Resultado |
 |---|---|
 | Tipo de proyecto | app |
-| Índice de calidad de servicios | **4/100** (mínimo 50) |
-| Criterios cumplidos | **13/16** |
+| Índice de calidad de servicios | **53/100** (mínimo 50) |
+| Criterios cumplidos | **14/16** |
 | Aprobado (semáforo) | **NO** |
-| Código (LOC) | 27,128 |
+| Código (LOC) | 31,688 |
 | Archivos de código | 247 |
-| Tests (archivos) | 23 |
-| Cobertura de líneas | 70.2% (mínimo 80%) |
+| Tests (archivos) | 24 |
+| Cobertura de líneas | 76.8% (mínimo 80%) |
 | Capas detectadas | presentacion, logica, datos, vistas, servicios, estado |
 | Pushes directos a `main` (sin PR) | 6 |
 
@@ -28,12 +28,12 @@
 
 | Autor | Commits | Código (LOC) | Tests (LOC) | Docs (LOC) | Días activos | % del código |
 |---|---:|---:|---:|---:|---:|---:|
-| mateo | 129 | 22,683 | 8,907 | 1,974 | 47 | 70% |
-| SantiValla | 39 | 9,751 | 45 | 591 | 13 | 30% |
+| mateo | 131 | 30,707 | 9,186 | 2,110 | 48 | 78% |
+| SantiValla | 39 | 8,900 | 45 | 591 | 13 | 22% |
 
 > _El LOC de autoría lo calcula RepoSense sobre el historial y puede diferir del LOC de código del análisis de calidad (que mira solo el estado de `main`)._
 
-> **Reparto del trabajo:** mateo concentra el 70% de las líneas de código. Un reparto muy desigual suele indicar que la integración no fue realmente en equipo; vale la pena reconstruir cómo se coordinó.
+> **Reparto del trabajo:** mateo concentra el 78% de las líneas de código. Un reparto muy desigual suele indicar que la integración no fue realmente en equipo; vale la pena reconstruir cómo se coordinó.
 
 ## 3. Constancia (IC) — todas las ramas
 
@@ -41,8 +41,8 @@
 
 | Alumno | Sesiones | Cumplimiento | Pausa | Recencia | IC | Nivel | Para subir de nivel |
 |---|--:|--:|--:|--:|--:|--|--|
-| mateo | 38 | 100% | 12 d | 57% | **73** | Aprueba | Pausa 12 d (máx. 5 d); Recencia 57% (mín. 75%) |
-| SantiValla | 17 | 61% | 19 d | 50% | **47** | Aprueba | Cumplimiento 61% (mín. 100%); Pausa 19 d (máx. 5 d); Recencia 50% (mín. 75%) |
+| mateo | 39 | 100% | 12 d | 93% | **78** | Aprueba | Pausa 12 d (máx. 5 d) |
+| SantiValla | 17 | 61% | 19 d | 43% | **45** | No aprueba | Recencia 43% (mín. 50%) |
 
 > Para aprobar el IC: **2 sesiones por semana** sostenidas, sin pausas mayores a **10 días** y con actividad en las **últimas 2 semanas**. Se excluyen merges, bots y al docente. Zona horaria UTC-3.
 
@@ -50,21 +50,17 @@
 
 Cada aspecto indica **qué mide**, **por qué importa** y **tu resultado**. Cuando el resultado está en rojo, se agregan preguntas para **investigar la causa** (no hay recetas: entender el porqué es parte de la evaluación).
 
-### 1. Índice de calidad de servicios (indice) — A REVISAR
+### 1. Índice de calidad de servicios (indice) — OK
 
 - **Qué mide:** Un resumen numérico (0-100) que combina todas las señales y métricas del análisis, con topes duros por duplicación.
 - **Por qué importa:** Ordena y prioriza la revisión: un índice bajo indica varias señales que conviene mirar juntas.
-- **Tu resultado:** índice **4/100** _(mínimo 50)_
-- **Para investigar la causa:**
-    - ¿En qué momento del proyecto se concentraron los problemas (arranque, integración de partes, cierre)?
-    - ¿El índice bajó por muchas señales chicas o por una o dos graves?
-    - ¿Se revisó el código integrado después de unir el trabajo de cada integrante?
+- **Tu resultado:** índice **53/100** _(mínimo 50)_
 
 ### 2. Duplicación (DRY) (duplicacion) — OK
 
 - **Qué mide:** Porcentaje de bloques de código repetidos (similitud) en el repositorio.
 - **Por qué importa:** Cada copia se mantiene por separado: un arreglo hay que repetirlo y los defectos se multiplican.
-- **Tu resultado:** **9.5%** de duplicación _(máximo 15%)_
+- **Tu resultado:** **7.2%** de duplicación _(máximo 15%)_
 
 ### 3. Secretos hardcodeados (SEC) — OK
 
@@ -102,11 +98,15 @@ Cada aspecto indica **qué mide**, **por qué importa** y **tu resultado**. Cuan
 - **Por qué importa:** Se pierde la ayuda del compilador justo donde los datos vienen de afuera (API, formularios).
 - **Tu resultado:** **0** uso(s) de `any` _(máximo 2)_
 
-### 9. Componente demasiado grande (BigC) — OK
+### 9. Componente demasiado grande (BigC) — A REVISAR
 
 - **Qué mide:** Componentes de UI muy extensos, que suelen mezclar render, estado y lógica.
 - **Por qué importa:** Son difíciles de leer, probar y reutilizar, y sus cambios tienen efectos inesperados.
-- **Tu resultado:** **1** componente(s) demasiado grande(s) _(máximo 1)_
+- **Tu resultado:** **7** componente(s) demasiado grande(s) _(máximo 1)_
+- **Para investigar la causa:**
+    - ¿El componente creció a medida que se agregaban requisitos, sin volver a dividirlo?
+    - ¿Mezcla responsabilidades distintas (mostrar, calcular, pedir datos)?
+    - ¿Se dividió por pantalla o por unidad de responsabilidad?
 
 ### 10. Baja cohesión (Coh) — OK
 
@@ -114,21 +114,17 @@ Cada aspecto indica **qué mide**, **por qué importa** y **tu resultado**. Cuan
 - **Por qué importa:** Una unidad que cambia por motivos distintos es frágil y cuesta entenderla.
 - **Tu resultado:** **0** unidad(es) con baja cohesión _(máximo 0)_
 
-### 11. Complejidad alta (Compl) — A REVISAR
+### 11. Complejidad alta (Compl) — OK
 
 - **Qué mide:** Complejidad ciclomática: cantidad de caminos posibles dentro de una función (condicionales, bucles, casos).
 - **Por qué importa:** Muchos caminos = difícil de seguir y de probar; suelen esconderse casos sin cubrir.
-- **Tu resultado:** **352** bloque(s) de complejidad alta _(máximo 5 por 1000 LOC (tenés 27128 LOC))_
-- **Para investigar la causa:**
-    - ¿Se agregaron condiciones a medida que aparecían casos nuevos?
-    - ¿Se probaron todos los caminos o solo el caso principal?
-    - ¿Hay reglas de negocio mezcladas con detalles técnicos?
+- **Tu resultado:** **66** bloque(s) de complejidad alta _(máximo 5 por 1000 LOC (tenés 31688 LOC))_
 
 ### 12. Funciones/métodos largos o con muchos parámetros (Tam) — OK
 
 - **Qué mide:** Tamaño de las funciones/métodos y cantidad de parámetros.
 - **Por qué importa:** Una función que hace varias cosas cuesta leerla, nombrarla y reutilizarla.
-- **Tu resultado:** **245** función/método(s) largos o con muchos parámetros _(máximo 10 por 1000 LOC)_
+- **Tu resultado:** **207** función/método(s) largos o con muchos parámetros _(máximo 10 por 1000 LOC)_
 
 ### 13. Acoplamiento alto (Acop) — OK
 
@@ -140,7 +136,7 @@ Cada aspecto indica **qué mide**, **por qué importa** y **tu resultado**. Cuan
 
 - **Qué mide:** Porcentaje de líneas de código ejecutadas por la suite de tests (cobertura real, no cantidad de archivos de test).
 - **Por qué importa:** Un test que existe pero no ejecuta el código no protege de nada: la cobertura muestra qué partes quedan sin verificar.
-- **Tu resultado:** **70.2%** de líneas cubiertas · fuente: ejecución: pytest (aviso: requirements.txt: sin instalar 2 línea(s) (no disponibles o en conflicto: torch>=2.1.0 --index-url https://dow…) (. 65.4%, backend_fastapi 77.0%) _(mínimo 80% de líneas)_
+- **Tu resultado:** **76.8%** de líneas cubiertas · fuente: ejecución: pytest (aviso: requirements.txt: sin instalar 2 línea(s) (no disponibles o en conflicto: torch>=2.1.0 --index-url https://dow…) (. 75.2%, backend_fastapi 79.0%) _(mínimo 80% de líneas)_
 - **Para investigar la causa:**
     - ¿Qué módulos o ramas del sistema nunca se ejecutan en los tests?
     - ¿Los tests prueban el camino principal y los errores, o solo el caso feliz?
@@ -164,9 +160,8 @@ Criterios que hoy están en rojo y, para cada uno, una explicación breve de **c
 
 | Criterio | Resultado actual | Meta | Brecha | Cómo alcanzarlo |
 |---|---|---|---|---|
-| Índice de calidad de servicios (indice) | índice **4/100** | mínimo 50 | faltan 46 pts | El índice sólo penaliza lo que **excede** los umbrales de cada criterio: si tenés todo en verde, el índice es 100. Si está en rojo, mirá la columna **Brecha** y los criterios en rojo; corregí primero duplicación, SEC, SQL y capas. Meta del perfil exigente: ≥50. |
-| Complejidad alta (Compl) | **352** bloque(s) de complejidad alta | máximo 5 por 1000 LOC (tenés 27128 LOC) | 352 hallazgo(s); el máximo para 27,128 LOC es 135.6 | Extraé condiciones y ramas a funciones con nombre propio, usá retornos tempranos y evitá anidar `if`/`switch`. Meta: ≤5 bloques por 1000 LOC. |
-| Cobertura de tests (Cob) | **70.2%** de líneas cubiertas · fuente: ejecución: pytest (aviso: requirements.txt: sin instalar 2 línea(s) (no disponibles o en conflicto: torch>=2.1.0 --index-url https://dow…) (. 65.4%, backend_fastapi 77.0%) | mínimo 80% de líneas | faltan 9.8 pts | Agregá o ampliá tests que ejecuten los módulos sin cubrir (camino principal y errores) y publicá el artefacto (`coverage/lcov.info`, `coverage-summary.json`, `coverage.xml` o `coverage.json`) o corré la suite con coverage. Meta: ≥80% de líneas. |
+| Componente demasiado grande (BigC) | **7** componente(s) demasiado grande(s) | máximo 1 | 6 componente(s) de más | Dividí el componente por responsabilidad en subcomponentes (render, estado, acceso a datos) y dejá el original sólo como orquestador. Meta: ≤1 componente grande. |
+| Cobertura de tests (Cob) | **76.8%** de líneas cubiertas · fuente: ejecución: pytest (aviso: requirements.txt: sin instalar 2 línea(s) (no disponibles o en conflicto: torch>=2.1.0 --index-url https://dow…) (. 75.2%, backend_fastapi 79.0%) | mínimo 80% de líneas | faltan 3.2 pts | Agregá o ampliá tests que ejecuten los módulos sin cubrir (camino principal y errores) y publicá el artefacto (`coverage/lcov.info`, `coverage-summary.json`, `coverage.xml` o `coverage.json`) o corré la suite con coverage. Meta: ≥80% de líneas. |
 
 > Empezá por las señales de seguridad (**SEC**, **SQL**) y por la **duplicación**: son las que más pesan en el índice y las más rápidas de verificar a ojo. Después de corregir, volvé a correr la medición: el semáforo se recalcula sobre `main`.
 
@@ -176,7 +171,7 @@ Criterios que hoy están en rojo y, para cada uno, una explicación breve de **c
 
 ### mateo
 
-**18/28 clases con actividad** · total del período: 77 commits · 25 merges
+**19/28 clases con actividad** · total del período: 81 commits · 27 merges
 
 | Fecha | Actividad | Repositorios | Commits / merges |
 |---|:--:|---|--:|
@@ -207,7 +202,7 @@ Criterios que hoy están en rojo y, para cada uno, una explicación breve de **c
 | 2026-11-06 | **Sí** | CLIPSAI---Valla---Boggio | 0 / 2 |
 | 2026-11-11 | **Sí** | CLIPSAI---Valla---Boggio | 2 / 2 |
 | 2026-11-13 | No | sin actividad | 0 / 0 |
-| 2026-11-18 | No | sin actividad | 0 / 0 |
+| 2026-11-18 | **Sí** | CLIPSAI---Valla---Boggio | 4 / 2 |
 
 **Fuera de clase:** 29 fecha(s) con actividad · 59 commits · 26 merges
 
@@ -284,70 +279,22 @@ Criterios que hoy están en rojo y, para cada uno, una explicación breve de **c
 
 Se listan los archivos y líneas que el análisis marca para cada criterio en rojo. Para **duplicación** se muestran los archivos con más líneas repetidas; para **cobertura**, las unidades por debajo del umbral.
 
-**Índice (indice)** — señales que más pesan:
-
-- `editor_viral.py:112` — high_coupling: clase 'RenderizadorVertical' muy acoplada (CBO=11)
-- `editor_viral.py:193` — high_coupling: clase 'VideoEditor' muy acoplada (CBO=21)
-- `editor_viral.py:44` — long_function: función 'calcular_filtro_vertical' de 40 líneas
-- `editor_viral.py:260` — long_function: función 'main' de 39 líneas
-- `editor_viral.py:260` — high_complexity: función 'main' con complejidad 8
-- `main.py:35` — high_complexity: función 'cargar_env' con complejidad 9
-- `main.py:108` — long_function: función 'analizar_audio_video' de 36 líneas
-- `main.py:108` — high_complexity: función 'analizar_audio_video' con complejidad 8
-- `main.py:167` — long_function: función 'formatear_transcripcion' de 62 líneas
-- `main.py:167` — high_complexity: función 'formatear_transcripcion' con complejidad 13
-- `main.py:241` — long_function: función 'preparar_transcripcion_para_ia' de 50 líneas
-- `main.py:241` — high_complexity: función 'preparar_transcripcion_para_ia' con complejidad 11
-- `main.py:293` — long_function: función 'enriquecer_datos_para_ia' de 58 líneas
-- `main.py:293` — high_complexity: función 'enriquecer_datos_para_ia' con complejidad 12
-- `main.py:353` — long_function: función 'construir_prompt' de 116 líneas
-- `main.py:471` — long_params: función '_post_con_retry' con 5 parámetros
-- `main.py:471` — high_complexity: función '_post_con_retry' con complejidad 6
-- `main.py:486` — long_function: función 'llamar_claude' de 31 líneas
-- `main.py:486` — high_complexity: función 'llamar_claude' con complejidad 8
-- `main.py:519` — long_function: función 'llamar_openai_compatible' de 37 líneas
-- `main.py:519` — high_complexity: función 'llamar_openai_compatible' con complejidad 9
-- `main.py:592` — high_complexity: función '_llamar_con_fallback' con complejidad 11
-- `main.py:615` — high_complexity: función '_extraer_clips_de_objeto' con complejidad 6
-- `main.py:630` — high_complexity: función '_extraer_clips_de_objetos_sueltos' con complejidad 6
-- `main.py:646` — long_function: función '_extraer_json_respuesta' de 34 líneas
-- `main.py:646` — high_complexity: función '_extraer_json_respuesta' con complejidad 7
-- `main.py:739` — long_function: función 'parsear_json_tolerante' de 45 líneas
-- `main.py:739` — high_complexity: función 'parsear_json_tolerante' con complejidad 11
-- `main.py:786` — long_function: función 'validar_clips' de 73 líneas
-- `main.py:786` — high_complexity: función 'validar_clips' con complejidad 10
-- … y 579 hallazgo(s) más.
-
-**Complejidad alta (Compl)** — 352 hallazgo(s) en 101 archivo(s):
+**Componente demasiado grande (BigC)** — 7 hallazgo(s) en 7 archivo(s):
 
 | Archivo | Línea(s) | Señal |
 |---|---|---|
-| `app/services/hook_service.py` | 69, 158, 180, 198, 247, 285, 308, 335 | función '_get_provider' con complejidad 8 |
-| `audio_analyzer.py` | 40, 225 | función 'detectar_eventos' con complejidad 7 |
-| `backend/api/routes/retrim.py` | 40, 100 | función '_assert_ownership_and_get_clip' con complejidad 6 |
-| `backend/api/routes/stream.py` | 47 | función '_progress_gen' con complejidad 9 |
-| `backend/core/security/ssrf_guard.py` | 39, 49 | función 'is_ip_blocked' con complejidad 9 |
-| `backend/core/security/vault.py` | 15 | función '_get_key' con complejidad 6 |
-| `backend/handler.py` | 48, 104, 149 | función '_upload_to_r2' con complejidad 7 |
-| `backend/services/ai_viral/analyzer.py` | 75, 115 | función '_map_llm_to_candidates' con complejidad 20 |
-| `backend/services/video_editor/renderer.py` | 37, 46 | función '_brand_filter' con complejidad 6 |
-| `backend/track_a/ingestion/service.py` | 20 | método 'IngestionService.ingest' con complejidad 7 |
-| `backend/track_b/virality/engine.py` | 35 | método 'ViralityEngine.score' con complejidad 22 |
-| `backend_express/src/db/index.ts` | 29 | función 'buildConnectionString' con complejidad 8 |
-| `backend_express/src/routes/auth.ts` | 30, 72 | función 'handleRegistro' con complejidad 16 |
-| `backend_express/src/routes/clips.ts` | 321 | función 'runReRender' con complejidad 52 |
-| `backend_express/src/routes/export.ts` | 7, 49, 74 | función 'resolveTranscript' con complejidad 7 |
-| `backend_express/src/routes/jobs.ts` | 12, 29, 42, 126 | función 'parseTimeToSeconds' con complejidad 8 |
-| `backend_express/src/routes/metrics.ts` | 7 | función 'handleMetrics' con complejidad 22 |
-| `backend_express/src/routes/publish.ts` | 28, 70 | función 'runPublish' con complejidad 14 |
-| `backend_express/src/routes/socialAuth.ts` | 96, 251, 290, 374 | función 'buildStatus' con complejidad 8 |
-| `backend_express/src/routes/subtitles.ts` | 53, 74, 191, 233, 342 | función 'wrapText' con complejidad 6 |
-| … | … | y 81 archivo(s) más |
+| `frontend_react/src/components/clip-library/ClipResults.tsx` | 1 | componente grande (180 líneas) |
+| `frontend_react/src/pages/DashboardPage.tsx` | 1 | componente grande (428 líneas) |
+| `frontend_react/src/pages/JobStatusPage.tsx` | 1 | componente grande (182 líneas) |
+| `frontend_react/src/pages/SettingsPage.tsx` | 1 | componente grande (168 líneas) |
+| `frontend_react/src/pages/UploadPage.tsx` | 1 | componente grande (173 líneas) |
+| `frontend_vue/src/views/JobStatusView.vue` | 1 | componente grande (156 líneas) |
+| `frontend_vue/src/views/SettingsView.vue` | 1 | componente grande (171 líneas) |
 
 **Cobertura (Cob)** — unidades por debajo del umbral:
 
-- `.` — 65.4% (6261/9578 líneas)
-- `backend_fastapi` — 77.0% (5244/6808 líneas)
+- `.` — 75.2% (8534/11353 líneas)
+- `backend_fastapi` — 79.0% (6430/8140 líneas)
 
 ---
 _Informe generado por la cátedra. Los umbrales corresponden al perfil `exigente`. Ante dudas, revisá el archivo y la línea señalados y el criterio en `CRITERIOS-CALIDAD.md`._
