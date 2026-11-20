@@ -285,59 +285,356 @@ Criterios que hoy están en rojo y, para cada uno, una explicación breve de **c
 
 ## 7. Anexo: archivos donde se originan los problemas
 
-Se listan los archivos y líneas que el análisis marca para cada criterio en rojo. Para **duplicación** se muestran los archivos con más líneas repetidas; para **cobertura**, las unidades por debajo del umbral.
+Se listan **todos** los archivos y líneas que el análisis marca para cada criterio en rojo. Para **duplicación** se muestran los archivos con líneas repetidas; para **cobertura**, las unidades por debajo del umbral.
 
-**Índice (indice)** — señales que más pesan:
+**Resumen por archivo** — archivos con más hallazgos:
 
-- `editor_viral.py:112` — high_coupling: clase 'RenderizadorVertical' muy acoplada (CBO=11)
-- `editor_viral.py:193` — high_coupling: clase 'VideoEditor' muy acoplada (CBO=21)
-- `editor_viral.py:44` — long_function: función 'calcular_filtro_vertical' de 40 líneas
-- `main.py:118` — high_complexity: función '_agregar_momentos_cluster' con complejidad 6
-- `main.py:207` — long_params: función '_integrar_linea_transcripcion' con 5 parámetros
-- `main.py:449` — long_function: función 'construir_prompt' de 116 líneas
-- `main.py:576` — long_params: función '_post_con_retry' con 5 parámetros
-- `main.py:1031` — long_function: función '_clip_valido' de 35 líneas
-- `main.py:1158` — long_function: función 'procesar_clips' de 38 líneas
-- `main.py:1327` — long_params: función '_ejecutar_pipeline_cli' con 5 parámetros
-- `whisper_transcriber.py:152` — long_params: función '_abrir_segmento_ts' con 5 parámetros
-- `whisper_transcriber.py:222` — long_function: función 'parsear_transcripcion_youtube' de 34 líneas
-- `whisper_transcriber.py:288` — long_function: función '_transcribir_segmentos' de 53 líneas
-- `whisper_transcriber.py:370` — long_function: función 'transcribir_video' de 34 líneas
-- `audio_analyzer.py:61` — long_params: función '_agregar_evento_nivel' con 5 parámetros
-- `audio_analyzer.py:81` — long_params: función '_agregar_cambio_brusco' con 6 parámetros
-- `audio_analyzer.py:330` — long_function: función 'analizar_audio' de 50 líneas
-- `ejemplo_engine.py:25` — long_function: función 'main' de 44 líneas
-- `ejemplo_engine.py:25` — high_complexity: función 'main' con complejidad 13
-- `video_processor.py:20` — long_function: función 'generate_ass_from_segments' de 55 líneas
-- `video_processor.py:20` — long_params: función 'generate_ass_from_segments' con 6 parámetros
-- `video_processor.py:108` — long_params: función '_segmento_aplicable' con 5 parámetros
-- `video_processor.py:335` — long_function: función 'reframe_and_burn_subtitles' de 52 líneas
-- `video_processor.py:335` — long_params: función 'reframe_and_burn_subtitles' con 6 parámetros
-- `video_processor.py:389` — long_function: función 'process_clip_vertical' de 60 líneas
-- `video_processor.py:389` — long_params: función 'process_clip_vertical' con 6 parámetros
-- `engine_subprocess.py:116` — long_function: función 'procesar_video_subprocess' de 41 líneas
-- `engine.py:423` — long_function: función '_paso_generar_archivos' de 30 líneas
-- `engine.py:473` — long_function: función '_ejecutar_pipeline_interno' de 32 líneas
-- `engine.py:507` — long_function: función 'procesar_video' de 72 líneas
-- … y 263 hallazgo(s) más.
+| Archivo | Hallazgos | Peso total | Señales |
+|---|---:|---:|---|
+| `backend_fastapi/app/routers/jobs.py` | 26 | 104 | long_function, long_params |
+| `backend_fastapi/app/services/publish_service.py` | 13 | 52 | long_function, long_params |
+| `frontend_react/src/pages/ClipLibraryPage.tsx` | 9 | 44 | high_complexity, long_function |
+| `frontend_react/src/hooks/usePublishSSE.ts` | 8 | 36 | high_complexity, long_function |
+| `backend_fastapi/app/routers/clips.py` | 7 | 28 | long_function, long_params |
+| `backend_fastapi/app/services/ass_generator.py` | 7 | 28 | long_params |
+| `main.py` | 7 | 29 | high_complexity, long_function, long_params |
+| `video_processor.py` | 7 | 28 | long_function, long_params |
+| `backend/handler.py` | 6 | 25 | high_complexity, long_function, long_params |
+| `backend_express/src/routes/clips.ts` | 6 | 25 | high_complexity, long_function, long_params |
+| `backend_fastapi/app/services/engine.py` | 6 | 24 | long_function, long_params |
+| `backend_fastapi/app/services/ffmpeg_service.py` | 6 | 24 | long_function, long_params |
+| `backend_fastapi/app/services/claude_service.py` | 5 | 20 | long_function, long_params |
+| `frontend_react/src/pages/DashboardPage.tsx` | 5 | 23 | big_component, high_complexity, long_function, long_params |
+| `backend_fastapi/app/routers/social_auth.py` | 4 | 16 | long_params |
+| `frontend_react/src/pages/JobStatusPage.tsx` | 4 | 20 | big_component, high_complexity, long_function |
+| `frontend_react/src/pages/SettingsPage.tsx` | 4 | 20 | big_component, high_complexity, long_function |
+| `frontend_vue/src/composables/useJobPolling.ts` | 4 | 18 | high_complexity, long_function |
+| `whisper_transcriber.py` | 4 | 16 | long_function, long_params |
+| `app/services/hook_service.py` | 3 | 12 | long_function, long_params |
+| `audio_analyzer.py` | 3 | 12 | long_function, long_params |
+| `backend_express/src/routes/publish.ts` | 3 | 14 | high_complexity, long_params |
+| `backend_express/src/services/runpod.ts` | 3 | 12 | long_params |
+| `backend_fastapi/app/services/hook_service.py` | 3 | 12 | long_function, long_params |
+| `backend_fastapi/app/services/runpod_service.py` | 3 | 12 | long_function, long_params |
+| … | … | … | y 89 archivo(s) más |
+
+**Índice (indice)** — todos los hallazgos que lo afectan:
+
+| Archivo:línea | Señal | Peso | Detalle |
+|---|---|---:|---|
+| `backend/core/schemas.py:115` | high_coupling | 8 | clase 'ScheduledPost' muy acoplada (CBO=8) |
+| `backend/track_a/ingestion/service.py:15` | high_coupling | 8 | clase 'IngestionService' muy acoplada (CBO=9) |
+| `backend/track_b/publishing/scheduler.py:7` | high_coupling | 8 | clase 'MockPublisher' muy acoplada (CBO=8) |
+| `backend/track_b/rendering/ffmpeg.py:7` | high_coupling | 8 | clase 'FFmpegRenderer' muy acoplada (CBO=13) |
+| `backend_fastapi/app/config.py:79` | high_coupling | 8 | clase 'Settings' muy acoplada (CBO=62) |
+| `backend_fastapi/app/models/clip.py:17` | high_coupling | 8 | clase 'Clip' muy acoplada (CBO=16) |
+| `backend_fastapi/app/models/job.py:25` | high_coupling | 8 | clase 'Job' muy acoplada (CBO=11) |
+| `backend_fastapi/app/models/social_account.py:16` | high_coupling | 8 | clase 'SocialAccount' muy acoplada (CBO=12) |
+| `backend_fastapi/app/models/video.py:16` | high_coupling | 8 | clase 'Video' muy acoplada (CBO=9) |
+| `editor_viral.py:112` | high_coupling | 8 | clase 'RenderizadorVertical' muy acoplada (CBO=11) |
+| `editor_viral.py:193` | high_coupling | 8 | clase 'VideoEditor' muy acoplada (CBO=21) |
+| `frontend_react/src/components/clip-library/ClipResults.tsx:1` | big_component | 6 | componente grande (180 líneas) |
+| `frontend_react/src/pages/DashboardPage.tsx:1` | big_component | 6 | componente grande (428 líneas) |
+| `frontend_react/src/pages/IntegrationsPage.tsx:1` | big_component | 6 | componente grande (164 líneas) |
+| `frontend_react/src/pages/JobStatusPage.tsx:1` | big_component | 6 | componente grande (182 líneas) |
+| `frontend_react/src/pages/SettingsPage.tsx:1` | big_component | 6 | componente grande (168 líneas) |
+| `frontend_react/src/pages/UploadPage.tsx:1` | big_component | 6 | componente grande (173 líneas) |
+| `frontend_vue/src/views/JobStatusView.vue:1` | big_component | 6 | componente grande (156 líneas) |
+| `frontend_vue/src/views/SettingsView.vue:1` | big_component | 6 | componente grande (171 líneas) |
+| `backend/api/routes/stream.py:47` | high_complexity | 5 | función '_progress_gen' con complejidad 9 |
+| `backend/core/security/vault.py:15` | high_complexity | 5 | función '_get_key' con complejidad 6 |
+| `backend/handler.py:344` | high_complexity | 5 | función 'process_video_job' con complejidad 6 |
+| `backend_express/src/routes/auth.ts:67` | high_complexity | 5 | función 'handleRegistro' con complejidad 11 |
+| `backend_express/src/routes/auth.ts:114` | high_complexity | 5 | función 'handleLogin' con complejidad 7 |
+| `backend_express/src/routes/clips.ts:455` | high_complexity | 5 | función 'removeClipFile' con complejidad 8 |
+| `backend_express/src/routes/publish.ts:133` | high_complexity | 5 | función 'handlePublish' con complejidad 8 |
+| `backend_express/src/routes/publish.ts:241` | high_complexity | 5 | función 'publishStreamTick' con complejidad 6 |
+| `backend_express/src/routes/socialAuth.ts:644` | high_complexity | 5 | función 'tiktokCallbackOutcome' con complejidad 7 |
+| `backend_express/src/routes/users.ts:310` | high_complexity | 5 | función 'handleChangePassword' con complejidad 7 |
+| `backend_express/src/routes/videos.ts:93` | high_complexity | 5 | función 'async' con complejidad 10 |
+| `backend_express/src/routes/videos.ts:225` | high_complexity | 5 | función 'async' con complejidad 6 |
+| `backend_fastapi/app/routers/videos.py:166` | high_complexity | 5 | función '_save_upload_file' con complejidad 6 |
+| `backend_fastapi/app/services/transcript_utils.py:16` | high_complexity | 5 | función 'parse_transcript_text_to_segments' con complejidad 14 |
+| `ejemplo_engine.py:25` | high_complexity | 5 | función 'main' con complejidad 13 |
+| `frontend_react/src/components/Navbar.tsx:62` | high_complexity | 5 | función 'handleSearch' con complejidad 8 |
+| `frontend_react/src/components/Navbar.tsx:66` | high_complexity | 5 | función 'toggleFullscreen' con complejidad 8 |
+| `frontend_react/src/components/auth/AuthForm.tsx:21` | high_complexity | 5 | función 'AuthForm' con complejidad 18 |
+| `frontend_react/src/components/auth/AuthProvider.tsx:31` | high_complexity | 5 | función 'useEffect' con complejidad 9 |
+| `frontend_react/src/components/clip-library/ClipCard.tsx:17` | high_complexity | 5 | función 'ClipCard' con complejidad 6 |
+| `frontend_react/src/components/clip-library/ClipResults.tsx:73` | high_complexity | 5 | función 'ClipResults' con complejidad 13 |
+| `frontend_react/src/components/dashboard/DashboardContent.tsx:9` | high_complexity | 5 | función 'DashboardContent' con complejidad 17 |
+| `frontend_react/src/components/dashboard/KpiGrid.tsx:8` | high_complexity | 5 | función 'KpiGrid' con complejidad 10 |
+| `frontend_react/src/components/job-status/CompletedClips.tsx:11` | high_complexity | 5 | función 'CompletedClips' con complejidad 21 |
+| `frontend_react/src/components/job-status/JobProgress.tsx:7` | high_complexity | 5 | función 'JobProgress' con complejidad 14 |
+| `frontend_react/src/components/landing/LandingHowItWorks.tsx:5` | high_complexity | 5 | función 'LandingHowItWorks' con complejidad 10 |
+| `frontend_react/src/components/upload/DirectUploadPanel.tsx:11` | high_complexity | 5 | función 'DirectUploadPanel' con complejidad 23 |
+| `frontend_react/src/hooks/useIntegrations.ts:46` | high_complexity | 5 | función 'connectSocial' con complejidad 6 |
+| `frontend_react/src/hooks/useIntegrations.ts:59` | high_complexity | 5 | función 'useIntegrations' con complejidad 8 |
+| `frontend_react/src/hooks/useJobPolling.ts:120` | high_complexity | 5 | función 'useJobPolling' con complejidad 9 |
+| `frontend_react/src/hooks/usePublishSSE.ts:67` | high_complexity | 5 | función 'applySseStatus' con complejidad 10 |
+| `frontend_react/src/hooks/usePublishSSE.ts:68` | high_complexity | 5 | función 'applySseFields' con complejidad 10 |
+| `frontend_react/src/hooks/usePublishSSE.ts:71` | high_complexity | 5 | función 'usePublishSSE' con complejidad 10 |
+| `frontend_react/src/hooks/usePublishSSE.ts:78` | high_complexity | 5 | función 'useEffect' con complejidad 10 |
+| `frontend_react/src/lib/apiClient.ts:94` | high_complexity | 5 | función 'redirectToLoginIfOutside' con complejidad 6 |
+| `frontend_react/src/pages/ClipLibraryPage.tsx:24` | high_complexity | 5 | función 'ClipLibraryPage' con complejidad 36 |
+| `frontend_react/src/pages/ClipLibraryPage.tsx:69` | high_complexity | 5 | función 'useEffect' con complejidad 11 |
+| `frontend_react/src/pages/ClipLibraryPage.tsx:99` | high_complexity | 5 | función 'setCaption' con complejidad 9 |
+| `frontend_react/src/pages/ClipLibraryPage.tsx:100` | high_complexity | 5 | función 'setWebhookUrl' con complejidad 8 |
+| `frontend_react/src/pages/ClipLibraryPage.tsx:103` | high_complexity | 5 | función 'submitPublish' con complejidad 8 |
+| `frontend_react/src/pages/ClipLibraryPage.tsx:125` | high_complexity | 5 | función 'setToast' con complejidad 6 |
+| `frontend_react/src/pages/ClipLibraryPage.tsx:126` | high_complexity | 5 | función 'setTimeout' con complejidad 6 |
+| `frontend_react/src/pages/ClipLibraryPage.tsx:127` | high_complexity | 5 | función 'setTimeout' con complejidad 6 |
+| `frontend_react/src/pages/DashboardPage.tsx:351` | high_complexity | 5 | función 'DashboardPage' con complejidad 11 |
+| `frontend_react/src/pages/IntegrationsPage.tsx:88` | high_complexity | 5 | función 'IntegrationsPage' con complejidad 6 |
+| `frontend_react/src/pages/JobStatusPage.tsx:119` | high_complexity | 5 | función 'JobStatusPage' con complejidad 16 |
+| `frontend_react/src/pages/JobStatusPage.tsx:154` | high_complexity | 5 | función 'useEffect' con complejidad 7 |
+| `frontend_react/src/pages/SettingsPage.tsx:88` | high_complexity | 5 | función 'SettingsPage' con complejidad 12 |
+| `frontend_react/src/pages/SettingsPage.tsx:110` | high_complexity | 5 | función 'useEffect' con complejidad 6 |
+| `frontend_react/src/pages/UploadPage.tsx:77` | high_complexity | 5 | función 'UploadPage' con complejidad 12 |
+| `frontend_react/src/services/api.ts:163` | high_complexity | 5 | función 'triggerBlobDownload' con complejidad 7 |
+| `frontend_vue/src/api/services.ts:137` | high_complexity | 5 | función 'triggerBlobDownload' con complejidad 10 |
+| `frontend_vue/src/components/Avatar.vue:6` | high_complexity | 5 | función 'getInitials' con complejidad 8 |
+| `frontend_vue/src/components/Navbar.vue:45` | high_complexity | 5 | función 'watch' con complejidad 7 |
+| `frontend_vue/src/components/Navbar.vue:64` | high_complexity | 5 | función 'toggleFullscreen' con complejidad 8 |
+| `frontend_vue/src/components/landing/LandingHowItWorks.vue:14` | high_complexity | 5 | función 'onKeydown' con complejidad 9 |
+| `frontend_vue/src/composables/useClipLibrary.ts:8` | high_complexity | 5 | función 'useClipLibrary' con complejidad 42 |
+| `frontend_vue/src/composables/useIntegrations.ts:38` | high_complexity | 5 | función 'useIntegrations' con complejidad 17 |
+| `frontend_vue/src/composables/useJobPolling.ts:59` | high_complexity | 5 | función 'handleUnrecoverablePollFailure' con complejidad 8 |
+| `frontend_vue/src/composables/useJobPolling.ts:94` | high_complexity | 5 | función 'useJobPolling' con complejidad 9 |
+| `frontend_vue/src/composables/usePublishStream.ts:63` | high_complexity | 5 | función 'usePublishStream' con complejidad 7 |
+| `frontend_vue/src/stores/auth.ts:45` | high_complexity | 5 | función 'init' con complejidad 6 |
+| `frontend_vue/src/views/JobStatusView.vue:55` | high_complexity | 5 | función 'onMounted' con complejidad 6 |
+| `frontend_vue/src/views/JobStatusView.vue:91` | high_complexity | 5 | función 'watch' con complejidad 7 |
+| `frontend_vue/src/views/UploadView.vue:63` | high_complexity | 5 | función 'handleSampleJob' con complejidad 6 |
+| `frontend_vue/src/views/UploadView.vue:79` | high_complexity | 5 | función 'handleSubmit' con complejidad 8 |
+| `main.py:118` | high_complexity | 5 | función '_agregar_momentos_cluster' con complejidad 6 |
+| `app/services/hook_service.py:107` | long_function | 4 | función '_build_hook_prompt' de 58 líneas |
+| `app/services/hook_service.py:186` | long_params | 4 | función '_post_with_retry' con 5 parámetros |
+| `app/services/hook_service.py:303` | long_params | 4 | función '_clip_llm_valido' con 6 parámetros |
+| `audio_analyzer.py:61` | long_params | 4 | función '_agregar_evento_nivel' con 5 parámetros |
+| `audio_analyzer.py:81` | long_params | 4 | función '_agregar_cambio_brusco' con 6 parámetros |
+| `audio_analyzer.py:330` | long_function | 4 | función 'analizar_audio' de 50 líneas |
+| `backend/api/routes/retrim.py:107` | long_function | 4 | función '_ffmpeg_retrim' de 35 líneas |
+| `backend/api/routes/retrim.py:168` | long_params | 4 | función '_ejecutar_retrim' con 5 parámetros |
+| `backend/api/routes/stream.py:47` | long_function | 4 | función '_progress_gen' de 35 líneas |
+| `backend/core/interfaces.py:49` | long_params | 4 | método 'IRenderer.render' con 6 parámetros |
+| `backend/handler.py:274` | long_params | 4 | función '_clip_vertical_dict' con 5 parámetros |
+| `backend/handler.py:291` | long_function | 4 | función '_procesar_clip_vertical' de 37 líneas |
+| `backend/handler.py:291` | long_params | 4 | función '_procesar_clip_vertical' con 6 parámetros |
+| `backend/handler.py:330` | long_params | 4 | función '_procesar_clips_verticales' con 5 parámetros |
+| `backend/handler.py:344` | long_function | 4 | función 'process_video_job' de 88 líneas |
+| `backend/services/ai_viral/analyzer.py:15` | long_function | 4 | función '_mock_candidates_from_transcript' de 34 líneas |
+| `backend/services/video_editor/renderer.py:122` | long_function | 4 | función 'render_clip' de 51 líneas |
+| `backend/services/video_editor/renderer.py:122` | long_params | 4 | función 'render_clip' con 5 parámetros |
+| `backend/track_b/rendering/ffmpeg.py:10` | long_params | 4 | método 'FFmpegRenderer.render' con 6 parámetros |
+| `backend_express/src/app.ts:18` | long_function | 4 | función 'createApp' de 100 líneas |
+| `backend_express/src/docs/swagger.ts:723` | long_function | 4 | función 'buildUserMePaths' de 109 líneas |
+| `backend_express/src/routes/clips.ts:455` | long_function | 4 | función 'removeClipFile' de 44 líneas |
+| `backend_express/src/routes/clips.ts:586` | long_params | 4 | función 'concatHookInto' con 6 parámetros |
+| `backend_express/src/routes/clips.ts:609` | long_params | 4 | función 'buildHookConcat' con 6 parámetros |
+| `backend_express/src/routes/clips.ts:731` | long_params | 4 | función 'persistReRenderResult' con 5 parámetros |
+| `backend_express/src/routes/clips.ts:771` | long_params | 4 | función 'runReRenderPipeline' con 5 parámetros |
+| `backend_express/src/routes/metrics.ts:147` | long_params | 4 | función 'recentActivityEntry' con 8 parámetros |
+| `backend_express/src/routes/metrics.ts:159` | long_params | 4 | función 'buildRecentActivity' con 7 parámetros |
+| `backend_express/src/routes/publish.ts:66` | long_params | 4 | función 'webhookPublication' con 5 parámetros |
+| `backend_express/src/routes/subtitles.ts:77` | long_params | 4 | función 'pushWrappedWord' con 5 parámetros |
+| `backend_express/src/routes/users.ts:186` | long_params | 4 | función 'applyBasicFields' con 5 parámetros |
+| `backend_express/src/services/runpod.ts:139` | long_params | 4 | función 'callRunpodEndpoint' con 6 parámetros |
+| `backend_express/src/services/runpod.ts:163` | long_params | 4 | función 'pollRunpodStatus' con 5 parámetros |
+| `backend_express/src/services/runpod.ts:177` | long_params | 4 | función 'pollRunpodJob' con 5 parámetros |
+| `backend_express/src/services/s3.ts:88` | long_function | 4 | función 'generatePresignedUrl' de 34 líneas |
+| `backend_fastapi/app/cli.py:73` | long_params | 4 | función '_renderizar_clip_cli' con 7 parámetros |
+| `backend_fastapi/app/main.py:165` | long_function | 4 | función '_preparar_restricciones' de 36 líneas |
+| `backend_fastapi/app/routers/clips.py:245` | long_params | 4 | función '_ajustar_al_segmento_cercano' con 5 parámetros |
+| `backend_fastapi/app/routers/clips.py:257` | long_params | 4 | función '_recortar_al_clip' con 5 parámetros |
+| `backend_fastapi/app/routers/clips.py:350` | long_params | 4 | función '_re_render_exitoso' con 9 parámetros |
+| `backend_fastapi/app/routers/clips.py:425` | long_params | 4 | función '_renderizar_re_render' con 5 parámetros |
+| `backend_fastapi/app/routers/clips.py:583` | long_function | 4 | función 'list_clips' de 37 líneas |
+| `backend_fastapi/app/routers/clips.py:583` | long_params | 4 | función 'list_clips' con 10 parámetros |
+| `backend_fastapi/app/routers/clips.py:670` | long_params | 4 | función 're_render_clip' con 5 parámetros |
+| `backend_fastapi/app/routers/jobs.py:392` | long_params | 4 | función '_validar_args_render' con 5 parámetros |
+| `backend_fastapi/app/routers/jobs.py:498` | long_params | 4 | función '_ass_teaser' con 6 parámetros |
+| `backend_fastapi/app/routers/jobs.py:509` | long_params | 4 | función '_ass_simple' con 5 parámetros |
+| `backend_fastapi/app/routers/jobs.py:518` | long_params | 4 | función '_generar_ass' con 6 parámetros |
+| `backend_fastapi/app/routers/jobs.py:561` | long_params | 4 | función '_cortar_clip_intermedio' con 6 parámetros |
+| `backend_fastapi/app/routers/jobs.py:594` | long_params | 4 | función '_reframar_y_quemar' con 7 parámetros |
+| `backend_fastapi/app/routers/jobs.py:632` | long_function | 4 | función '_render_clip_with_ass_and_hook' de 42 líneas |
+| `backend_fastapi/app/routers/jobs.py:632` | long_params | 4 | función '_render_clip_with_ass_and_hook' con 8 parámetros |
+| `backend_fastapi/app/routers/jobs.py:955` | long_params | 4 | función '_invocar_engine' con 5 parámetros |
+| `backend_fastapi/app/routers/jobs.py:1101` | long_params | 4 | función '_cerrar_job_r2' con 5 parámetros |
+| `backend_fastapi/app/routers/jobs.py:1130` | long_params | 4 | función '_persistir_clips_r2' con 5 parámetros |
+| `backend_fastapi/app/routers/jobs.py:1175` | long_function | 4 | función '_resolver_segmentos' de 30 líneas |
+| `backend_fastapi/app/routers/jobs.py:1175` | long_params | 4 | función '_resolver_segmentos' con 5 parámetros |
+| `backend_fastapi/app/routers/jobs.py:1328` | long_params | 4 | función '_enriquecer_tags' con 5 parámetros |
+| `backend_fastapi/app/routers/jobs.py:1369` | long_params | 4 | función '_registrar_fallo_render' con 5 parámetros |
+| `backend_fastapi/app/routers/jobs.py:1392` | long_function | 4 | función '_renderar_clip_item' de 43 líneas |
+| `backend_fastapi/app/routers/jobs.py:1392` | long_params | 4 | función '_renderar_clip_item' con 12 parámetros |
+| `backend_fastapi/app/routers/jobs.py:1437` | long_params | 4 | función '_crear_clip_persistible' con 6 parámetros |
+| `backend_fastapi/app/routers/jobs.py:1464` | long_params | 4 | función '_renderizar_clips' con 7 parámetros |
+| `backend_fastapi/app/routers/jobs.py:1520` | long_function | 4 | función '_completar_job_exitoso' de 31 líneas |
+| `backend_fastapi/app/routers/jobs.py:1520` | long_params | 4 | función '_completar_job_exitoso' con 6 parámetros |
+| `backend_fastapi/app/routers/jobs.py:1597` | long_params | 4 | función '_mensaje_por_causa_comun' con 5 parámetros |
+| `backend_fastapi/app/routers/jobs.py:1619` | long_params | 4 | función '_guardar_metadata_detallada' con 6 parámetros |
+| `backend_fastapi/app/routers/jobs.py:1637` | long_params | 4 | función '_persistir_metadata_fallo' con 5 parámetros |
+| `backend_fastapi/app/routers/jobs.py:1661` | long_params | 4 | función '_marcar_failed_descriptivo' con 6 parámetros |
+| `backend_fastapi/app/routers/jobs.py:1677` | long_params | 4 | función '_aplicar_mensaje_failed' con 7 parámetros |
+| `backend_fastapi/app/routers/publish.py:35` | long_params | 4 | función 'publish_clip' con 5 parámetros |
+| `backend_fastapi/app/routers/publish.py:185` | long_function | 4 | función 'publish_stream' de 38 líneas |
+| `backend_fastapi/app/routers/sample.py:79` | long_function | 4 | función 'create_sample_job' de 59 líneas |
+| `backend_fastapi/app/routers/social_auth.py:241` | long_params | 4 | función '_redirect_oauth' con 5 parámetros |
+| `backend_fastapi/app/routers/social_auth.py:268` | long_params | 4 | función 'youtube_callback' con 5 parámetros |
+| `backend_fastapi/app/routers/social_auth.py:340` | long_params | 4 | función 'instagram_callback' con 5 parámetros |
+| `backend_fastapi/app/routers/social_auth.py:462` | long_params | 4 | función 'tiktok_callback' con 5 parámetros |
+| `backend_fastapi/app/routers/stream.py:143` | long_params | 4 | función '_eventos_iteracion' con 5 parámetros |
+| `backend_fastapi/app/security/jwt.py:24` | long_function | 4 | función 'create_access_token' de 32 líneas |
+| `backend_fastapi/app/services/ass_generator.py:68` | long_params | 4 | función '_cortar_linea' con 6 parámetros |
+| `backend_fastapi/app/services/ass_generator.py:100` | long_params | 4 | función 'generate_ass_content' con 6 parámetros |
+| `backend_fastapi/app/services/ass_generator.py:235` | long_params | 4 | función '_seg_del_rango' con 6 parámetros |
+| `backend_fastapi/app/services/ass_generator.py:246` | long_params | 4 | función '_segs_de_segmento' con 7 parámetros |
+| `backend_fastapi/app/services/ass_generator.py:268` | long_params | 4 | función '_generate_hooked_segments' con 5 parámetros |
+| `backend_fastapi/app/services/ass_generator.py:295` | long_params | 4 | función 'generate_hooked_ass' con 7 parámetros |
+| `backend_fastapi/app/services/ass_generator.py:309` | long_params | 4 | función 'build_hooked_ass_content' con 6 parámetros |
+| `backend_fastapi/app/services/claude_service.py:171` | long_function | 4 | función '_build_output_schema' de 51 líneas |
+| `backend_fastapi/app/services/claude_service.py:232` | long_function | 4 | función '_build_claude_prompt' de 44 líneas |
+| `backend_fastapi/app/services/claude_service.py:314` | long_params | 4 | función '_llamar_sdk_anthropic' con 5 parámetros |
+| `backend_fastapi/app/services/claude_service.py:509` | long_params | 4 | función '_pedir_con_requests' con 5 parámetros |
+| `backend_fastapi/app/services/claude_service.py:614` | long_params | 4 | función '_formato_de_clip_valido' con 5 parámetros |
+| `backend_fastapi/app/services/editor.py:64` | long_function | 4 | función '_comando_reframe' de 32 líneas |
+| `backend_fastapi/app/services/engine.py:150` | long_params | 4 | función '_evaluar_ventana' con 5 parámetros |
+| `backend_fastapi/app/services/engine.py:168` | long_params | 4 | función '_ventana_frontier' con 5 parámetros |
+| `backend_fastapi/app/services/engine.py:306` | long_function | 4 | función '_hook_desde_candidato' de 35 líneas |
+| `backend_fastapi/app/services/engine.py:306` | long_params | 4 | función '_hook_desde_candidato' con 5 parámetros |
+| `backend_fastapi/app/services/engine.py:343` | long_function | 4 | función '_select_clip_hook' de 31 líneas |
+| `backend_fastapi/app/services/engine.py:916` | long_function | 4 | función '_mapear_clip_claude' de 38 líneas |
+| `backend_fastapi/app/services/ffmpeg_service.py:105` | long_function | 4 | función 'burn_subtitles' de 47 líneas |
+| `backend_fastapi/app/services/ffmpeg_service.py:105` | long_params | 4 | función 'burn_subtitles' con 7 parámetros |
+| `backend_fastapi/app/services/ffmpeg_service.py:197` | long_params | 4 | función 'cut_segment' con 6 parámetros |
+| `backend_fastapi/app/services/ffmpeg_service.py:372` | long_params | 4 | función '_ensamblar_hook' con 6 parámetros |
+| `backend_fastapi/app/services/ffmpeg_service.py:400` | long_function | 4 | función 'build_hook_clip' de 34 líneas |
+| `backend_fastapi/app/services/ffmpeg_service.py:400` | long_params | 4 | función 'build_hook_clip' con 7 parámetros |
+| `backend_fastapi/app/services/hook_service.py:108` | long_function | 4 | función '_build_hook_prompt' de 58 líneas |
+| `backend_fastapi/app/services/hook_service.py:187` | long_params | 4 | función '_post_with_retry' con 5 parámetros |
+| `backend_fastapi/app/services/hook_service.py:302` | long_params | 4 | función '_clip_llm_valido' con 6 parámetros |
+| `backend_fastapi/app/services/instagram_service.py:365` | long_params | 4 | función '_actualizar_cuenta_ig' con 7 parámetros |
+| `backend_fastapi/app/services/instagram_service.py:381` | long_params | 4 | función '_cuenta_nueva_ig' con 7 parámetros |
+| `backend_fastapi/app/services/publish_service.py:599` | long_function | 4 | función '_publicar_upload_youtube' de 30 líneas |
+| `backend_fastapi/app/services/publish_service.py:1029` | long_function | 4 | función '_iniciar_upload_tiktok' de 48 líneas |
+| `backend_fastapi/app/services/publish_service.py:1314` | long_params | 4 | función '_publicar_via_webhook' con 5 parámetros |
+| `backend_fastapi/app/services/publish_service.py:1345` | long_params | 4 | función '_do_publish' con 5 parámetros |
+| `backend_fastapi/app/services/publish_service.py:1383` | long_params | 4 | función '_reintentar_publicacion' con 6 parámetros |
+| `backend_fastapi/app/services/publish_service.py:1406` | long_params | 4 | función '_reintentar_tras_refresh' con 7 parámetros |
+| `backend_fastapi/app/services/publish_service.py:1427` | long_params | 4 | función '_reaccionar_token_expirado' con 7 parámetros |
+| `backend_fastapi/app/services/publish_service.py:1439` | long_params | 4 | función '_publicar_con_oauth' con 6 parámetros |
+| `backend_fastapi/app/services/publish_service.py:1461` | long_params | 4 | función '_webhook_o_falso' con 6 parámetros |
+| `backend_fastapi/app/services/publish_service.py:1470` | long_params | 4 | función '_resultado_publicacion' con 8 parámetros |
+| `backend_fastapi/app/services/publish_service.py:1496` | long_params | 4 | función '_persistir_publicado' con 5 parámetros |
+| `backend_fastapi/app/services/publish_service.py:1522` | long_params | 4 | función '_publicar_y_persistir' con 6 parámetros |
+| `backend_fastapi/app/services/publish_service.py:1557` | long_params | 4 | función 'publish_clip_task' con 5 parámetros |
+| `backend_fastapi/app/services/runpod_service.py:126` | long_function | 4 | función 'process_local_video_via_runpod' de 37 líneas |
+| `backend_fastapi/app/services/runpod_service.py:380` | long_params | 4 | función '_esperar_job' con 6 parámetros |
+| `backend_fastapi/app/services/runpod_service.py:400` | long_function | 4 | función 'process_video_via_runpod' de 32 líneas |
+| `backend_fastapi/app/services/storage_cleanup.py:140` | long_function | 4 | función 'cleanup_storage' de 41 líneas |
+| `backend_fastapi/app/services/storage_cleanup.py:183` | long_function | 4 | función 'ensure_disk_space' de 34 líneas |
+| `backend_fastapi/app/services/tiktok_service.py:292` | long_params | 4 | función '_actualizar_cuenta' con 7 parámetros |
+| `backend_fastapi/app/services/tiktok_service.py:318` | long_params | 4 | función '_crear_cuenta_tiktok' con 7 parámetros |
+| `backend_fastapi/app/services/transcript_utils.py:16` | long_function | 4 | función 'parse_transcript_text_to_segments' de 55 líneas |
+| `backend_fastapi/app/services/youtube_service.py:208` | long_params | 4 | función '_actualizar_cuenta_youtube' con 8 parámetros |
+| `backend_fastapi/app/services/youtube_service.py:236` | long_params | 4 | función '_crear_cuenta_youtube' con 7 parámetros |
+| `backend_fastapi/app/tasks/subtitle_pipeline.py:123` | long_params | 4 | función '_update_clip_status' con 5 parámetros |
+| `editor_viral.py:44` | long_function | 4 | función 'calcular_filtro_vertical' de 40 líneas |
+| `ejemplo_engine.py:25` | long_function | 4 | función 'main' de 44 líneas |
+| `engine.py:423` | long_function | 4 | función '_paso_generar_archivos' de 30 líneas |
+| `engine.py:473` | long_function | 4 | función '_ejecutar_pipeline_interno' de 32 líneas |
+| `engine.py:507` | long_function | 4 | función 'procesar_video' de 72 líneas |
+| `engine_subprocess.py:116` | long_function | 4 | función 'procesar_video_subprocess' de 41 líneas |
+| `frontend_react/src/components/Avatar.tsx:42` | long_params | 4 | función 'Avatar' con 5 parámetros |
+| `frontend_react/src/components/Footer.tsx:1` | long_function | 4 | función 'Footer' de 39 líneas |
+| `frontend_react/src/components/auth/AuthForm.tsx:21` | long_function | 4 | función 'AuthForm' de 99 líneas |
+| `frontend_react/src/components/auth/AuthProvider.tsx:31` | long_function | 4 | función 'useEffect' de 59 líneas |
+| `frontend_react/src/components/clip-library/ClipCard.tsx:17` | long_function | 4 | función 'ClipCard' de 79 líneas |
+| `frontend_react/src/components/clip-library/ClipResults.tsx:73` | long_function | 4 | función 'ClipResults' de 114 líneas |
+| `frontend_react/src/components/clip-library/FilterBar.tsx:16` | long_function | 4 | función 'FilterBar' de 48 líneas |
+| `frontend_react/src/components/clip-library/PublishDialog.tsx:18` | long_function | 4 | función 'PublishDialog' de 42 líneas |
+| `frontend_react/src/components/dashboard/DashboardContent.tsx:9` | long_function | 4 | función 'DashboardContent' de 93 líneas |
+| `frontend_react/src/components/dashboard/KpiGrid.tsx:8` | long_function | 4 | función 'KpiGrid' de 62 líneas |
+| `frontend_react/src/components/integrations/PlatformCard.tsx:20` | long_function | 4 | función 'PlatformCard' de 38 líneas |
+| `frontend_react/src/components/job-status/CompletedClips.tsx:11` | long_function | 4 | función 'CompletedClips' de 81 líneas |
+| `frontend_react/src/components/job-status/JobProgress.tsx:7` | long_function | 4 | función 'JobProgress' de 40 líneas |
+| `frontend_react/src/components/landing/LandingAbout.tsx:4` | long_function | 4 | función 'LandingAbout' de 37 líneas |
+| `frontend_react/src/components/landing/LandingFeatures.tsx:4` | long_function | 4 | función 'LandingFeatures' de 31 líneas |
+| `frontend_react/src/components/landing/LandingFooter.tsx:34` | long_function | 4 | función 'LandingFooter' de 46 líneas |
+| `frontend_react/src/components/landing/LandingHero.tsx:14` | long_function | 4 | función 'LandingHero' de 76 líneas |
+| `frontend_react/src/components/landing/LandingHowItWorks.tsx:5` | long_function | 4 | función 'LandingHowItWorks' de 105 líneas |
+| `frontend_react/src/components/navbar/QuickCreateDropdown.tsx:4` | long_function | 4 | función 'QuickCreateDropdown' de 38 líneas |
+| `frontend_react/src/components/settings/SettingsForms.tsx:31` | long_function | 4 | función 'SettingsForms' de 93 líneas |
+| `frontend_react/src/components/upload/DirectUploadPanel.tsx:11` | long_function | 4 | función 'DirectUploadPanel' de 51 líneas |
+| `frontend_react/src/components/upload/Dropzone.tsx:12` | long_function | 4 | función 'Dropzone' de 33 líneas |
+| `frontend_react/src/hooks/useIntegrations.ts:59` | long_function | 4 | función 'useIntegrations' de 65 líneas |
+| `frontend_react/src/hooks/useJobPolling.ts:120` | long_function | 4 | función 'useJobPolling' de 61 líneas |
+| `frontend_react/src/hooks/usePublishSSE.ts:67` | long_function | 4 | función 'applySseStatus' de 78 líneas |
+| `frontend_react/src/hooks/usePublishSSE.ts:68` | long_function | 4 | función 'applySseFields' de 77 líneas |
+| `frontend_react/src/hooks/usePublishSSE.ts:71` | long_function | 4 | función 'usePublishSSE' de 75 líneas |
+| `frontend_react/src/hooks/usePublishSSE.ts:78` | long_function | 4 | función 'useEffect' de 61 líneas |
+| `frontend_react/src/hooks/useUploadAndProcess.ts:117` | long_function | 4 | función 'useUploadAndProcess' de 37 líneas |
+| `frontend_react/src/pages/AuthPage.tsx:29` | long_function | 4 | función 'AuthPage' de 61 líneas |
+| `frontend_react/src/pages/ClipLibraryPage.tsx:24` | long_function | 4 | función 'ClipLibraryPage' de 114 líneas |
+| `frontend_react/src/pages/DashboardPage.tsx:226` | long_params | 4 | función 'renderDayBar' con 5 parámetros |
+| `frontend_react/src/pages/DashboardPage.tsx:278` | long_function | 4 | función 'renderMetricsBody' de 67 líneas |
+| `frontend_react/src/pages/DashboardPage.tsx:351` | long_function | 4 | función 'DashboardPage' de 107 líneas |
+| `frontend_react/src/pages/IntegrationsPage.tsx:88` | long_function | 4 | función 'IntegrationsPage' de 89 líneas |
+| `frontend_react/src/pages/JobStatusPage.tsx:119` | long_function | 4 | función 'JobStatusPage' de 84 líneas |
+| `frontend_react/src/pages/LandingPage.tsx:19` | long_function | 4 | función 'LandingPage' de 41 líneas |
+| `frontend_react/src/pages/SettingsPage.tsx:88` | long_function | 4 | función 'SettingsPage' de 96 líneas |
+| `frontend_react/src/pages/UploadPage.tsx:77` | long_function | 4 | función 'UploadPage' de 109 líneas |
+| `frontend_react/src/pages/legal/DataDeletionPage.tsx:4` | long_function | 4 | función 'DataDeletionPage' de 67 líneas |
+| `frontend_react/src/pages/legal/PrivacyPage.tsx:4` | long_function | 4 | función 'PrivacyPage' de 82 líneas |
+| `frontend_react/src/pages/legal/TermsPage.tsx:4` | long_function | 4 | función 'TermsPage' de 85 líneas |
+| `frontend_vue/src/composables/useClipLibrary.ts:8` | long_function | 4 | función 'useClipLibrary' de 269 líneas |
+| `frontend_vue/src/composables/useClipLibrary.ts:182` | long_params | 4 | función 'watch' con 6 parámetros |
+| `frontend_vue/src/composables/useIntegrations.ts:38` | long_function | 4 | función 'useIntegrations' de 118 líneas |
+| `frontend_vue/src/composables/useJobPolling.ts:59` | long_function | 4 | función 'handleUnrecoverablePollFailure' de 45 líneas |
+| `frontend_vue/src/composables/useJobPolling.ts:94` | long_function | 4 | función 'useJobPolling' de 55 líneas |
+| `frontend_vue/src/composables/usePublishStream.ts:63` | long_function | 4 | función 'usePublishStream' de 64 líneas |
+| `frontend_vue/src/stores/auth.ts:45` | long_function | 4 | función 'init' de 44 líneas |
+| `frontend_vue/src/views/SettingsView.vue:116` | long_params | 4 | función 'applyFetchedProfile' con 5 parámetros |
+| `main.py:207` | long_params | 4 | función '_integrar_linea_transcripcion' con 5 parámetros |
+| `main.py:449` | long_function | 4 | función 'construir_prompt' de 116 líneas |
+| `main.py:576` | long_params | 4 | función '_post_con_retry' con 5 parámetros |
+| `main.py:1031` | long_function | 4 | función '_clip_valido' de 35 líneas |
+| `main.py:1158` | long_function | 4 | función 'procesar_clips' de 38 líneas |
+| `main.py:1327` | long_params | 4 | función '_ejecutar_pipeline_cli' con 5 parámetros |
+| `scripts/make_og_image.py:37` | long_params | 4 | función 'glow' con 5 parámetros |
+| `video_processor.py:20` | long_function | 4 | función 'generate_ass_from_segments' de 55 líneas |
+| `video_processor.py:20` | long_params | 4 | función 'generate_ass_from_segments' con 6 parámetros |
+| `video_processor.py:108` | long_params | 4 | función '_segmento_aplicable' con 5 parámetros |
+| `video_processor.py:335` | long_function | 4 | función 'reframe_and_burn_subtitles' de 52 líneas |
+| `video_processor.py:335` | long_params | 4 | función 'reframe_and_burn_subtitles' con 6 parámetros |
+| `video_processor.py:389` | long_function | 4 | función 'process_clip_vertical' de 60 líneas |
+| `video_processor.py:389` | long_params | 4 | función 'process_clip_vertical' con 6 parámetros |
+| `whisper_transcriber.py:152` | long_params | 4 | función '_abrir_segmento_ts' con 5 parámetros |
+| `whisper_transcriber.py:222` | long_function | 4 | función 'parsear_transcripcion_youtube' de 34 líneas |
+| `whisper_transcriber.py:288` | long_function | 4 | función '_transcribir_segmentos' de 53 líneas |
+| `whisper_transcriber.py:370` | long_function | 4 | función 'transcribir_video' de 34 líneas |
 
 **Componente demasiado grande (BigC)** — 8 hallazgo(s) en 8 archivo(s):
 
-| Archivo | Línea(s) | Señal |
-|---|---|---|
-| `frontend_react/src/components/clip-library/ClipResults.tsx` | 1 | componente grande (180 líneas) |
-| `frontend_react/src/pages/DashboardPage.tsx` | 1 | componente grande (428 líneas) |
-| `frontend_react/src/pages/IntegrationsPage.tsx` | 1 | componente grande (164 líneas) |
-| `frontend_react/src/pages/JobStatusPage.tsx` | 1 | componente grande (182 líneas) |
-| `frontend_react/src/pages/SettingsPage.tsx` | 1 | componente grande (168 líneas) |
-| `frontend_react/src/pages/UploadPage.tsx` | 1 | componente grande (173 líneas) |
-| `frontend_vue/src/views/JobStatusView.vue` | 1 | componente grande (156 líneas) |
-| `frontend_vue/src/views/SettingsView.vue` | 1 | componente grande (171 líneas) |
+| Archivo | Línea(s) | Señal | Detalle |
+|---|---|---|---|
+| `frontend_react/src/components/clip-library/ClipResults.tsx` | 1 | big_component | componente grande (180 líneas) |
+| `frontend_react/src/pages/DashboardPage.tsx` | 1 | big_component | componente grande (428 líneas) |
+| `frontend_react/src/pages/IntegrationsPage.tsx` | 1 | big_component | componente grande (164 líneas) |
+| `frontend_react/src/pages/JobStatusPage.tsx` | 1 | big_component | componente grande (182 líneas) |
+| `frontend_react/src/pages/SettingsPage.tsx` | 1 | big_component | componente grande (168 líneas) |
+| `frontend_react/src/pages/UploadPage.tsx` | 1 | big_component | componente grande (173 líneas) |
+| `frontend_vue/src/views/JobStatusView.vue` | 1 | big_component | componente grande (156 líneas) |
+| `frontend_vue/src/views/SettingsView.vue` | 1 | big_component | componente grande (171 líneas) |
 
 **Cobertura (Cob)** — unidades por debajo del umbral:
 
-- `.` — 75.5% (8567/11353 líneas)
-- `backend_fastapi` — 79.0% (6430/8140 líneas)
+| Unidad | Cobertura | Líneas cubiertas / totales |
+|---|---:|---:|
+| `.` | 75.5% | 8567/11353 |
+| `backend_fastapi` | 79.0% | 6430/8140 |
 
 ---
 _Informe generado por la cátedra. Los umbrales corresponden al perfil `exigente`. Ante dudas, revisá el archivo y la línea señalados y el criterio en `CRITERIOS-CALIDAD.md`._
