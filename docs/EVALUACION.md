@@ -3,20 +3,20 @@
 
 > Documento **generado automáticamente** por la cátedra de Programación III (RepoSense + análisis de calidad + constancia). **No editar a mano**: se regenera en cada evaluación.
 > Rama evaluada: `main`. Análisis **heurístico** (regex + métricas): es una criba para orientar la revisión, **no una nota**.
-> Generado: 2026-11-19.
+> Generado: 2026-11-20.
 
 ## 1. Veredicto
 
 | Aspecto | Resultado |
 |---|---|
 | Tipo de proyecto | app |
-| Índice de calidad de servicios | **53/100** (mínimo 50) |
-| Criterios cumplidos | **14/16** |
+| Índice de calidad de servicios | **49/100** (mínimo 50) |
+| Criterios cumplidos | **13/16** |
 | Aprobado (semáforo) | **NO** |
-| Código (LOC) | 31,688 |
+| Código (LOC) | 31,793 |
 | Archivos de código | 247 |
 | Tests (archivos) | 24 |
-| Cobertura de líneas | 76.8% (mínimo 80%) |
+| Cobertura de líneas | 76.9% (mínimo 80%) |
 | Capas detectadas | presentacion, logica, datos, vistas, servicios, estado |
 | Pushes directos a `main` (sin PR) | 6 |
 
@@ -28,8 +28,8 @@
 
 | Autor | Commits | Código (LOC) | Tests (LOC) | Docs (LOC) | Días activos | % del código |
 |---|---:|---:|---:|---:|---:|---:|
-| mateo | 131 | 30,707 | 9,186 | 2,110 | 48 | 78% |
-| SantiValla | 39 | 8,900 | 45 | 591 | 13 | 22% |
+| mateo | 133 | 30,831 | 9,186 | 2,155 | 49 | 78% |
+| SantiValla | 39 | 8,888 | 45 | 591 | 13 | 22% |
 
 > _El LOC de autoría lo calcula RepoSense sobre el historial y puede diferir del LOC de código del análisis de calidad (que mira solo el estado de `main`)._
 
@@ -41,8 +41,8 @@
 
 | Alumno | Sesiones | Cumplimiento | Pausa | Recencia | IC | Nivel | Para subir de nivel |
 |---|--:|--:|--:|--:|--:|--|--|
-| mateo | 39 | 100% | 12 d | 93% | **78** | Aprueba | Pausa 12 d (máx. 5 d) |
-| SantiValla | 17 | 61% | 19 d | 43% | **45** | No aprueba | Recencia 43% (mín. 50%) |
+| mateo | 40 | 100% | 12 d | 93% | **78** | Aprueba | Pausa 12 d (máx. 5 d) |
+| SantiValla | 17 | 60% | 19 d | 36% | **44** | No aprueba | Recencia 36% (mín. 50%) |
 
 > Para aprobar el IC: **2 sesiones por semana** sostenidas, sin pausas mayores a **10 días** y con actividad en las **últimas 2 semanas**. Se excluyen merges, bots y al docente. Zona horaria UTC-3.
 
@@ -50,11 +50,15 @@
 
 Cada aspecto indica **qué mide**, **por qué importa** y **tu resultado**. Cuando el resultado está en rojo, se agregan preguntas para **investigar la causa** (no hay recetas: entender el porqué es parte de la evaluación).
 
-### 1. Índice de calidad de servicios (indice) — OK
+### 1. Índice de calidad de servicios (indice) — A REVISAR
 
 - **Qué mide:** Un resumen numérico (0-100) que combina todas las señales y métricas del análisis, con topes duros por duplicación.
 - **Por qué importa:** Ordena y prioriza la revisión: un índice bajo indica varias señales que conviene mirar juntas.
-- **Tu resultado:** índice **53/100** _(mínimo 50)_
+- **Tu resultado:** índice **49/100** _(mínimo 50)_
+- **Para investigar la causa:**
+    - ¿En qué momento del proyecto se concentraron los problemas (arranque, integración de partes, cierre)?
+    - ¿El índice bajó por muchas señales chicas o por una o dos graves?
+    - ¿Se revisó el código integrado después de unir el trabajo de cada integrante?
 
 ### 2. Duplicación (DRY) (duplicacion) — OK
 
@@ -102,7 +106,7 @@ Cada aspecto indica **qué mide**, **por qué importa** y **tu resultado**. Cuan
 
 - **Qué mide:** Componentes de UI muy extensos, que suelen mezclar render, estado y lógica.
 - **Por qué importa:** Son difíciles de leer, probar y reutilizar, y sus cambios tienen efectos inesperados.
-- **Tu resultado:** **7** componente(s) demasiado grande(s) _(máximo 1)_
+- **Tu resultado:** **8** componente(s) demasiado grande(s) _(máximo 1)_
 - **Para investigar la causa:**
     - ¿El componente creció a medida que se agregaban requisitos, sin volver a dividirlo?
     - ¿Mezcla responsabilidades distintas (mostrar, calcular, pedir datos)?
@@ -118,7 +122,7 @@ Cada aspecto indica **qué mide**, **por qué importa** y **tu resultado**. Cuan
 
 - **Qué mide:** Complejidad ciclomática: cantidad de caminos posibles dentro de una función (condicionales, bucles, casos).
 - **Por qué importa:** Muchos caminos = difícil de seguir y de probar; suelen esconderse casos sin cubrir.
-- **Tu resultado:** **66** bloque(s) de complejidad alta _(máximo 5 por 1000 LOC (tenés 31688 LOC))_
+- **Tu resultado:** **67** bloque(s) de complejidad alta _(máximo 5 por 1000 LOC (tenés 31793 LOC))_
 
 ### 12. Funciones/métodos largos o con muchos parámetros (Tam) — OK
 
@@ -136,7 +140,7 @@ Cada aspecto indica **qué mide**, **por qué importa** y **tu resultado**. Cuan
 
 - **Qué mide:** Porcentaje de líneas de código ejecutadas por la suite de tests (cobertura real, no cantidad de archivos de test).
 - **Por qué importa:** Un test que existe pero no ejecuta el código no protege de nada: la cobertura muestra qué partes quedan sin verificar.
-- **Tu resultado:** **76.8%** de líneas cubiertas · fuente: ejecución: pytest (aviso: requirements.txt: sin instalar 2 línea(s) (no disponibles o en conflicto: torch>=2.1.0 --index-url https://dow…) (. 75.2%, backend_fastapi 79.0%) _(mínimo 80% de líneas)_
+- **Tu resultado:** **76.9%** de líneas cubiertas · fuente: ejecución: pytest (aviso: requirements.txt: sin instalar 2 línea(s) (no disponibles o en conflicto: torch>=2.1.0 --index-url https://dow…) (. 75.5%, backend_fastapi 79.0%) _(mínimo 80% de líneas)_
 - **Para investigar la causa:**
     - ¿Qué módulos o ramas del sistema nunca se ejecutan en los tests?
     - ¿Los tests prueban el camino principal y los errores, o solo el caso feliz?
@@ -160,18 +164,19 @@ Criterios que hoy están en rojo y, para cada uno, una explicación breve de **c
 
 | Criterio | Resultado actual | Meta | Brecha | Cómo alcanzarlo |
 |---|---|---|---|---|
-| Componente demasiado grande (BigC) | **7** componente(s) demasiado grande(s) | máximo 1 | 6 componente(s) de más | Dividí el componente por responsabilidad en subcomponentes (render, estado, acceso a datos) y dejá el original sólo como orquestador. Meta: ≤1 componente grande. |
-| Cobertura de tests (Cob) | **76.8%** de líneas cubiertas · fuente: ejecución: pytest (aviso: requirements.txt: sin instalar 2 línea(s) (no disponibles o en conflicto: torch>=2.1.0 --index-url https://dow…) (. 75.2%, backend_fastapi 79.0%) | mínimo 80% de líneas | faltan 3.2 pts | Agregá o ampliá tests que ejecuten los módulos sin cubrir (camino principal y errores) y publicá el artefacto (`coverage/lcov.info`, `coverage-summary.json`, `coverage.xml` o `coverage.json`) o corré la suite con coverage. Meta: ≥80% de líneas. |
+| Índice de calidad de servicios (indice) | índice **49/100** | mínimo 50 | faltan 1 pts | El índice sólo penaliza lo que **excede** los umbrales de cada criterio: si tenés todo en verde, el índice es 100. Si está en rojo, mirá la columna **Brecha** y los criterios en rojo; corregí primero duplicación, SEC, SQL y capas. Meta del perfil exigente: ≥50. |
+| Componente demasiado grande (BigC) | **8** componente(s) demasiado grande(s) | máximo 1 | 7 componente(s) de más | Dividí el componente por responsabilidad en subcomponentes (render, estado, acceso a datos) y dejá el original sólo como orquestador. Meta: ≤1 componente grande. |
+| Cobertura de tests (Cob) | **76.9%** de líneas cubiertas · fuente: ejecución: pytest (aviso: requirements.txt: sin instalar 2 línea(s) (no disponibles o en conflicto: torch>=2.1.0 --index-url https://dow…) (. 75.5%, backend_fastapi 79.0%) | mínimo 80% de líneas | faltan 3.1 pts | Agregá o ampliá tests que ejecuten los módulos sin cubrir (camino principal y errores) y publicá el artefacto (`coverage/lcov.info`, `coverage-summary.json`, `coverage.xml` o `coverage.json`) o corré la suite con coverage. Meta: ≥80% de líneas. |
 
 > Empezá por las señales de seguridad (**SEC**, **SQL**) y por la **duplicación**: son las que más pesan en el índice y las más rápidas de verificar a ojo. Después de corregir, volvé a correr la medición: el semáforo se recalcula sobre `main`.
 
 ## 6. Actividad en clase y fuera de clase
 
-> Se consideran las **28 clases** del período (miércoles y viernes, según `config/constancia.json`; feriados y semanas sin clase descontados). Para cada alumno se muestra la actividad **en cada clase** y también la actividad **fuera de los días de clase** (fines de semana u otros días). `Commits` = commits de trabajo (no-merge); `Merges` = merges de PR (también son push). Los días sin actividad dicen **sin actividad**.
+> Se consideran las **29 clases** del período (miércoles y viernes, según `config/constancia.json`; feriados y semanas sin clase descontados). Para cada alumno se muestra la actividad **en cada clase** y también la actividad **fuera de los días de clase** (fines de semana u otros días). `Commits` = commits de trabajo (no-merge); `Merges` = merges de PR (también son push). Los días sin actividad dicen **sin actividad**.
 
 ### mateo
 
-**19/28 clases con actividad** · total del período: 81 commits · 27 merges
+**19/29 clases con actividad** · total del período: 81 commits · 27 merges
 
 | Fecha | Actividad | Repositorios | Commits / merges |
 |---|:--:|---|--:|
@@ -203,8 +208,9 @@ Criterios que hoy están en rojo y, para cada uno, una explicación breve de **c
 | 2026-11-11 | **Sí** | CLIPSAI---Valla---Boggio | 2 / 2 |
 | 2026-11-13 | No | sin actividad | 0 / 0 |
 | 2026-11-18 | **Sí** | CLIPSAI---Valla---Boggio | 4 / 2 |
+| 2026-11-20 | No | sin actividad | 0 / 0 |
 
-**Fuera de clase:** 29 fecha(s) con actividad · 59 commits · 26 merges
+**Fuera de clase:** 30 fecha(s) con actividad · 61 commits · 26 merges
 
 | Fecha | Repositorios | Commits / merges |
 |---|---|--:|
@@ -237,10 +243,11 @@ Criterios que hoy están en rojo y, para cada uno, una explicación breve de **c
 | 2026-11-09 | CLIPSAI---Valla---Boggio | 2 / 2 |
 | 2026-11-10 | CLIPSAI---Valla---Boggio | 4 / 1 |
 | 2026-11-12 | CLIPSAI---Valla---Boggio | 1 / 1 |
+| 2026-11-19 | CLIPSAI---Valla---Boggio | 2 / 0 |
 
 ### SantiValla
 
-**18/28 clases con actividad** · total del período: 45 commits · 10 merges
+**18/29 clases con actividad** · total del período: 45 commits · 10 merges
 
 | Fecha | Actividad | Repositorios | Commits / merges |
 |---|:--:|---|--:|
@@ -272,6 +279,7 @@ Criterios que hoy están en rojo y, para cada uno, una explicación breve de **c
 | 2026-11-11 | **Sí** | CLIPSAI---Valla---Boggio | 1 / 0 |
 | 2026-11-13 | No | sin actividad | 0 / 0 |
 | 2026-11-18 | No | sin actividad | 0 / 0 |
+| 2026-11-20 | No | sin actividad | 0 / 0 |
 
 **Fuera de clase:** sin actividad registrada.
 
@@ -279,12 +287,47 @@ Criterios que hoy están en rojo y, para cada uno, una explicación breve de **c
 
 Se listan los archivos y líneas que el análisis marca para cada criterio en rojo. Para **duplicación** se muestran los archivos con más líneas repetidas; para **cobertura**, las unidades por debajo del umbral.
 
-**Componente demasiado grande (BigC)** — 7 hallazgo(s) en 7 archivo(s):
+**Índice (indice)** — señales que más pesan:
+
+- `editor_viral.py:112` — high_coupling: clase 'RenderizadorVertical' muy acoplada (CBO=11)
+- `editor_viral.py:193` — high_coupling: clase 'VideoEditor' muy acoplada (CBO=21)
+- `editor_viral.py:44` — long_function: función 'calcular_filtro_vertical' de 40 líneas
+- `main.py:118` — high_complexity: función '_agregar_momentos_cluster' con complejidad 6
+- `main.py:207` — long_params: función '_integrar_linea_transcripcion' con 5 parámetros
+- `main.py:449` — long_function: función 'construir_prompt' de 116 líneas
+- `main.py:576` — long_params: función '_post_con_retry' con 5 parámetros
+- `main.py:1031` — long_function: función '_clip_valido' de 35 líneas
+- `main.py:1158` — long_function: función 'procesar_clips' de 38 líneas
+- `main.py:1327` — long_params: función '_ejecutar_pipeline_cli' con 5 parámetros
+- `whisper_transcriber.py:152` — long_params: función '_abrir_segmento_ts' con 5 parámetros
+- `whisper_transcriber.py:222` — long_function: función 'parsear_transcripcion_youtube' de 34 líneas
+- `whisper_transcriber.py:288` — long_function: función '_transcribir_segmentos' de 53 líneas
+- `whisper_transcriber.py:370` — long_function: función 'transcribir_video' de 34 líneas
+- `audio_analyzer.py:61` — long_params: función '_agregar_evento_nivel' con 5 parámetros
+- `audio_analyzer.py:81` — long_params: función '_agregar_cambio_brusco' con 6 parámetros
+- `audio_analyzer.py:330` — long_function: función 'analizar_audio' de 50 líneas
+- `ejemplo_engine.py:25` — long_function: función 'main' de 44 líneas
+- `ejemplo_engine.py:25` — high_complexity: función 'main' con complejidad 13
+- `video_processor.py:20` — long_function: función 'generate_ass_from_segments' de 55 líneas
+- `video_processor.py:20` — long_params: función 'generate_ass_from_segments' con 6 parámetros
+- `video_processor.py:108` — long_params: función '_segmento_aplicable' con 5 parámetros
+- `video_processor.py:335` — long_function: función 'reframe_and_burn_subtitles' de 52 líneas
+- `video_processor.py:335` — long_params: función 'reframe_and_burn_subtitles' con 6 parámetros
+- `video_processor.py:389` — long_function: función 'process_clip_vertical' de 60 líneas
+- `video_processor.py:389` — long_params: función 'process_clip_vertical' con 6 parámetros
+- `engine_subprocess.py:116` — long_function: función 'procesar_video_subprocess' de 41 líneas
+- `engine.py:423` — long_function: función '_paso_generar_archivos' de 30 líneas
+- `engine.py:473` — long_function: función '_ejecutar_pipeline_interno' de 32 líneas
+- `engine.py:507` — long_function: función 'procesar_video' de 72 líneas
+- … y 263 hallazgo(s) más.
+
+**Componente demasiado grande (BigC)** — 8 hallazgo(s) en 8 archivo(s):
 
 | Archivo | Línea(s) | Señal |
 |---|---|---|
 | `frontend_react/src/components/clip-library/ClipResults.tsx` | 1 | componente grande (180 líneas) |
 | `frontend_react/src/pages/DashboardPage.tsx` | 1 | componente grande (428 líneas) |
+| `frontend_react/src/pages/IntegrationsPage.tsx` | 1 | componente grande (164 líneas) |
 | `frontend_react/src/pages/JobStatusPage.tsx` | 1 | componente grande (182 líneas) |
 | `frontend_react/src/pages/SettingsPage.tsx` | 1 | componente grande (168 líneas) |
 | `frontend_react/src/pages/UploadPage.tsx` | 1 | componente grande (173 líneas) |
@@ -293,7 +336,7 @@ Se listan los archivos y líneas que el análisis marca para cada criterio en ro
 
 **Cobertura (Cob)** — unidades por debajo del umbral:
 
-- `.` — 75.2% (8534/11353 líneas)
+- `.` — 75.5% (8567/11353 líneas)
 - `backend_fastapi` — 79.0% (6430/8140 líneas)
 
 ---
