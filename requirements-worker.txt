@@ -1,0 +1,45 @@
+# ============================================================================
+# requirements-worker.txt — dependencias del worker GPU en RunPod
+#
+# Imagen: worker.Dockerfile (base pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime).
+# PyTorch + CUDA los provee la imagen base: NO instalar torch aquí.
+# FFmpeg es el binario estático de johnvansickle (con libx264), no ffmpeg-python.
+#
+# Cambios v29 (chore/worker-deps-v29):
+#  - whisperx / pysubs2 / emoji        → issues #117 (emojis + zoompan) y alineación de subtítulos
+#  - mediapipe / opencv-headless /
+#    scenedetect[opencv]              → issue #118 (podcast_split / gameplay_split + face-tracking #128)
+#  - yt-dlp / curl-cffi                → issue #119 (ingesta por URL desde el worker)
+#  - instructor / litellm              → capa LLM estructurada (copy por plataforma #129)
+#  - HF cache apunta a Network Volume  → issue #122 (HF_HOME=/runpod-volume/huggingface)
+# ============================================================================
+
+# --- Worker RunPod + storage R2 ---
+runpod>=1.7.0
+boto3>=1.35.0
+requests>=2.32.0
+python-dotenv>=1.0.1
+pydantic>=2.9.0
+
+# --- Audio y transcripción ---
+librosa>=0.10.2
+scikit-learn>=1.5.0
+numpy>=1.26.4,<2.0.0
+faster-whisper>=1.0.3
+whisperx>=3.1.5
+
+# --- Subtítulos y video ---
+pysubs2>=1.7.3
+ffmpeg-python>=0.2.0
+emoji>=2.14.0
+
+# --- Visión e ingesta ---
+mediapipe>=0.10.14
+opencv-python-headless>=4.10.0.84
+scenedetect[opencv]>=0.6.4
+yt-dlp>=2024.11.4
+curl-cffi>=0.7.3
+
+# --- LLM estructurado ---
+instructor>=1.6.4
+litellm>=1.52.0
