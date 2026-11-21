@@ -76,13 +76,34 @@ RUN pip install --no-cache-dir -r requirements-worker.txt
 # Registramos las rutas dinámicamente vía ldconfig (no hardcodear paths ni sonames):
 # la imagen base pytorch/pytorch es CONDA, así que los paquetes van a
 # /opt/conda/lib/python3.X/site-packages/nvidia/... (no a /usr/local/lib/...).
-# cuDNN 9: ctranslate2>=4.5 (el que resuelve faster-whisper>=1.0.3) está compilado
+# cuDNN 9: ctranslate2>=4.5 (el que resuelve faster-whisper>=1.1.0) está compilado
 # contra cuDNN 9 — la 8.x de la imagen anterior causaría mismatch de sonames.
 RUN pip install --no-cache-dir "nvidia-cudnn-cu12==9.*" "nvidia-cublas-cu12==12.*" && \
     SITE=$(python -c "import site; print(site.getsitepackages()[0])") && \
     { find "$SITE/nvidia" -maxdepth 2 -type d -name lib 2>/dev/null || true; } > /etc/ld.so.conf.d/nvidia-pip.conf && \
     ldconfig && \
     echo "[worker-docker] nvidia lib dirs registrados en ld.so.conf:" && cat /etc/ld.so.conf.d/nvidia-pip.conf
+
+# Verificación cuDNN/ctranslate2: el SIGABRT (exit code 134) en runtime llega
+# cuando ctranslate2 viejo enlaza libcudnn_ops_infer.so.8 (cuDNN 8) sobre esta
+# base cuDNN 9. Falla el build si algún .so de ctranslate2 apunta a cuDNN 8 o
+# si queda alguna dependencia dinámica "not found".
+RUN set -eux; \
+    CT2_DIR=$(python -c "import ctranslate2, os; print(os.path.dirname(ctranslate2.__file__))"); \
+    SO_LIST=$(find "$CT2_DIR" -name "*.so*" -type f); \
+    test -n "$SO_LIST" || { echo "ERROR: ctranslate2 sin binarios .so - instalación rota"; exit 1; }; \
+    ldd $SO_LIST > /tmp/ldd_ct2.txt 2>&1; \
+    if grep -qE "cudnn[a-z_]*\.so\.8" /tmp/ldd_ct2.txt; then \
+      echo "ERROR: ctranslate2 enlaza cuDNN 8 (incompatible con base cuDNN 9) - fijar ctranslate2>=4.5.0"; \
+      grep -E "cudnn[a-z_]*\.so\.8" /tmp/ldd_ct2.txt; \
+      exit 1; \
+    fi; \
+    if grep -q "not found" /tmp/ldd_ct2.txt; then \
+      echo "ERROR: dependencias dinámicas 'not found' en ctranslate2:"; \
+      grep "not found" /tmp/ldd_ct2.txt; \
+      exit 1; \
+    fi; \
+    python -c "import ctranslate2; from importlib.metadata import version; print('[worker-docker] ctranslate2', ctranslate2.__version__, '| faster_whisper', version('faster-whisper'))"
 
 # Copiar scripts del worker (desde la raíz del repo)
 COPY engine.py ./engine.py

@@ -25,7 +25,11 @@ pydantic>=2.9.0
 librosa>=0.10.2
 scikit-learn>=1.5.0
 numpy>=1.26.4,<2.0.0
-faster-whisper>=1.0.3
+faster-whisper>=1.1.0
+# ctranslate2>=4.5.0 compila contra cuDNN 9 (necesario en la base
+# pytorch:2.7.1-cuda12.8-cudnn9-runtime y soporte RTX 50xx/Blackwell);
+# una 4.x vieja enlaza cudnn_ops_infer.so.8 -> SIGABRT (exit code 134).
+ctranslate2>=4.5.0
 whisperx>=3.1.5
 
 # --- Subtítulos y video ---
