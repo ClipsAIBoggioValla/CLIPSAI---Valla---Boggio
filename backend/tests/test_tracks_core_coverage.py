@@ -1074,3 +1074,68 @@ class TestHandlerSSRFRedirects:
                 }
             )
         get.assert_not_called()
+
+
+# ---------------------------------------------------------------- render paralelo (handler)
+
+
+class TestHandlerRenderParalelo:
+    """ThreadPoolExecutor(3) en _procesar_clips_verticales: orden, filtrado y concurrencia."""
+
+    def _mock_vertical(self, monkeypatch, respuestas: list):
+        """Mock de _procesar_clip_vertical indexado por idx (dict|None|Exception)."""
+        import backend.handler as handler
+
+        idx_vistos = []
+
+        def fake(video_path, segments, clip, idx, bucket, video_id):
+            idx_vistos.append(idx)
+            resultado = respuestas[idx]
+            if isinstance(resultado, Exception):
+                raise resultado
+            return resultado
+
+        monkeypatch.setattr(handler, "_procesar_clip_vertical", fake)
+        return idx_vistos
+
+    def test_tres_clips_en_orden(self, monkeypatch) -> None:
+        import backend.handler as handler
+
+        idx_vistos = self._mock_vertical(monkeypatch, [{"index": 0}, {"index": 1}, {"index": 2}])
+        salida = handler._procesar_clips_verticales("v.mp4", [], [object()] * 3, "bucket", "vid")
+        assert [c["index"] for c in salida] == [0, 1, 2]
+        assert sorted(idx_vistos) == [0, 1, 2]
+
+    def test_none_se_filtran_y_orden_relativo_permanece(self, monkeypatch) -> None:
+        import backend.handler as handler
+
+        self._mock_vertical(monkeypatch, [{"index": 0}, None, {"index": 2}])
+        salida = handler._procesar_clips_verticales("v.mp4", [], [object()] * 3, "bucket", "vid")
+        assert [c["index"] for c in salida] == [0, 2]
+
+    def test_excepcion_en_clip_propaga(self, monkeypatch) -> None:
+        import backend.handler as handler
+
+        self._mock_vertical(monkeypatch, [{"index": 0}, RuntimeError("boom"), {"index": 2}])
+        with pytest.raises(RuntimeError, match="boom"):
+            handler._procesar_clips_verticales("v.mp4", [], [object()] * 3, "bucket", "vid")
+
+    def test_paralelismo_real_con_threads(self, monkeypatch) -> None:
+        import threading
+        import time
+        import backend.handler as handler
+
+        activos: list = []
+        pico = [0]
+
+        def fake(video_path, segments, clip, idx, bucket, video_id):
+            activos.append(idx)
+            pico[0] = max(pico[0], len(activos))
+            time.sleep(0.05)
+            activos.remove(idx)
+            return {"index": idx}
+
+        monkeypatch.setattr(handler, "_procesar_clip_vertical", fake)
+        salida = handler._procesar_clips_verticales("v.mp4", [], [object()] * 3, "bucket", "vid")
+        assert [c["index"] for c in salida] == [0, 1, 2]
+        assert pico[0] >= 2  # tareas superpuestas = ejecución paralela real

@@ -22,6 +22,14 @@ import engine as engine_mod  # noqa: E402
 import video_processor as vp_mod  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _reset_nvenc_cache():
+    """Aísla el cache del sondeo NVENC entre tests (sin estado global cruzado)."""
+    vp_mod._probe_nvenc_cache = None
+    yield
+    vp_mod._probe_nvenc_cache = None
+
+
 # ------------------------------------------------------------------- main.py
 
 
@@ -429,3 +437,98 @@ class TestVideoProcessor:
         monkeypatch.setattr(vp_mod.subprocess, "run", Mock(return_value=fallo))
         resultado = vp_mod.process_clip_vertical(str(input_video), str(tmp_path / "o.mp4"), [], 0, 20)
         assert resultado is False
+
+
+# ------------------------------------------------------------------ nvenc (perf worker)
+
+
+class TestCodecSeleccion:
+    """Selección de codec h264_nvenc/libx264 con fallback de runtime (sin GPU real ni red)."""
+
+    def _activar_gpu(self, monkeypatch: Any) -> None:
+        monkeypatch.setenv("RUNPOD_GPU", "1")
+        # Sondeo mockeado: no depende del binario ffmpeg real del entorno.
+        monkeypatch.setattr(vp_mod, "_sondear_nvenc", Mock(return_value=True))
+
+    def test_sin_gpu_env_usa_libx264_y_no_sondea(self, monkeypatch: Any) -> None:
+        # Sin RUNPOD_GPU: args libx264 y CERO subprocess de ffmpeg (el
+        # short-circuit de env vive dentro de _sondear_nvenc, que corre real).
+        monkeypatch.delenv("RUNPOD_GPU", raising=False)
+        run = Mock(side_effect=AssertionError("no debe ejecutar ffmpeg sin RUNPOD_GPU"))
+        monkeypatch.setattr(vp_mod.subprocess, "run", run)
+        args = vp_mod._args_codec_video("20")
+        assert args == ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "20"]
+        run.assert_not_called()
+
+    def test_gpu_con_nvenc_disponible_usa_nvenc(self, monkeypatch: Any) -> None:
+        self._activar_gpu(monkeypatch)
+        args = vp_mod._args_codec_video("20")
+        assert args[:3] == ["-c:v", "h264_nvenc", "-preset"]
+        assert "-cq" in args and "-b:v" in args
+
+    def test_gpu_sin_nvenc_en_binario_fallback_libx264(self, monkeypatch: Any) -> None:
+        monkeypatch.setenv("RUNPOD_GPU", "1")
+        monkeypatch.setattr(vp_mod, "_sondear_nvenc", Mock(return_value=False))
+        assert vp_mod._args_codec_video("20")[1] == "libx264"
+
+    def test_probe_con_excepcion_devuelve_false(self, monkeypatch: Any) -> None:
+        monkeypatch.setenv("RUNPOD_GPU", "1")
+        probe = Mock(side_effect=RuntimeError("ffmpeg no existe"))
+        monkeypatch.setattr(vp_mod.subprocess, "run", probe)
+        assert vp_mod._sondear_nvenc() is False
+        probe.assert_called_once()
+
+    def test_memoizacion_un_solo_probe(self, monkeypatch: Any) -> None:
+        self._activar_gpu(monkeypatch)
+        probe = Mock(return_value=True)
+        monkeypatch.setattr(vp_mod, "_sondear_nvenc", probe)
+        assert vp_mod._nvenc_disponible() is True
+        assert vp_mod._nvenc_disponible() is True
+        probe.assert_called_once()
+
+    def test_reframe_retry_libx264_cuando_nvenc_falla(self, tmp_path: Path, monkeypatch: Any) -> None:
+        self._activar_gpu(monkeypatch)
+        llamadas = []
+
+        def _run(cmd, **kwargs):
+            llamadas.append(list(cmd))
+            if len(llamadas) == 1:  # 1er intento (nvenc) falla
+                return SimpleNamespace(returncode=1, stderr="nvenc error")
+            Path(cmd[-1]).write_bytes(b"v")  # 2do intento (libx264) OK
+            return SimpleNamespace(returncode=0, stderr="")
+
+        monkeypatch.setattr(vp_mod.subprocess, "run", Mock(side_effect=_run))
+        salida = tmp_path / "out.mp4"
+        assert vp_mod.reframe_and_burn_subtitles("in.mp4", str(salida), ass_file=None) is True
+        assert len(llamadas) == 2
+        assert "h264_nvenc" in llamadas[0]
+        assert "libx264" in llamadas[1]
+
+    def test_reframe_sin_gpu_no_reintenta(self, tmp_path: Path, monkeypatch: Any) -> None:
+        monkeypatch.delenv("RUNPOD_GPU", raising=False)
+        run = Mock(return_value=SimpleNamespace(returncode=1, stderr="err"))
+        monkeypatch.setattr(vp_mod.subprocess, "run", run)
+        assert vp_mod.reframe_and_burn_subtitles("in.mp4", "out.mp4", ass_file=None) is False
+        assert run.call_count == 1
+
+    def test_corte_retry_libx264_cuando_nvenc_falla(self, tmp_path: Path, monkeypatch: Any) -> None:
+        self._activar_gpu(monkeypatch)
+        input_video = tmp_path / "in.mp4"
+        input_video.write_bytes(b"v")
+        llamadas = []
+
+        def _run(cmd, **kwargs):
+            llamadas.append(list(cmd))
+            if len(llamadas) == 1:
+                return SimpleNamespace(returncode=1, stderr="nvenc error")
+            Path(cmd[-1]).write_bytes(b"x")
+            return SimpleNamespace(returncode=0, stderr="")
+
+        monkeypatch.setattr(vp_mod.subprocess, "run", Mock(side_effect=_run))
+        resultado = vp_mod.process_clip_vertical(
+            str(input_video), str(tmp_path / "out.mp4"), [{"start": 0, "end": 5, "text": "hola"}], 0, 20
+        )
+        assert resultado is True
+        assert len(llamadas) >= 2
+        assert "h264_nvenc" in llamadas[0]
+        assert any("libx264" in cmd for cmd in llamadas[1:])
