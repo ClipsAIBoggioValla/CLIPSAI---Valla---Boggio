@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
+FROM pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime
 
 ENV DEBIAN_FRONTEND=noninteractive \
     TZ=UTC \
@@ -58,11 +58,13 @@ RUN python --version \
 COPY requirements-worker.txt ./
 RUN pip install --no-cache-dir -r requirements-worker.txt
 
-# CUDA 12 runtime para CTranslate2/faster-whisper en GPU.
+# CUDA 12.8 runtime para CTranslate2/faster-whisper en GPU (base cudnn9).
 # Registramos las rutas dinámicamente vía ldconfig (no hardcodear paths ni sonames):
 # la imagen base pytorch/pytorch es CONDA, así que los paquetes van a
-# /opt/conda/lib/python3.10/site-packages/nvidia/... (no a /usr/local/lib/...).
-RUN pip install --no-cache-dir "nvidia-cudnn-cu12==8.*" "nvidia-cublas-cu12==12.*" && \
+# /opt/conda/lib/python3.X/site-packages/nvidia/... (no a /usr/local/lib/...).
+# cuDNN 9: ctranslate2>=4.5 (el que resuelve faster-whisper>=1.0.3) está compilado
+# contra cuDNN 9 — la 8.x de la imagen anterior causaría mismatch de sonames.
+RUN pip install --no-cache-dir "nvidia-cudnn-cu12==9.*" "nvidia-cublas-cu12==12.*" && \
     SITE=$(python -c "import site; print(site.getsitepackages()[0])") && \
     { find "$SITE/nvidia" -maxdepth 2 -type d -name lib 2>/dev/null || true; } > /etc/ld.so.conf.d/nvidia-pip.conf && \
     ldconfig && \
@@ -77,8 +79,13 @@ COPY video_processor.py ./video_processor.py
 COPY backend/ ./backend/
 COPY backend_fastapi/runpod_worker.py ./runpod_worker.py
 
-# Sitecustomize: reordena PATH para priorizar FFmpeg del sistema
-COPY backend_fastapi/docker-sitecustomize.py /usr/local/lib/python3.10/site-packages/sitecustomize.py
+# Sitecustomize: reordena PATH para priorizar FFmpeg del sistema.
+# Ruta resuelta dinámicamente: la base conda usa /opt/conda/lib/python3.X/site-packages
+# (el /usr/local/lib/python3.10 fijo de la imagen anterior nunca fue efectivo).
+COPY backend_fastapi/docker-sitecustomize.py /tmp/docker-sitecustomize.py
+RUN SITE=$(python -c "import site; print(site.getsitepackages()[0])") && \
+    cp /tmp/docker-sitecustomize.py "$SITE/sitecustomize.py" && \
+    rm /tmp/docker-sitecustomize.py
 
 # Crear directorios de storage
 RUN mkdir -p /app/storage/clips /app/storage/uploads \
