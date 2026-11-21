@@ -5,9 +5,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    HF_HOME=/runpod-volume/huggingface \
-    HUGGINGFACE_HUB_CACHE=/runpod-volume/huggingface/hub \
-    TORCH_HOME=/runpod-volume/torch
+    HF_HOME=/tmp/cache/huggingface \
+    HUGGINGFACE_HUB_CACHE=/tmp/cache/huggingface/hub \
+    TORCH_HOME=/tmp/cache/torch
 
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
@@ -112,13 +112,12 @@ RUN useradd --create-home --shell /bin/bash appuser \
 
 USER appuser
 
-# Directorios de cache sobre el RunPod Network Volume (issue #122): HF_HOME/TORCH_HOME
-# apuntan aquí para que el modelo large-v3-turbo persista entre cold starts.
-# Se crean con permisos amplios; en runtime RunPod monta el volumen en /runpod-volume
-# (el mount reemplaza estos dirs, el chmod es best-effort para dev local).
-RUN mkdir -p /runpod-volume/huggingface /runpod-volume/torch \
+# Caches de modelos: SIEMPRE en /tmp (grabable por appuser). /runpod-volume se
+# activa en runtime solo si el Network Volume está montado y escribible — ver
+# _directorio_cache_hf() en whisper_transcriber.py (fallback automático).
+RUN mkdir -p /tmp/cache/huggingface /tmp/cache/torch \
     /tmp/huggingface_cache \
-    && chmod -R a+rwX /runpod-volume /tmp/huggingface_cache 2>/dev/null || true
+    && chmod -R a+rwX /tmp/cache /tmp/huggingface_cache
 
 EXPOSE 8000
 
