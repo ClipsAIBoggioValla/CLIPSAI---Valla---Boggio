@@ -15,9 +15,11 @@ import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
+
+from backend.core.security.ssrf_guard import SSRFError, validate_url
 
 
 # Asegurar que el root del proyecto este en sys.path para importar engine.py
@@ -41,6 +43,9 @@ logger.propagate = False
 MAX_VIDEO_BYTES = 500 * 1024 * 1024
 MAX_TRANSCRIPT_BYTES = 10 * 1024 * 1024
 DOWNLOAD_CHUNK_BYTES = 1024 * 1024
+# Redirects seguidos manualmente validando cada hop con el SSRF guard
+# (issue #112): allow_redirects=False evita el toctou post-validación.
+MAX_REDIRECTS = 5
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 TRANSCRIPT_EXTENSIONS = {".txt", ".srt", ".vtt"}
 
@@ -137,13 +142,55 @@ def _copiar_chunks(response, output, max_bytes: int) -> int:
     return total
 
 
+def _validar_url_entrada(url: str, tipo: str) -> str:
+    """Valida una URL con el SSRF guard y registra el resultado."""
+    try:
+        validate_url(url)
+    except SSRFError:
+        logger.warning("URL de %s rechazada por SSRF guard: %s", tipo, url)
+        raise
+    logger.info("URL de %s validada por SSRF guard", tipo)
+    return url
+
+
+def _estado_es_redirect(response) -> bool:
+    """True si la respuesta HTTP es un redirect 3xx."""
+    return 300 <= response.status_code < 400
+
+
+def _location_validada(url_actual: str, response) -> str:
+    """Location absoluto del redirect, validado con el SSRF guard."""
+    location = response.headers.get("Location", "").strip()
+    if not location:
+        raise SSRFError(f"Redirect {response.status_code} sin Location: {url_actual}")
+    destino = urljoin(url_actual, location)
+    validate_url(destino)
+    logger.warning("Redirect %s -> %s (validado por SSRF guard)", url_actual, destino)
+    return destino
+
+
+def _descargar_hops(url: str, destination: Path, max_bytes: int) -> int:
+    """Descarga siguiendo redirects manualmente, validando cada hop (SSRF).
+
+    allow_redirects=False: cada 3xx se cierra con el context manager y el
+    siguiente hop se re-valida antes del GET, sin toctou post-validación.
+    """
+    for _ in range(MAX_REDIRECTS + 1):
+        with requests.get(url, stream=True, timeout=(10, 120), allow_redirects=False) as response:
+            if _estado_es_redirect(response):
+                url = _location_validada(url, response)
+                continue
+            response.raise_for_status()
+            _validar_content_length(response, max_bytes)
+            with destination.open("wb") as output:
+                return _copiar_chunks(response, output, max_bytes)
+    raise SSRFError(f"Demasiados redirects (>{MAX_REDIRECTS}) en {url}")
+
+
 def _descargar_stream(url: str, destination: Path, max_bytes: int) -> int:
-    """Descarga el stream a destino y devuelve la cantidad de bytes escritos."""
-    with requests.get(url, stream=True, timeout=(10, 120), allow_redirects=True) as response:
-        response.raise_for_status()
-        _validar_content_length(response, max_bytes)
-        with destination.open("wb") as output:
-            return _copiar_chunks(response, output, max_bytes)
+    """Valida la URL con el SSRF guard y descarga el stream a destino."""
+    _validar_url_entrada(url, "descarga")
+    return _descargar_hops(url, destination, max_bytes)
 
 
 def _download_file(url: str, destination: Path, max_bytes: int) -> None:
@@ -151,6 +198,8 @@ def _download_file(url: str, destination: Path, max_bytes: int) -> None:
     total = 0
     try:
         total = _descargar_stream(url, destination, max_bytes)
+    except SSRFError as exc:
+        raise RuntimeError(f"URL rechazada por SSRF guard: {exc}") from exc
     except requests.RequestException as exc:
         raise RuntimeError(f"No se pudo descargar el archivo de entrada: {exc}") from exc
 
@@ -190,21 +239,30 @@ def _validar_input(job: dict[str, Any]) -> dict[str, Any]:
 
 
 def _video_url_de(input_data: dict[str, Any]) -> tuple:
-    """(video_url limpia, extension) validados del input."""
+    """(video_url limpia, extension) validados del input (incluye SSRF guard)."""
     # Extraer video_url
     video_url = input_data.get("video_url")
     if not isinstance(video_url, str) or not video_url.strip():
         raise ValueError("Falta el parametro obligatorio input.video_url")
     video_url = video_url.strip()
+    _validar_url_entrada(video_url, "video")
     video_extension = _get_extension(video_url, VIDEO_EXTENSIONS, ".mp4")
     return video_url, video_extension
 
 
+def _url_transcripcion_invalida(transcript_url: Any) -> bool:
+    """True si transcription_url viene y no es una URL no vacía."""
+    return transcript_url is not None and (not isinstance(transcript_url, str) or not transcript_url.strip())
+
+
 def _validar_transcript_url(input_data: dict[str, Any]) -> str | None:
-    """Valida transcription_url del input; None si no viene."""
+    """Valida transcription_url del input (SSRF incluido); None si no viene."""
     transcript_url = input_data.get("transcription_url")
-    if transcript_url is not None and (not isinstance(transcript_url, str) or not transcript_url.strip()):
+    if _url_transcripcion_invalida(transcript_url):
         raise ValueError("input.transcription_url debe ser una URL no vacia")
+    if transcript_url:
+        transcript_url = transcript_url.strip()
+        _validar_url_entrada(transcript_url, "transcripcion")
     return transcript_url
 
 
@@ -288,6 +346,26 @@ def _clip_vertical_dict(idx: int, clip: Any, r2_url: str, clip_start: float, cli
     }
 
 
+def _hook_texto_de(clip: Any) -> str | None:
+    """Hook del clip o None si esta vacio."""
+    return clip.hook_texto or None
+
+
+def _subir_clip_a_r2(vertical_path: str, idx: int, bucket: str, video_id: str, clip: Any, clip_start: float, clip_end: float) -> dict[str, Any] | None:
+    """Sube el clip vertical a R2; None si falla el upload."""
+    try:
+        r2_key = f"clips/{video_id}/{idx}_vertical.mp4"
+        r2_url = _upload_to_r2(vertical_path, bucket, r2_key)
+
+        logger.info("Clip %s subido a R2: %s", idx + 1, r2_url)
+
+        return _clip_vertical_dict(idx, clip, r2_url, clip_start, clip_end)
+
+    except Exception as exc:
+        logger.warning("Error subiendo clip %s a R2: %s", idx + 1, exc)
+        return None
+
+
 def _procesar_clip_vertical(video_path: str, transcription_segments: list, clip: Any, idx: int, bucket: str, video_id: str) -> dict[str, Any] | None:
     """Procesa un clip a vertical 9:16 con subs+hook y lo sube a R2. None si falla."""
     from video_processor import process_clip_vertical
@@ -306,25 +384,14 @@ def _procesar_clip_vertical(video_path: str, transcription_segments: list, clip:
         segments=transcription_segments,
         clip_start=clip_start,
         clip_end=clip_end,
-        hook_text=clip.hook_texto if clip.hook_texto else None
+        hook_text=_hook_texto_de(clip)
     )
 
     if not success or not os.path.exists(vertical_path):
         logger.warning("Clip %s fallo el procesamiento vertical, saltando", idx + 1)
         return None
 
-    # Subir a R2
-    try:
-        r2_key = f"clips/{video_id}/{idx}_vertical.mp4"
-        r2_url = _upload_to_r2(vertical_path, bucket, r2_key)
-
-        logger.info("Clip %s subido a R2: %s", idx + 1, r2_url)
-
-        return _clip_vertical_dict(idx, clip, r2_url, clip_start, clip_end)
-
-    except Exception as exc:
-        logger.warning("Error subiendo clip %s a R2: %s", idx + 1, exc)
-        return None
+    return _subir_clip_a_r2(vertical_path, idx, bucket, video_id, clip, clip_start, clip_end)
 
 
 def _procesar_clips_verticales(video_path: str, transcription_segments: list, clips: list, bucket: str, video_id: str) -> list:
@@ -397,38 +464,43 @@ def process_video_job(job: dict[str, Any]) -> dict[str, Any]:
         if not result.exito:
             return _resultado_fallo(result, video_id)
 
-        clips = result.clips
-        transcription_segments = getattr(result, 'transcription_segments', None) or []
-        logger.info(
-            "Engine OK: %s clips horizontales generados, %s segmentos de transcripción",
-            len(clips),
-            len(transcription_segments),
-        )
-
-        # Procesar clips horizontales a verticales 9:16 con subs+hook y subir a R2
-        logger.info("Procesando clips verticales 9:16 + subs + hook...")
-        from video_processor import process_clip_vertical
-
         bucket = os.getenv("BUCKET_NAME", "clipsai-videos").strip()
-        clips_verticales = _procesar_clips_verticales(video_path, transcription_segments, clips, bucket, video_id)
+        return _respuesta_completa(result, video_id, video_path, bucket)
 
-        logger.info("%s clips verticales procesados y subidos a R2", len(clips_verticales))
 
-        response = {
-            "status": "COMPLETED",
-            "video_id": video_id,
-            "engine": "clipsai_native",
-            "clips": clips_verticales,
-            "clip_count": len(clips_verticales),
-            "output_folder": result.carpeta_salida,
-            "transcription_segments": transcription_segments,
-        }
+def _respuesta_completa(result, video_id: str, video_path: Path, bucket: str) -> dict[str, Any]:
+    """Procesa los clips del engine a verticales 9:16 y arma la respuesta COMPLETED."""
+    clips = result.clips
+    transcription_segments = getattr(result, 'transcription_segments', None) or []
+    logger.info(
+        "Engine OK: %s clips horizontales generados, %s segmentos de transcripción",
+        len(clips),
+        len(transcription_segments),
+    )
 
-        # Mensaje informativo si no hay clips
-        if len(clips_verticales) == 0:
-            response["message"] = "No se pudieron procesar clips verticales. Revisa los logs para más detalles."
+    # Procesar clips horizontales a verticales 9:16 con subs+hook y subir a R2
+    logger.info("Procesando clips verticales 9:16 + subs + hook...")
+    from video_processor import process_clip_vertical
 
-        return response
+    clips_verticales = _procesar_clips_verticales(video_path, transcription_segments, clips, bucket, video_id)
+
+    logger.info("%s clips verticales procesados y subidos a R2", len(clips_verticales))
+
+    response = {
+        "status": "COMPLETED",
+        "video_id": video_id,
+        "engine": "clipsai_native",
+        "clips": clips_verticales,
+        "clip_count": len(clips_verticales),
+        "output_folder": result.carpeta_salida,
+        "transcription_segments": transcription_segments,
+    }
+
+    # Mensaje informativo si no hay clips
+    if len(clips_verticales) == 0:
+        response["message"] = "No se pudieron procesar clips verticales. Revisa los logs para más detalles."
+
+    return response
 
 
 # Alias para compatibilidad con runpod.serverless.start({"handler": handler})
