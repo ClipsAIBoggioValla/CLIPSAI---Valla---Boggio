@@ -188,6 +188,59 @@ class TestSSRFGuard:
         with _patch.object(sg.socket, "getaddrinfo", lambda *a, **k: self._DNS_PUBLICA):
             assert sg.assert_safe_url("https://media.example.com/x") is None
 
+    # ------------------------------------------------------ issue #112 (nuevos)
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://127.0.0.1/video.mp4",
+            "http://10.0.0.5/video.mp4",
+            "http://172.16.0.9/video.mp4",
+            "http://192.168.1.5/video.mp4",
+        ],
+    )
+    def test_ip_directa_privada_bloqueada(self, url: str, monkeypatch) -> None:
+        from backend.core.security import ssrf_guard as sg
+
+        # Sin red real: el DNS mockeado resuelve el hostname literal a sí mismo.
+        monkeypatch.setattr(sg.socket, "getaddrinfo", lambda h, *a, **k: [((2, 1, 0, "", (h, 0)))])
+        with pytest.raises(sg.SSRFError, match="Resolved IP blocked"):
+            sg.validate_url(url)
+
+    @pytest.mark.parametrize(
+        "url",
+        ["ftp://media.example.com/x", "file:///etc/passwd", "gopher://media.example.com/x", "javascript:alert(1)"],
+    )
+    def test_esquemas_invalidos(self, url: str) -> None:
+        from backend.core.security import ssrf_guard as sg
+
+        with pytest.raises(sg.SSRFError, match="Scheme not allowed"):
+            sg.validate_url(url)
+
+    @pytest.mark.parametrize(
+        "ip",
+        ["127.0.0.1", "10.1.2.3", "172.16.5.5", "192.168.0.9", "169.254.169.254", "::1", "fe80::1"],
+    )
+    def test_is_ip_blocked_bloquea_rangos_privados(self, ip: str) -> None:
+        from backend.core.security import ssrf_guard as sg
+
+        assert sg.is_ip_blocked(ip) is True
+
+    @pytest.mark.parametrize("ip", ["8.8.8.8", "1.1.1.1"])
+    def test_is_ip_blocked_permite_publicas(self, ip: str) -> None:
+        from backend.core.security import ssrf_guard as sg
+
+        assert sg.is_ip_blocked(ip) is False
+
+    def test_imds_literal_se_bloquea_antes_de_dns(self, monkeypatch) -> None:
+        from backend.core.security import ssrf_guard as sg
+
+        # El chequeo por literal corre ANTES de resolver DNS: si se llegara a
+        # llamar getaddrinfo, este mock hace fallar el test.
+        monkeypatch.setattr(sg.socket, "getaddrinfo", Mock(side_effect=AssertionError("no debe resolverse")))
+        with pytest.raises(sg.SSRFError, match="IMDS"):
+            sg.validate_url(f"http://169.254.169.254/latest/meta-data/")
+
 
 # ---------------------------------------------------------------- rate_limiter
 
@@ -674,6 +727,13 @@ class TestViralityEngine:
 
 
 class TestHandlerRbranches:
+    @staticmethod
+    def _dns_publico(monkeypatch) -> None:
+        """Mockea el DNS del SSRF guard sin red real: cada hostname se resuelve a
+        sí mismo (hosts con nombre pasan sin IPs; literales privados quedan bloqueados)."""
+        from backend.core.security import ssrf_guard as sg
+
+        monkeypatch.setattr(sg.socket, "getaddrinfo", lambda h, *a, **k: [((2, 1, 0, "", (h, 0)))])
     def test_upload_r2_requiere_credenciales(self, monkeypatch) -> None:
         import backend.handler as handler
 
@@ -720,8 +780,10 @@ class TestHandlerRbranches:
 
         import backend.handler as handler
 
+        self._dns_publico(monkeypatch)
         destino = tmp_path / "video.mp4"
         response = Mock()
+        response.status_code = 200
         response.headers = {"Content-Length": str(600 * 1024 * 1024)}
         response.iter_content = Mock(return_value=iter([]))
         ctx = Mock()
@@ -736,8 +798,10 @@ class TestHandlerRbranches:
     def test_download_file_exige_bytes(self, tmp_path, monkeypatch) -> None:
         import backend.handler as handler
 
+        self._dns_publico(monkeypatch)
         destino = tmp_path / "vacio.mp4"
         response = Mock()
+        response.status_code = 200
         response.headers = {}
         response.iter_content = Mock(return_value=iter([]))
         ctx = Mock()
@@ -762,9 +826,10 @@ class TestHandlerRbranches:
         with pytest.raises(ValueError, match="job"):
             process_video_job({"input": "no-dict"})
 
-    def test_transcription_url_invalida(self) -> None:
+    def test_transcription_url_invalida(self, monkeypatch) -> None:
         from backend.handler import process_video_job
 
+        self._dns_publico(monkeypatch)
         with pytest.raises(ValueError, match="transcription_url"):
             process_video_job({"input": {"video_url": "https://x/v.mp4", "transcription_url": ""}})
 
@@ -772,16 +837,18 @@ class TestHandlerRbranches:
         import backend.handler as handler
         from backend.handler import process_video_job
 
+        self._dns_publico(monkeypatch)
         monkeypatch.setattr(handler, "MAX_TRANSCRIPT_BYTES", 16)
         with pytest.raises(ValueError, match="supera el maximo"):
             process_video_job(
                 {"input": {"video_url": "https://x/v.mp4", "transcription_text": "x" * 100}}
             )
 
-    def test_vertical_fallida_registra_mensaje(self) -> None:
+    def test_vertical_fallida_registra_mensaje(self, monkeypatch) -> None:
         import backend.handler as handler
         from backend.handler import process_video_job
 
+        self._dns_publico(monkeypatch)
         with tempfile.TemporaryDirectory() as directory:
             horizontal = Path(directory) / "c.mp4"
             horizontal.write_bytes(b"h")
@@ -815,10 +882,11 @@ class TestHandlerRbranches:
         assert salida["clip_count"] == 0
         assert "logs" in salida["message"]
 
-    def test_upload_r2_raises_continua(self) -> None:
+    def test_upload_r2_raises_continua(self, monkeypatch) -> None:
         import backend.handler as handler
         from backend.handler import process_video_job
 
+        self._dns_publico(monkeypatch)
         with tempfile.TemporaryDirectory() as directory:
             horizontal = Path(directory) / "z.mp4"
             horizontal.write_bytes(b"h")
@@ -855,3 +923,154 @@ class TestHandlerRbranches:
                 )
         assert salida["status"] == "COMPLETED"
         assert salida["clip_count"] == 0
+
+
+# ---------------------------------------------------------------- ssrf redirects (issue #112)
+
+
+class TestHandlerSSRFRedirects:
+    """Redirects seguidos a mano con validación SSRF en cada hop (allow_redirects=False)."""
+
+    @staticmethod
+    def _dns_sin_red(monkeypatch) -> None:
+        """DNS mockeado: cada hostname se resuelve a sí mismo (sin red)."""
+        from backend.core.security import ssrf_guard as sg
+
+        monkeypatch.setattr(sg.socket, "getaddrinfo", lambda h, *a, **k: [((2, 1, 0, "", (h, 0)))])
+
+    @staticmethod
+    def _respuesta(status_code: int, headers: dict | None = None, contenido: bytes = b"") -> Mock:
+        """Context manager sintético de requests.get (cierre del 3xx garantizado)."""
+        response = Mock()
+        response.status_code = status_code
+        response.headers = headers or {}
+        response.iter_content = Mock(return_value=iter([contenido] if contenido else []))
+        ctx = Mock()
+        ctx.__enter__ = Mock(return_value=response)
+        ctx.__exit__ = Mock(return_value=False)
+        return ctx
+
+    def _get_mock(self, monkeypatch, respuestas: list[Mock]) -> Mock:
+        import backend.handler as handler
+
+        get = Mock(side_effect=respuestas)
+        monkeypatch.setattr(handler.requests, "get", get)
+        return get
+
+    def test_redirect_a_ip_privada_rechazado(self, tmp_path, monkeypatch) -> None:
+        import backend.handler as handler
+
+        self._dns_sin_red(monkeypatch)
+        get = self._get_mock(monkeypatch, [self._respuesta(302, {"Location": "http://10.0.0.5/x.mp4"})])
+        with pytest.raises(RuntimeError, match="SSRF guard"):
+            handler._download_file(
+                "https://media.example/v.mp4", tmp_path / "v.mp4", handler.MAX_VIDEO_BYTES
+            )
+        assert get.call_count == 1  # el hop privado jamás fue GET
+        assert all(c.args[0] == "https://media.example/v.mp4" for c in get.call_args_list)
+
+    def test_redirect_a_localhost_rechazado(self, tmp_path, monkeypatch) -> None:
+        import backend.handler as handler
+
+        self._dns_sin_red(monkeypatch)
+        self._get_mock(monkeypatch, [self._respuesta(302, {"Location": "http://localhost:8000/x.mp4"})])
+        with pytest.raises(RuntimeError, match="SSRF guard"):
+            handler._download_file(
+                "https://media.example/v.mp4", tmp_path / "v.mp4", handler.MAX_VIDEO_BYTES
+            )
+
+    def test_redirect_a_imds_rechazado(self, tmp_path, monkeypatch) -> None:
+        import backend.handler as handler
+
+        self._dns_sin_red(monkeypatch)
+        self._get_mock(
+            monkeypatch, [self._respuesta(302, {"Location": "http://169.254.169.254/latest/meta-data/"})]
+        )
+        with pytest.raises(RuntimeError, match="SSRF guard"):
+            handler._download_file(
+                "https://media.example/v.mp4", tmp_path / "v.mp4", handler.MAX_VIDEO_BYTES
+            )
+
+    def test_bucle_de_redirects_excede_max_redirects(self, tmp_path, monkeypatch) -> None:
+        import backend.handler as handler
+
+        self._dns_sin_red(monkeypatch)
+        url_bucle = "https://redirect.example/x.mp4"
+        get = self._get_mock(
+            monkeypatch, [self._respuesta(302, {"Location": url_bucle}) for _ in range(6)]
+        )
+        with pytest.raises(RuntimeError, match="SSRF guard"):
+            handler._download_file(url_bucle, tmp_path / "v.mp4", handler.MAX_VIDEO_BYTES)
+        assert get.call_count == handler.MAX_REDIRECTS + 1
+
+    def test_redirect_publico_valido_seguimiento(self, tmp_path, monkeypatch) -> None:
+        import backend.handler as handler
+
+        self._dns_sin_red(monkeypatch)
+        get = self._get_mock(
+            monkeypatch,
+            [
+                self._respuesta(302, {"Location": "https://media.example/ok.mp4"}),
+                self._respuesta(200, {}, b"video"),
+            ],
+        )
+        destino = tmp_path / "v.mp4"
+        handler._download_file("https://media.example/v.mp4", destino, handler.MAX_VIDEO_BYTES)
+        assert destino.read_bytes() == b"video"
+        assert get.call_count == 2
+        assert get.call_args_list[0].kwargs["allow_redirects"] is False
+        assert get.call_args_list[1].kwargs["allow_redirects"] is False
+
+    def test_location_relativa_resuelta_y_validada(self, tmp_path, monkeypatch) -> None:
+        import backend.handler as handler
+
+        self._dns_sin_red(monkeypatch)
+        get = self._get_mock(
+            monkeypatch,
+            [
+                self._respuesta(302, {"Location": "/relativa.mp4"}),
+                self._respuesta(200, {}, b"relativo"),
+            ],
+        )
+        destino = tmp_path / "v.mp4"
+        handler._download_file("https://media.example/v.mp4", destino, handler.MAX_VIDEO_BYTES)
+        assert destino.read_bytes() == b"relativo"
+        assert get.call_args_list[1].args[0] == "https://media.example/relativa.mp4"
+
+    def test_redirect_sin_location_rechazado(self, tmp_path, monkeypatch) -> None:
+        import backend.handler as handler
+
+        self._dns_sin_red(monkeypatch)
+        self._get_mock(monkeypatch, [self._respuesta(302, {})])
+        with pytest.raises(RuntimeError, match="sin Location"):
+            handler._download_file(
+                "https://media.example/v.mp4", tmp_path / "v.mp4", handler.MAX_VIDEO_BYTES
+            )
+
+    def test_input_video_url_privada_falla_antes_de_descargar(self, monkeypatch) -> None:
+        import backend.handler as handler
+        from backend.handler import process_video_job
+
+        self._dns_sin_red(monkeypatch)
+        get = self._get_mock(monkeypatch, [])
+        with pytest.raises(ValueError, match="Resolved IP blocked"):
+            process_video_job({"input": {"video_url": "http://127.0.0.1/v.mp4", "video_id": "v-1"}})
+        get.assert_not_called()
+
+    def test_input_transcription_url_privada_falla_antes_de_descargar(self, monkeypatch) -> None:
+        import backend.handler as handler
+        from backend.handler import process_video_job
+
+        self._dns_sin_red(monkeypatch)
+        get = self._get_mock(monkeypatch, [])
+        with pytest.raises(ValueError, match="Resolved IP blocked"):
+            process_video_job(
+                {
+                    "input": {
+                        "video_url": "https://media.example/v.mp4",
+                        "transcription_url": "http://127.0.0.1/t.txt",
+                        "video_id": "v-2",
+                    }
+                }
+            )
+        get.assert_not_called()
