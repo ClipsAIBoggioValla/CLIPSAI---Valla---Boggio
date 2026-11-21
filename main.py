@@ -607,6 +607,18 @@ def _texto_de_bloques(datos: Dict) -> str:
     return texto
 
 
+class IAError(Exception):
+    """Error de llamada a la IA (HTTP/respuesta inválida), con detalle por proveedor."""
+
+
+def _mensaje_error_proveedor(exc: BaseException) -> str:
+    """status_code (si el error lo trae) + detalle truncado, para el log/final."""
+    status = getattr(exc, "status_code", None)
+    if status is None:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+    return f"status={status} detalle={str(exc)[:300]}"
+
+
 def llamar_claude(prompt: str) -> str:
     """Llama a la API de Anthropic Claude y devuelve el texto de la respuesta."""
     if not ANTHROPIC_API_KEY:
@@ -717,17 +729,15 @@ def _llamar_proveedor_primario(prompt: str) -> str:
     return llamar_openai_compatible(prompt)
 
 
-def _fallback_anthropic(prompt: str, proveedor: str) -> Optional[str]:
-    """Reintenta con Claude si el primario no era Anthropic. None si no aplica o falla."""
-    if not ANTHROPIC_API_KEY:
-        return None
-    if proveedor == "Claude (Anthropic)":
-        return None
+def _fallback_anthropic(prompt: str, proveedor: str) -> tuple:
+    """Reintenta con Claude si el primario no era Anthropic. (None, error) si falla."""
+    if not ANTHROPIC_API_KEY or proveedor == "Claude (Anthropic)":
+        return None, None
     try:
-        return llamar_claude(prompt)
-    except Exception:
-        logger.exception("Fallback Anthropic también falló")
-        return None
+        return llamar_claude(prompt), None
+    except Exception as exc:
+        logger.exception("Fallback Anthropic también falló: %s", _mensaje_error_proveedor(exc))
+        return None, exc
 
 
 def _hay_fallback_openai(has_deepseek: bool) -> bool:
@@ -735,30 +745,43 @@ def _hay_fallback_openai(has_deepseek: bool) -> bool:
     return bool(OPENROUTER_API_KEY or OPENAI_API_KEY or has_deepseek)
 
 
-def _fallback_openai(prompt: str, has_deepseek: bool) -> Optional[str]:
-    """Reintenta con OpenAI/OpenRouter/DeepSeek. None si no aplica o falla."""
+def _fallback_openai(prompt: str, has_deepseek: bool) -> tuple:
+    """Reintenta con OpenAI/OpenRouter/DeepSeek. (None, error) si falla."""
     if not _hay_fallback_openai(has_deepseek):
-        return None
+        return None, None
     try:
-        return llamar_openai_compatible(prompt)
-    except Exception:
-        logger.exception("Fallback OpenAI/OpenRouter/DeepSeek falló")
-        return None
+        return llamar_openai_compatible(prompt), None
+    except Exception as exc:
+        logger.exception("Fallback OpenAI/OpenRouter/DeepSeek falló: %s", _mensaje_error_proveedor(exc))
+        return None, exc
+
+
+def _error_sin_fallback(proveedor: str, exc: Exception, exc_alt) -> IAError:
+    """Arma el IAError final encadenando el detalle del primario y del alternativo."""
+    detalle = f"proveedor={proveedor} primario: {_mensaje_error_proveedor(exc)}"
+    if exc_alt is not None:
+        detalle += f" | alternativo: {_mensaje_error_proveedor(exc_alt)}"
+    return IAError(f"Error en API de IA ({detalle})")
 
 
 def _llamar_con_fallback(prompt: str, proveedor: str) -> str:
-    """Llamada LLM con fallback robusto: reintenta alternativos si el primario falla."""
+    """Llamada LLM con fallback robusto: reintenta alternativos si el primario falla.
+
+    Si todos fallan, relanza IAError encadenando la excepción original
+    (`from exc`) — nunca un `raise` suelto fuera del bloque except (que
+    provocaba RuntimeError: No active exception to reraise).
+    """
     has_deepseek = bool(os.getenv("DEEPSEEK_API_KEY", ""))
     try:
         return _llamar_proveedor_primario(prompt)
-    except Exception:
+    except Exception as exc:
         logger.exception("Fallo llamada LLM proveedor=%s, intentando fallback alternativo", proveedor)
-    fallback = _fallback_anthropic(prompt, proveedor)
-    if fallback is None:
-        fallback = _fallback_openai(prompt, has_deepseek)
-    if fallback is None:
-        raise
-    return fallback
+        resultado_alt, error_alt = _fallback_anthropic(prompt, proveedor)
+        if resultado_alt is None:
+            resultado_alt, error_alt = _fallback_openai(prompt, has_deepseek)
+        if resultado_alt is None:
+            raise _error_sin_fallback(proveedor, exc, error_alt) from exc
+        return resultado_alt
 
 
 def _es_clip_objeto(obj: dict) -> bool:
