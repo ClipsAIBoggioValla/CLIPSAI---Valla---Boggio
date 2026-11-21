@@ -93,7 +93,8 @@ def create_sample_job(
         )
 
     # Copiar el video de muestra al directorio de uploads del usuario
-    upload_dir = Path(os.getenv("UPLOAD_DIR", "storage/uploads"))
+    # Stateless (Koyeb/Cloud Run): storage efímero en /tmp — sin disco persistente.
+    upload_dir = Path(os.getenv("UPLOAD_DIR", "/tmp/clipsai/uploads"))
     try:
         upload_dir.mkdir(parents=True, exist_ok=True)
     except PermissionError:
