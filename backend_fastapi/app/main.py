@@ -119,7 +119,8 @@ async def lifespan(app: FastAPI):
     """Arranque: migraciones idempotentes y limpieza de storage; luego sirve la app."""
     _migrar_esquema()
 
-    # Limpieza de emergencia al arrancar: evita [Errno 28] en Render si el disco quedó lleno.
+    # Limpieza de emergencia al arrancar: evita que el storage efímero (/tmp/clipsai
+    # o STORAGE_DIR) crezca sin control entre reinicios del contenedor.
     _limpiar_storage_inicio()
 
     yield
@@ -266,7 +267,7 @@ def _limpiar_storage_inicio() -> None:
     try:
         from .services.storage_cleanup import cleanup_storage
 
-        freed_bytes = cleanup_storage()  # usa STORAGE_DIR/STORAGE_PATH o /var/data
+        freed_bytes = cleanup_storage()  # usa STORAGE_DIR/STORAGE_PATH o /tmp/clipsai
         logger.info("[STARTUP] Storage cleanup: liberó %.2f MB", freed_bytes / (1024 * 1024))
     except Exception as cleanup_err:
         logger.warning("[STARTUP] Storage cleanup falló (non-fatal): %s", cleanup_err)
