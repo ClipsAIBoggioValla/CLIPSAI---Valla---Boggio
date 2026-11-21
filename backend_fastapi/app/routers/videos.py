@@ -142,7 +142,8 @@ MAX_FILE_SIZE = 500 * 1024 * 1024
 
 
 def _get_upload_dir() -> Path:
-    base = Path(os.getenv("UPLOAD_DIR", "/storage/uploads"))
+    # Stateless (Koyeb/Cloud Run): storage efímero en /tmp — sin disco persistente.
+    base = Path(os.getenv("UPLOAD_DIR", "/tmp/clipsai/uploads"))
     try:
         base.mkdir(parents=True, exist_ok=True)
     except PermissionError:
