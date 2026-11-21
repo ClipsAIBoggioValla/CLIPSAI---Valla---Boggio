@@ -16,6 +16,47 @@ if not logger.handlers:
     logger.addHandler(_handler)
 logger.setLevel(logging.INFO)
 
+FFMPEG_BIN = "/usr/local/bin/ffmpeg"
+
+# Sondeo de NVENC memoizado: se corre `ffmpeg -encoders` UNA vez por proceso
+# solo si RUNPOD_GPU está activo (issue: render GPU). Sin GPU env -> libx264
+# directo, sin subprocess extra (local y tests quedan byte-a-byte iguales).
+_probe_nvenc_cache: bool | None = None
+
+_GPU_ENV_ACTIVO = ("1", "true", "yes")
+
+
+def _sondear_nvenc() -> bool:
+    """True si el binario ffmpeg lista el encoder h264_nvenc (sin driver en build)."""
+    if os.environ.get("RUNPOD_GPU", "").lower() not in _GPU_ENV_ACTIVO:
+        return False
+    try:
+        result = subprocess.run(
+            [FFMPEG_BIN, "-hide_banner", "-encoders"],
+            capture_output=True, text=True, timeout=15,
+        )
+        return "h264_nvenc" in (result.stdout or "")
+    except Exception as exc:
+        logger.warning("[video_processor] Sondeo NVENC falló: %s", exc)
+        return False
+
+
+def _nvenc_disponible() -> bool:
+    """Resultado memoizado del sondeo NVENC (1 probe por proceso)."""
+    global _probe_nvenc_cache
+    if _probe_nvenc_cache is None:
+        _probe_nvenc_cache = _sondear_nvenc()
+        estado = "h264_nvenc (GPU)" if _probe_nvenc_cache else "libx264 (CPU)"
+        logger.info("[video_processor] Encoder de video seleccionado: %s", estado)
+    return _probe_nvenc_cache
+
+
+def _args_codec_video(quality: str) -> list:
+    """Args del codec de video: nvenc (-preset p4 -cq) con GPU; libx264 ultrafast sin GPU."""
+    if _nvenc_disponible():
+        return ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", quality, "-b:v", "0"]
+    return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", quality]
+
 
 def generate_ass_from_segments(
     segments: List[Dict[str, Any]],
@@ -308,6 +349,11 @@ def _verificar_salida_reframe(result, output_video: str) -> bool:
     return True
 
 
+def _stderr_tail(result) -> str:
+    """Cola del stderr de ffmpeg para logging (hasta 3000 chars)."""
+    return (result.stderr or "")[-3000:]
+
+
 def _ejecutar_ffmpeg_reframe(command: list, timeout_seconds: int, output_video: str) -> bool:
     """Corre ffmpeg y loguea stderr completo; valida el output generado."""
     try:
@@ -319,7 +365,7 @@ def _ejecutar_ffmpeg_reframe(command: list, timeout_seconds: int, output_video: 
         )
 
         # stderr SIEMPRE se loguea (no solo al fallar) para ver warnings de libass/ffmpeg
-        stderr_tail = (result.stderr or "")[-3000:]
+        stderr_tail = _stderr_tail(result)
         logger.info("[video_processor] ffmpeg stderr (rc=%s):\n%s", result.returncode, stderr_tail if stderr_tail.strip() else "<vacío>")
 
         return _verificar_salida_reframe(result, output_video)
@@ -330,6 +376,22 @@ def _ejecutar_ffmpeg_reframe(command: list, timeout_seconds: int, output_video: 
     except Exception as e:
         logger.error("[video_processor] Excepción: %s", e)
         return False
+
+
+def _comando_reframe(input_video: str, output_video: str, vf: str, codec_args: list) -> list:
+    """Comando ffmpeg completo del reframe 9:16 con los codec args dados."""
+    return [
+        FFMPEG_BIN,
+        "-y",
+        "-i", input_video,
+        "-vf", vf,
+        *codec_args,
+        "-threads", "1",
+        "-c:a", "aac",
+        "-b:a", "128k",
+        "-movflags", "+faststart",
+        output_video
+    ]
 
 
 def reframe_and_burn_subtitles(
@@ -363,27 +425,62 @@ def reframe_and_burn_subtitles(
 
     vf = ",".join(filters)
 
-    command = [
-        "/usr/local/bin/ffmpeg",
-        "-y",
-        "-i", input_video,
-        "-vf", vf,
-        "-c:v", "libx264",
-        "-preset", "ultrafast",
-        "-crf", "20",
-        "-threads", "1",
-        "-c:a", "aac",
-        "-b:a", "128k",
-        "-movflags", "+faststart",
-        output_video
-    ]
+    # NVENC con fallback de runtime: si el encode GPU falla (driver sin
+    # libnvidia-encode, driver viejo), se reintenta UNA vez con libx264.
+    codec_args = _args_codec_video("20")
+    command = _comando_reframe(input_video, output_video, vf, codec_args)
 
     logger.info("[video_processor] Reframe vertical + subs + hook...")
     logger.info("[video_processor] Filtros: %s...", vf[:200])
     logger.info("[video_processor] Comando ffmpeg COMPLETO: %s", " ".join(command))
     _log_filtergraph(vf)
 
-    return _ejecutar_ffmpeg_reframe(command, timeout_seconds, output_video)
+    exito = _ejecutar_ffmpeg_reframe(command, timeout_seconds, output_video)
+    if not exito and "h264_nvenc" in codec_args:
+        logger.warning("[video_processor] Encode NVENC falló — retry con libx264 (CPU)")
+        fallback = _comando_reframe(input_video, output_video, vf, _args_codec_video_libx264("20"))
+        exito = _ejecutar_ffmpeg_reframe(fallback, timeout_seconds, output_video)
+    return exito
+
+
+def _args_codec_video_libx264(quality: str) -> list:
+    """Args libx264 explícitos para el fallback (sin depender del probe)."""
+    return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", quality]
+
+
+def _corte_ok(returncode: int, horizontal_clip: str) -> bool:
+    """Corte exitoso: rc=0 y archivo intermedio presente."""
+    return returncode == 0 and os.path.exists(horizontal_clip)
+
+
+def _cortar_clip_horizontal(input_video: str, horizontal_clip: str, clip_start: float, duration: float) -> bool:
+    """Corta el clip horizontal intermedio; nvenc con retry único a libx264.
+
+    -threads 2 acota el CPU por ffmpeg para no saturar la máquina cuando el
+    handler renderiza 3 clips en paralelo.
+    """
+    intentos = [_args_codec_video("18")]
+    if "h264_nvenc" in intentos[0]:
+        intentos.append(_args_codec_video_libx264("18"))
+    for codec_args in intentos:
+        cmd = [
+            FFMPEG_BIN,
+            "-y",
+            "-ss", str(clip_start),
+            "-i", input_video,
+            "-t", str(duration),
+            *codec_args,
+            "-threads", "2",
+            "-c:a", "aac",
+            "-movflags", "+faststart",
+            horizontal_clip
+        ]
+        logger.info("[video_processor] Cortando clip %.1fs (+%.1fs)...", clip_start, duration)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if _corte_ok(result.returncode, horizontal_clip):
+            return True
+        logger.error("[video_processor] Corte FAILED (rc=%s)", result.returncode)
+    return False
 
 
 def process_clip_vertical(
@@ -411,28 +508,10 @@ def process_clip_vertical(
     with tempfile.TemporaryDirectory() as tmpdir:
         horizontal_clip = os.path.join(tmpdir, "horizontal.mp4")
         ass_file = os.path.join(tmpdir, "subtitles.ass")
-        
-        # Cortar con ffmpeg
+
+        # Cortar con ffmpeg (codec seleccionado + retry; sin re-encode CPU si hay GPU)
         duration = clip_end - clip_start
-        cut_cmd = [
-            "/usr/local/bin/ffmpeg",
-            "-y",
-            "-ss", str(clip_start),
-            "-i", input_video,
-            "-t", str(duration),
-            "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-crf", "18",
-            "-c:a", "aac",
-            "-movflags", "+faststart",
-            horizontal_clip
-        ]
-        
-        logger.info("[video_processor] Cortando clip %.1fs - %.1fs...", clip_start, clip_end)
-        result = subprocess.run(cut_cmd, capture_output=True, text=True, timeout=120)
-        
-        if result.returncode != 0 or not os.path.exists(horizontal_clip):
-            logger.error("[video_processor] Corte FAILED")
+        if not _cortar_clip_horizontal(input_video, horizontal_clip, clip_start, duration):
             return False
         
         # 2. Generar ASS (incluye el hook como primer evento estilo Hook 0-3s)
