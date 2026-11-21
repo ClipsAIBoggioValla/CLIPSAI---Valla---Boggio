@@ -20,6 +20,7 @@ if str(REPO_ROOT) not in sys.path:
 import main as main_mod  # noqa: E402
 import engine as engine_mod  # noqa: E402
 import video_processor as vp_mod  # noqa: E402
+import whisper_transcriber as wt_mod  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -532,3 +533,53 @@ class TestCodecSeleccion:
         assert len(llamadas) >= 2
         assert "h264_nvenc" in llamadas[0]
         assert any("libx264" in cmd for cmd in llamadas[1:])
+
+# ------------------------------------------------------------------ cache whisper (worker)
+
+
+class TestCacheWhisper:
+    """Fallback de cache HF: /runpod-volume solo si montado+escribible; si no /tmp/cache."""
+
+    def test_sin_volumen_usa_tmp(self, monkeypatch) -> None:
+        monkeypatch.setattr(wt_mod.os.path, "isdir", lambda p: False)
+        assert wt_mod._directorio_cache_hf() == wt_mod._CACHE_HF_DEFAULT
+
+    def test_volumen_montado_pero_no_escribible_usa_tmp(self, monkeypatch) -> None:
+        monkeypatch.setattr(wt_mod.os.path, "isdir", lambda p: True)
+        monkeypatch.setattr(wt_mod.os, "access", lambda p, m: False)
+        assert wt_mod._directorio_cache_hf() == wt_mod._CACHE_HF_DEFAULT
+
+    def test_volumen_montado_y_escribible_usa_volumen(self, monkeypatch) -> None:
+        monkeypatch.setattr(wt_mod.os.path, "isdir", lambda p: True)
+        monkeypatch.setattr(wt_mod.os, "access", lambda p, m: True)
+        makedirs = Mock()
+        monkeypatch.setattr(wt_mod.os, "makedirs", makedirs)
+        assert wt_mod._directorio_cache_hf() == wt_mod._CACHE_HF_VOLUMEN
+        makedirs.assert_not_called()  # no toca /tmp si usa el volumen
+
+    def test_permiso_denegado_al_crear_tmp_no_explota(self, monkeypatch) -> None:
+        monkeypatch.setattr(wt_mod.os.path, "isdir", lambda p: False)
+        monkeypatch.setattr(wt_mod.os, "makedirs", Mock(side_effect=PermissionError(13, "denied")))
+        assert wt_mod._directorio_cache_hf() == wt_mod._CACHE_HF_DEFAULT
+
+    def test_download_root_se_pasa_a_whisper_model(self, monkeypatch, tmp_path) -> None:
+        """transcribir_audio invoca WhisperModel con download_root del helper."""
+        construidos = []
+
+        class FakeWhisper:
+            def __init__(self, model_id, device=None, compute_type=None, download_root=None, local_files_only=False):
+                construidos.append({"model_id": model_id, "download_root": download_root})
+
+        monkeypatch.setattr(wt_mod, "_importar_faster_whisper", lambda: FakeWhisper)
+        monkeypatch.setattr(wt_mod, "detectar_device", lambda force_gpu: ("cuda", "float16"))
+        monkeypatch.setattr(wt_mod, "_resolver_modelo", lambda m: ("fake/model", "/no/existe"))
+        monkeypatch.setattr(wt_mod, "_log_descarga_modelo", lambda cache, mid: None)
+        monkeypatch.setattr(wt_mod, "_transcribir_segmentos", lambda model, audio, idioma, salida: salida)
+        monkeypatch.setattr(wt_mod.os.path, "isdir", lambda p: False)
+        monkeypatch.setattr(wt_mod.os, "makedirs", lambda p, exist_ok=False: None)
+        salida = tmp_path / "t.txt"
+        resultado = wt_mod.transcribir_audio(str(tmp_path / "a.wav"), str(salida))
+        assert resultado == str(salida)
+        assert len(construidos) == 1
+        assert construidos[0]["download_root"] == wt_mod._CACHE_HF_DEFAULT
+        assert construidos[0]["model_id"] == "fake/model"
