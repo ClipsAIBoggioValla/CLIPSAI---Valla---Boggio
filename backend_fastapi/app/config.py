@@ -52,6 +52,21 @@ def _apunta_a_db(url: str) -> bool:
     return "@db:" in url or "@db/" in url
 
 
+def _normalizar_esquema_db(url: str) -> str:
+    """Normaliza prefijos de proveedores de nube al dialecto explícito SQLAlchemy.
+
+    Neon / Render / Supabase entregan DATABASE_URL como `postgres://` o
+    `postgresql://`; el driver del proyecto es psycopg2 (psycopg2-binary), así
+    que se reescribe a `postgresql+psycopg2://`. Los query params (p. ej.
+    `?sslmode=require` de Neon) se preservan: solo se reemplaza el esquema.
+    """
+    if url.startswith("postgres://"):
+        return "postgresql+psycopg2://" + url[len("postgres://"):]
+    if url.startswith("postgresql://"):
+        return "postgresql+psycopg2://" + url[len("postgresql://"):]
+    return url
+
+
 def _resolve_db_host(url: str) -> str:
     if _is_docker() and _apunta_a_local(url):
         return url.replace("@127.0.0.1:", "@db:").replace("@localhost:", "@db:").replace("@127.0.0.1/", "@db/")
@@ -93,7 +108,11 @@ class Settings(BaseSettings):
     )
 
     def model_post_init(self, __context):  # type: ignore[override]
-        object.__setattr__(self, "database_url", _resolve_db_host(self.database_url))
+        object.__setattr__(
+            self,
+            "database_url",
+            _resolve_db_host(_normalizar_esquema_db(self.database_url)),
+        )
         # Forzar que callbacks usen PUBLIC_BACKEND_URL como base si aún contienen URLs temporales antiguas
         base = self.public_backend_url.rstrip("/") if self.public_backend_url else "https://api.clipsai.xyz"
         self._normalizar_callbacks(base)

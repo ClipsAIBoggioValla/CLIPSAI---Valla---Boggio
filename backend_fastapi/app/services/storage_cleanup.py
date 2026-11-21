@@ -1,6 +1,6 @@
-"""Limpieza de archivos locales en el disco persistente de Render.
+"""Limpieza de archivos locales en el almacenamiento efímero del contenedor.
 
-Evita que /var/data se llene con uploads y clips acumulados.
+Evita que /tmp/clipsai (o el STORAGE_DIR configurado) crezca sin control.
 Se usa desde 3 puntos:
   - startup de FastAPI (limpieza inicial)
   - finally de cada job (limpieza post-job)
@@ -25,9 +25,16 @@ def _resolve_base_path(base_path: Optional[str]) -> Path:
     candidate = (
         os.environ.get("STORAGE_DIR")
         or os.environ.get("STORAGE_PATH")
-        or "/var/data"
+        or "/tmp/clipsai"
     )
-    return Path(candidate)
+    base = Path(candidate)
+    # Contenedor stateless: garantizar que la base exista para no depender del
+    # disco persistente (Render) — Koyeb / Cloud Run solo tienen /tmp efímero.
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+    except Exception:  # no fatal: cleanup() tolera base inexistente
+        logger.warning("No se pudo crear el directorio de storage %s", base)
+    return base
 
 
 def _archivos_de_subcarpeta(child: Path) -> list[Path]:
@@ -145,7 +152,7 @@ def cleanup_storage(
     """Limpia archivos locales viejos o excesivos.
 
     Reglas:
-      a) base_path por defecto = STORAGE_DIR o STORAGE_PATH env, o "/var/data".
+      a) base_path por defecto = STORAGE_DIR o STORAGE_PATH env, o "/tmp/clipsai".
       b) Recorre subcarpetas (uploads, clips, temp, tmp) y archivos .mp4/.ass/.mp3
          sueltos; borra los con mtime > max_age_hours.
       c) Si el total restante supera max_total_mb, borra los más viejos primero

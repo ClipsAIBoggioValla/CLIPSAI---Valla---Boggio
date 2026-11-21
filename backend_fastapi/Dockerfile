@@ -25,9 +25,10 @@ RUN pip install -r requirements.txt
 
 COPY app ./app
 
-# Storage persistente para clips renderizados
-RUN mkdir -p /app/storage/clips /app/storage/uploads \
-    && chmod -R 777 /app/storage
+# Storage efímero stateless (Koyeb / Google Cloud Run): clips y uploads en /tmp.
+# Sin disco persistente — los archivos finales viven en R2 (videos.clipsai.xyz).
+RUN mkdir -p /tmp/clipsai/clips /tmp/clipsai/uploads \
+    && chmod -R 777 /tmp/clipsai
 
 EXPOSE 8000
 

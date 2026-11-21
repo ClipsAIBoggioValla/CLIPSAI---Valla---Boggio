@@ -89,9 +89,10 @@ def _resolve_storage_dir() -> Path:
     env_dir = os.getenv("STORAGE_CLIPS_DIR", "").strip()
     if env_dir:
         return _crear_dir(Path(env_dir))
-    # Docker: /.dockerenv existe
-    if Path("/.dockerenv").exists():
-        return _crear_dir(Path("/app/storage/clips"))
+    # Contenedor (Docker/Koyeb/Cloud Run): Koyeb y Cloud Run NO garantizan
+    # /.dockerenv, pero ambos setean PORT → contenedor stateless → /tmp efímero.
+    if Path("/.dockerenv").exists() or os.getenv("PORT"):
+        return _crear_dir(Path("/tmp/clipsai/clips"))
     # Local dev: <repo_root>/storage/clips — resolución segura sin parents[3] fijo
     cur = Path(__file__).resolve()
     repo_root = _raiz_repo_local(cur)
