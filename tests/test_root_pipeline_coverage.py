@@ -583,3 +583,59 @@ class TestCacheWhisper:
         assert len(construidos) == 1
         assert construidos[0]["download_root"] == wt_mod._CACHE_HF_DEFAULT
         assert construidos[0]["model_id"] == "fake/model"
+
+
+# ------------------------------------------------------------------ llm fallback (main.py)
+
+
+class TestLLMFallback:
+    """Fallback LLM sin RuntimeError 'No active exception to reraise'."""
+
+    def test_primario_falla_fallback_exitoso(self, monkeypatch: Any) -> None:
+        monkeypatch.setattr(
+            main_mod, "_llamar_proveedor_primario",
+            Mock(side_effect=ConnectionError("Error 429: rate limit")),
+        )
+        monkeypatch.setattr(main_mod, "_fallback_anthropic", lambda p, prov: ("respuesta", None))
+        assert main_mod._llamar_con_fallback("prompt", "OpenRouter") == "respuesta"
+
+    def test_ambos_fallan_lanza_iaerror_encadenado(self, monkeypatch: Any) -> None:
+        primario_exc = ConnectionError("Error 500: boom")
+        alt_exc = ConnectionError("Error 503: caido")
+        monkeypatch.setattr(main_mod, "_llamar_proveedor_primario", Mock(side_effect=primario_exc))
+        monkeypatch.setattr(main_mod, "_fallback_anthropic", lambda p, prov: (None, alt_exc))
+        monkeypatch.setattr(main_mod, "_fallback_openai", lambda p, h: (None, alt_exc))
+        with pytest.raises(main_mod.IAError) as excinfo:
+            main_mod._llamar_con_fallback("prompt", "OpenRouter")
+        mensaje = str(excinfo.value)
+        assert "500" in mensaje  # status del primario en el mensaje final
+        assert "503" in mensaje  # detalle del alternativo
+        assert "No active exception" not in mensaje
+        assert isinstance(excinfo.value.__cause__, ConnectionError)  # encadenado `from exc`
+
+    def test_sin_fallbacks_disponibles_iaerror_solo_primario(self, monkeypatch: Any) -> None:
+        monkeypatch.setattr(
+            main_mod, "_llamar_proveedor_primario",
+            Mock(side_effect=ConnectionError("Error 401: bad key")),
+        )
+        monkeypatch.setattr(main_mod, "_fallback_anthropic", lambda p, prov: (None, None))
+        monkeypatch.setattr(main_mod, "_fallback_openai", lambda p, h: (None, None))
+        with pytest.raises(main_mod.IAError, match="401"):
+            main_mod._llamar_con_fallback("prompt", "Claude (Anthropic)")
+
+    def test_fallback_anthropic_no_aplica_si_primario_era_claude(self, monkeypatch: Any) -> None:
+        llamado = Mock(return_value="texto")
+        monkeypatch.setattr(main_mod, "llamar_claude", llamado)
+        resultado, error = main_mod._fallback_anthropic("prompt", "Claude (Anthropic)")
+        assert resultado is None and error is None
+        llamado.assert_not_called()
+
+    def test_mensaje_error_proveedor_incluye_status_directo(self) -> None:
+        exc = ConnectionError("Error 429: rate limit")
+        exc.status_code = 429
+        assert "status=429" in main_mod._mensaje_error_proveedor(exc)
+
+    def test_mensaje_error_proveedor_incluye_status_por_response(self) -> None:
+        exc = ConnectionError("boom")
+        exc.response = SimpleNamespace(status_code=502)
+        assert "status=502" in main_mod._mensaje_error_proveedor(exc)
