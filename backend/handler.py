@@ -13,6 +13,7 @@ import os
 import sys
 import tempfile
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlparse
@@ -394,18 +395,28 @@ def _procesar_clip_vertical(video_path: str, transcription_segments: list, clip:
     return _subir_clip_a_r2(vertical_path, idx, bucket, video_id, clip, clip_start, clip_end)
 
 
+MAX_RENDER_WORKERS = 3
+
+
 def _procesar_clips_verticales(video_path: str, transcription_segments: list, clips: list, bucket: str, video_id: str) -> list:
-    """Procesa todos los clips horizontales a verticales 9:16 y los sube a R2."""
-    clips_verticales = []
+    """Procesa los clips en paralelo (ThreadPoolExecutor) preservando el orden.
 
-    for idx, clip in enumerate(clips):
-        logger.info("Procesando clip %s/%s...", idx + 1, len(clips))
+    El trabajo es subprocess-bound (ffmpeg/R2), así que threads no compiten por
+    el GIL; cada clip usa su propio TemporaryDirectory y paths únicos, sin
+    colisiones entre workers.
+    """
+    with ThreadPoolExecutor(max_workers=MAX_RENDER_WORKERS) as pool:
+        futures = {
+            idx: pool.submit(_procesar_clip_vertical, video_path, transcription_segments, clip, idx, bucket, video_id)
+            for idx, clip in enumerate(clips)
+        }
+        resultados = [futuro.result() for futuro in futures.values()]
+    return _filtrar_verticales(resultados)
 
-        vertical = _procesar_clip_vertical(video_path, transcription_segments, clip, idx, bucket, video_id)
-        if vertical is not None:
-            clips_verticales.append(vertical)
 
-    return clips_verticales
+def _filtrar_verticales(resultados: list) -> list:
+    """Descarta los Nones (clips fallidos) preservando el orden original."""
+    return [resultado for resultado in resultados if resultado is not None]
 
 
 def process_video_job(job: dict[str, Any]) -> dict[str, Any]:
