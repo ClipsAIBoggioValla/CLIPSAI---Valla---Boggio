@@ -16,11 +16,14 @@ WORKDIR /app
 # Instalar curl + fuentes para libass: el ffmpeg estático renderiza ASS vía
 # fontconfig; sin fuentes .ttf instaladas los subtítulos/hook salen invisibles (rc=0).
 # fonts-noto-color-emoji: emojis a color en subtítulos (issue #117) — DejaVu no los renderiza.
+# xz-utils: OBLIGATORIO para extraer el .tar.xz de BtbN FFmpeg (no asumir que
+# la base conda lo trae; el build viejo dependía del xz de la base 2.1.0).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         fonts-dejavu-core \
         fonts-noto-color-emoji \
         fontconfig \
+        xz-utils \
     && fc-cache -f \
     && rm -rf /var/lib/apt/lists/*
 
