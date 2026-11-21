@@ -64,7 +64,7 @@ RUN python --version \
     && /usr/local/bin/ffprobe -version
 
 # Instalar dependencias del worker (requirements-worker.txt):
-# set completo para el pipeline GPU — librosa/faster-whisper/whisperx (audio+STT),
+# set completo para el pipeline GPU — librosa/faster-whisper/ctranslate2 (audio+STT),
 # mediapipe/opencv/scenedetect (visión #118), yt-dlp (ingesta #119),
 # instructor/litellm (LLM estructurado), pysubs2/emoji (subs #117).
 # Nota: PyTorch/CUDA vienen de la imagen base; NO usar backend_fastapi/requirements.txt
