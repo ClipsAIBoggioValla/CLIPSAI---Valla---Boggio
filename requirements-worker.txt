@@ -6,7 +6,8 @@
 # FFmpeg es el binario estático de johnvansickle (con libx264), no ffmpeg-python.
 #
 # Cambios v29 (chore/worker-deps-v29):
-#  - whisperx / pysubs2 / emoji        → issues #117 (emojis + zoompan) y alineación de subtítulos
+#  - whisperx FUE ELIMINADO (conflicto ctranslate2<4.5 y sin uso en el repo);
+#    pysubs2/emoji cubren la alineación de subtítulos → issues #117
 #  - mediapipe / opencv-headless /
 #    scenedetect[opencv]              → issue #118 (podcast_split / gameplay_split + face-tracking #128)
 #  - yt-dlp / curl-cffi                → issue #119 (ingesta por URL desde el worker)
@@ -29,8 +30,10 @@ faster-whisper>=1.1.0
 # ctranslate2>=4.5.0 compila contra cuDNN 9 (necesario en la base
 # pytorch:2.7.1-cuda12.8-cudnn9-runtime y soporte RTX 50xx/Blackwell);
 # una 4.x vieja enlaza cudnn_ops_infer.so.8 -> SIGABRT (exit code 134).
+# NOTA: whisperx FUE ELIMINADO: exige ctranslate2<4.5.0 (ResolutionImpossible
+# contra el pin de arriba) y no se importa en ningún módulo del repo; su
+# alineación de subtítulos se resuelve con pysubs2 + ass_generator.
 ctranslate2>=4.5.0
-whisperx>=3.1.5
 
 # --- Subtítulos y video ---
 pysubs2>=1.7.3
