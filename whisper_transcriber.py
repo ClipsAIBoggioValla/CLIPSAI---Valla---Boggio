@@ -267,6 +267,34 @@ def _importar_faster_whisper():
     return WhisperModel
 
 
+# Cache de modelos HF: /runpod-volume solo si el Network Volume está montado
+# Y escribible; si no, /tmp/cache (grabable por el usuario no-root). Escribir
+# en /runpod-volume no-montado lanza [Errno 13] Permission denied.
+_CACHE_HF_VOLUMEN = "/runpod-volume/huggingface"
+_CACHE_HF_DEFAULT = "/tmp/cache/huggingface"
+
+
+def _volume_utilizable(ruta: str) -> bool:
+    """True si la ruta del Network Volume existe y es escribible por este usuario."""
+    return os.path.isdir(ruta) and os.access(ruta, os.W_OK)
+
+
+def _directorio_cache_hf() -> str:
+    """Directorio de cache de HuggingFace con fallback automático.
+
+    Usa /runpod-volume/huggingface SOLO si el Network Volume está montado y
+    escribible (isdir + os.access W_OK); cualquier otro caso cae a /tmp/cache,
+    que el Dockerfile crea con permisos a+rwX para el usuario no-root.
+    """
+    if _volume_utilizable(_CACHE_HF_VOLUMEN):
+        return _CACHE_HF_VOLUMEN
+    try:
+        os.makedirs(_CACHE_HF_DEFAULT, exist_ok=True)
+    except Exception:  # no fatal: HF maneja directorio inexistente creándolo
+        pass
+    return _CACHE_HF_DEFAULT
+
+
 def _resolver_modelo(modelo: str) -> tuple:
     """(model_id, ruta_cache) según el modelo pedido y el cache local."""
     model_name = MODELO_MAPA.get(modelo, "deepdml/faster-whisper-large-v3-turbo-ct2")
@@ -359,7 +387,13 @@ def transcribir_audio(
 
     try:
         _log_descarga_modelo(whisper_model_cache, model_id)
-        model = WhisperModel(model_id, device=device, compute_type=compute_type, local_files_only=False)
+        model = WhisperModel(
+            model_id,
+            device=device,
+            compute_type=compute_type,
+            download_root=_directorio_cache_hf(),
+            local_files_only=False,
+        )
 
         return _transcribir_segmentos(model, audio_path, idioma, salida)
 
@@ -390,7 +424,13 @@ def transcribir_video(
 
     try:
         _log_descarga_modelo(whisper_model_cache, model_id)
-        model = WhisperModel(model_id, device=device, compute_type=compute_type, local_files_only=False)
+        model = WhisperModel(
+            model_id,
+            device=device,
+            compute_type=compute_type,
+            download_root=_directorio_cache_hf(),
+            local_files_only=False,
+        )
 
         _transcribir_segmentos(model, audio_temp, idioma, salida)
 
