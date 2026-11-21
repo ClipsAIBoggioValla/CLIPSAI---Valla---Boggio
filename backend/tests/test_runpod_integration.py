@@ -81,6 +81,10 @@ class RunPodHandlerTests(unittest.TestCase):
                 patch.dict(sys.modules, {"engine": engine, "video_processor": video_processor}),
                 patch("backend.handler._download_file", side_effect=fake_download),
                 patch("backend.handler._upload_to_r2", return_value=url_r2) as upload,
+                patch(
+                    "backend.core.security.ssrf_guard.socket.getaddrinfo",
+                    lambda h, *a, **k: [((2, 1, 0, "", (h, 0)))],
+                ),
             ):
                 result = process_video_job(
                     {
@@ -132,6 +136,10 @@ class RunPodHandlerTests(unittest.TestCase):
                 patch.dict(sys.modules, {"engine": engine}),
                 patch("backend.handler._download_file", side_effect=fake_download),
                 patch("backend.handler._upload_to_r2") as upload,
+                patch(
+                    "backend.core.security.ssrf_guard.socket.getaddrinfo",
+                    lambda h, *a, **k: [((2, 1, 0, "", (h, 0)))],
+                ),
             ):
                 result = process_video_job(
                     {"input": {"video_url": "https://media.example/video.mp4", "video_id": "video-456"}}
