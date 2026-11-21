@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import ipaddress
+import logging
 import socket
 from urllib.parse import urlparse
 
+logger = logging.getLogger("clipsai.ssrf")
 
 BLOCKED_CIDRS = [
     ipaddress.ip_network("127.0.0.0/8"),
@@ -16,6 +18,18 @@ BLOCKED_CIDRS = [
     ipaddress.ip_network("fe80::/10"),
     ipaddress.ip_network("ff00::/8"),
 ]
+
+# Hostnames que siempre apuntan a metadatos/servicios internos: bloqueados por
+# literal, ANTES de resolver DNS (issue #112).
+_HOSTNAMES_BLOQUEADOS = frozenset({"localhost", "metadata.google.internal"})
+
+# IP literal del IMDS de las nubes (AWS/GCP/Azure): se valida por literal para
+# no depender de la resolución DNS.
+_IMDS_LITERAL = "169.254.169.254"
+
+# Propiedades de ipaddress que marcan rangos no enrutables (regla BoolOp: la
+# cadena `or` de 5 operandos equivalía a CC 5; `any()` + tuple la baja a CC 2).
+_PROTECTORAS = ("is_loopback", "is_private", "is_link_local", "is_multicast", "is_reserved")
 
 
 class SSRFError(ValueError):
@@ -38,14 +52,12 @@ def _resolve_ips(hostname: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Ad
 
 def is_ip_blocked(ip: str | ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     addr = ipaddress.ip_address(ip) if isinstance(ip, str) else ip
-    if _esta_en_rangos_protectores(addr):
-        return True
-    return _esta_en_cidrs_bloqueados(addr)
+    return _esta_en_rangos_protectores(addr) or _esta_en_cidrs_bloqueados(addr)
 
 
 def _esta_en_rangos_protectores(addr) -> bool:
     """Loopback, privada, link-local, multicast o reservada = bloqueada."""
-    return addr.is_loopback or addr.is_private or addr.is_link_local or addr.is_multicast or addr.is_reserved
+    return any(getattr(addr, propiedad) for propiedad in _PROTECTORAS)
 
 
 def _esta_en_cidrs_bloqueados(addr) -> bool:
@@ -66,14 +78,28 @@ def validate_url(url: str) -> str:
 
 
 def _validar_hostname(hostname: str) -> None:
-    """Bloquea hostnames conocidos, el IMDS y las IPs resueltas privadas."""
-    if hostname.lower() in {"localhost", "metadata.google.internal"}:
+    """Bloquea hostnames conocidos, el IMDS literal (antes del DNS) e IPs privadas."""
+    _validar_hostname_literal(hostname)
+    _validar_dns_hostname(hostname)
+
+
+def _validar_hostname_literal(hostname: str) -> None:
+    """Chequeo por literal: sin tocar la red (localhost, metadata y IMDS)."""
+    lowered = hostname.lower()
+    if lowered in _HOSTNAMES_BLOQUEADOS:
+        logger.warning("Hostname bloqueado por el SSRF guard: %s", hostname)
         raise SSRFError(f"Hostname blocked: {hostname}")
+    if hostname == _IMDS_LITERAL:
+        logger.warning("IMDS bloqueado por el SSRF guard: %s", hostname)
+        raise SSRFError(f"{_IMDS_LITERAL} blocked (IMDS)")
+
+
+def _validar_dns_hostname(hostname: str) -> None:
+    """Resuelve DNS y bloquea si alguna IP resultante es privada/IMDS."""
     for ip in _resolve_ips(hostname):
         if is_ip_blocked(ip):
+            logger.warning("IP resuelta bloqueada (%s) para host %s", ip, hostname)
             raise SSRFError(f"Resolved IP blocked {ip} for host {hostname} (SSRF guard)")
-    if hostname == "169.254.169.254":
-        raise SSRFError("169.254.169.254 blocked (IMDS)")
 
 
 def assert_safe_url(url: str) -> None:
