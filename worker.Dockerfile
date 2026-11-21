@@ -29,19 +29,30 @@ RUN fc-list | grep -i "dejavu" \
     && fc-list | grep -i "noto color emoji" \
     || (echo "ERROR: fuentes DejaVu o Noto Color Emoji no instaladas — subs/hook/emojis invisibles" && exit 1)
 
-# Descargar FFmpeg estático con todos los codecs (incluido libx264)
-RUN curl -sSL https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz -o ffmpeg-release.tar.xz \
-    && tar -xf ffmpeg-release.tar.xz \
-    && mv ffmpeg-*-amd64-static/ffmpeg /usr/local/bin/ffmpeg \
-    && mv ffmpeg-*-amd64-static/ffprobe /usr/local/bin/ffprobe \
-    && rm -rf ffmpeg-release.tar.xz ffmpeg-*-amd64-static \
-    && chmod +x /usr/local/bin/ffmpeg /usr/local/bin/ffprobe
+# FFmpeg con NVENC: build BtbN linux64-gpl (--enable-ffnvcodec). El encoder
+# h264_nvenc queda registrado en el binario y carga libnvidia-encode.so.1 del
+# driver del host en runtime (RunPod lo inyecta) — no hace falta driver en build.
+# Release pinneado (reproducible) con fallback a master-latest si el asset cambia.
+RUN set -eux; \
+    BASE_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest"; \
+    URL_PINNED="$BASE_URL/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz"; \
+    URL_FALLBACK="$BASE_URL/ffmpeg-master-latest-linux64-gpl.tar.xz"; \
+    curl -fsSL -o ffmpeg.tar.xz "$URL_PINNED" || curl -fsSL -o ffmpeg.tar.xz "$URL_FALLBACK"; \
+    tar -xf ffmpeg.tar.xz; \
+    mv ffmpeg-*-gpl*/bin/ffmpeg /usr/local/bin/ffmpeg; \
+    mv ffmpeg-*-gpl*/bin/ffprobe /usr/local/bin/ffprobe; \
+    rm -rf ffmpeg.tar.xz ffmpeg-*-gpl*/; \
+    chmod +x /usr/local/bin/ffmpeg /usr/local/bin/ffprobe
 
 # Asegurar que /usr/local/bin esté primero en el PATH
 ENV PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH}"
 
-# Verificar que ffmpeg tenga libx264
-RUN /usr/local/bin/ffmpeg -encoders 2>/dev/null | grep libx264 || (echo "ERROR: libx264 no disponible" && exit 1)
+# Checks endurecidos: el binario BtbN debe listar AMBOS encoders (se listan
+# sin driver presente; la libnvidia-encode.so.1 se resuelve en runtime en RunPod).
+RUN /usr/local/bin/ffmpeg -hide_banner -encoders 2>/dev/null | grep -E "h264_nvenc" \
+    || (echo "ERROR: h264_nvenc no disponible en el binario BtbN" && exit 1)
+RUN /usr/local/bin/ffmpeg -hide_banner -encoders 2>/dev/null | grep -E "libx264" \
+    || (echo "ERROR: libx264 no disponible (fallback CPU roto)" && exit 1)
 
 # Verificar versiones y entorno
 RUN python --version \
