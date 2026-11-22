@@ -1139,3 +1139,57 @@ class TestHandlerRenderParalelo:
         salida = handler._procesar_clips_verticales("v.mp4", [], [object()] * 3, "bucket", "vid")
         assert [c["index"] for c in salida] == [0, 1, 2]
         assert pico[0] >= 2  # tareas superpuestas = ejecución paralela real
+
+
+# ---------------------------------------------------------------- issue 115 (paridad handler/engine)
+
+
+class TestHandlerParidadTranscripcion:
+    """Issue #115: transcript sin word-timestamps pasa INTACTO al engine (paridad local/RunPod)."""
+
+    def test_transcription_text_sin_timestamps_pasa_al_engine(self, tmp_path, monkeypatch) -> None:
+        import backend.handler as handler
+        from backend.handler import process_video_job
+
+        capturado: dict = {}
+
+        def fake_procesar(video_path, transcript_path):
+            capturado["transcripcion"] = Path(transcript_path).read_text(encoding="utf-8")
+            capturado["video"] = video_path
+            return SimpleNamespace(
+                exito=True, clips=[], carpeta_salida=str(tmp_path),
+                transcription_segments=[], error=None, error_tipo=None, error_detalle=None,
+            )
+
+        engine = types.ModuleType("engine")
+        engine.procesar_video = fake_procesar
+        videoprocessor = types.ModuleType("video_processor")
+        videoprocessor.process_clip_vertical = Mock(return_value=False)
+
+        with (
+            patch.dict(sys.modules, {"engine": engine, "video_processor": videoprocessor}),
+            patch.object(
+                handler, "_download_file",
+                Mock(side_effect=lambda url, destino, max_bytes: destino.write_bytes(b"video")),
+            ),
+            patch.object(handler, "_upload_to_r2", Mock(return_value="https://videos.clipsai.xyz/x/0.mp4")),
+            patch(
+                "backend.core.security.ssrf_guard.socket.getaddrinfo",
+                lambda h, *a, **k: [((2, 1, 0, "", (h, 0)))],
+            ),
+        ):
+            salida = process_video_job(
+                {
+                    "input": {
+                        "video_url": "https://x/v.mp4",
+                        "transcription_text": "hola\nmundo\nsin timestamps",
+                        "video_id": "v-par",
+                    }
+                }
+            )
+
+        assert salida["status"] == "COMPLETED"
+        # El handler NO exige word-timestamps ni duplica el fallback: el engine
+        # recibe el texto intacto y decide el auto-Whisper (_preparar_transcripcion).
+        assert capturado["transcripcion"] == "hola\nmundo\nsin timestamps"
+        assert capturado["video"].endswith("video.mp4")

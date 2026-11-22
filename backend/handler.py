@@ -309,14 +309,20 @@ def _resultado_fallo(result, video_id: str) -> dict[str, Any]:
 
 
 def _descargar_transcripcion(transcript_url: str | None, transcript_text: str | None, transcript_path: Path) -> None:
-    """Descarga la transcripción de la URL o escribe el texto provisto."""
+    """Descarga la transcripción de la URL o escribe el texto provisto.
+
+    Paridad local/RunPod (issue #115): el archivo pasa INTACTO al engine,
+    que resuelve el fallback de faster-whisper si la transcripción no trae
+    timestamps de palabra (criterio en engine._transcripcion_valida_provista).
+    El handler NO duplica esa lógica: un solo lugar de verdad (engine.py).
+    """
     # Descargar o escribir transcripcion
     if transcript_url:
         logger.info("Descargando transcripcion a %s...", transcript_path)
         _download_file(transcript_url, transcript_path, MAX_TRANSCRIPT_BYTES)
         logger.info("Transcripcion descargada: %s bytes", transcript_path.stat().st_size)
     else:
-        logger.info("Escribiendo transcripcion desde texto...")
+        logger.info("Escribiendo transcripcion desde texto (word-timestamps: engine decide fallback)...")
         transcript_path.write_text(transcript_text or "", encoding="utf-8")
 
 

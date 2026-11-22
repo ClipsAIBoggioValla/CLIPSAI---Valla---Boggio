@@ -10,6 +10,7 @@ la entrada/salida y el manejo de errores.
 """
 
 import os
+import re
 import sys
 import json
 import traceback
@@ -238,11 +239,44 @@ def _contenido_util_transcripcion(contenido: str) -> bool:
     return True
 
 
+# Línea de transcripción con timestamp: 'HH:MM:SS - texto' / 'M:SS - texto'.
+RE_LINEA_CON_TS = re.compile(r"^\s*\d{1,2}:\d{2}(:\d{2})?\s*-\s")
+
+
+def _transcripcion_con_timestamps(contenido: str) -> bool:
+    """True si todas las líneas traen timestamp (criterio issue #115).
+
+    Una transcripción 'texto plano' sin timestamps obliga al pipeline a usar
+    Whisper: los segmentos sin marcas temporales no permiten cortar clips.
+    """
+    lineas = _lineas_no_vacias(contenido)
+    return bool(lineas) and all(RE_LINEA_CON_TS.match(linea) for linea in lineas)
+
+
+def _validar_segmentos_parseados(contenido: str) -> None:
+    """Exige >=3 segmentos Y que traigan timestamps; si no, corresponde Whisper.
+
+    Raises:
+        ValueError: 'Muy pocos segmentos' o 'Transcripción sin timestamps'.
+    """
+    lineas = _lineas_no_vacias(contenido)
+    if len(lineas) < 3:
+        print(f"[engine] Solo {len(lineas)} segmentos. Usando Whisper...")
+        raise ValueError("Muy pocos segmentos")
+    if not _transcripcion_con_timestamps(contenido):
+        print("[engine] Transcripción sin timestamps de palabra (texto plano). Usando Whisper...")
+        raise ValueError("Transcripción sin timestamps")
+
+
 def _transcripcion_valida_provista(transcripcion_formatted: str) -> None:
     """Valida que la transcripción parseada tenga contenido utilizable.
 
+    Criterio (issue #115): la transcripción provista debe traer timestamps
+    a nivel de palabra/segmento; un .txt plano de N líneas dispara Whisper.
+
     Raises:
-        ValueError: si el archivo falta, está vacío o tiene muy pocos segmentos.
+        ValueError: si el archivo falta, está vacío, tiene muy pocos segmentos
+            o no trae timestamps.
     """
     print("[engine] Intentando parsear transcripción proporcionada...")
     if not os.path.exists(transcripcion_formatted):
@@ -255,13 +289,9 @@ def _transcripcion_valida_provista(transcripcion_formatted: str) -> None:
     if not _contenido_util_transcripcion(contenido):
         raise ValueError("Transcripción vacía")
 
-    # Contar líneas no vacías
-    lineas = _lineas_no_vacias(contenido)
-    if len(lineas) < 3:
-        print(f"[engine] Solo {len(lineas)} segmentos. Usando Whisper...")
-        raise ValueError("Muy pocos segmentos")
+    _validar_segmentos_parseados(contenido)
 
-    print(f"[engine] Transcripción válida: {len(lineas)} segmentos")
+    print(f"[engine] Transcripción válida: {len(_lineas_no_vacias(contenido))} segmentos")
 
 
 def _lineas_no_vacias(contenido: str) -> list[str]:

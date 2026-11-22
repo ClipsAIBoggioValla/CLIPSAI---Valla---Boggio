@@ -319,7 +319,9 @@ def _transcribir_segmentos(model, audio_path: str, idioma: str, salida: str) -> 
     segments_gen, info = model.transcribe(
         audio_path,
         language=idioma,
-        word_timestamps=False,
+        # word_timestamps=True (issue #115): el pipeline genera timestamps por
+        # palabra; el formato de salida 'HH:MM:SS - texto' queda idéntico.
+        word_timestamps=True,
         vad_filter=True,
         beam_size=5,
         temperature=0.0,
