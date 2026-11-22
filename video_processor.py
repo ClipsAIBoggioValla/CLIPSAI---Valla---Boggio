@@ -2,6 +2,7 @@
 
 import logging
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -17,6 +18,19 @@ if not logger.handlers:
 logger.setLevel(logging.INFO)
 
 FFMPEG_BIN = "/usr/local/bin/ffmpeg"
+
+# ---- Hook Teaser unificado con backend (issue #116) --------------------------
+TEASER_DURACION = 5.0          # teaser de video de 5s (mismo estándar que ffmpeg_service)
+ZOOM_TEASER = 1.08             # zoom leve sobre la ventana del hook
+VOLUMEN_SFX = 0.13             # whoosh ≤ -18 dB respecto al diálogo
+SFX_DURACION = 0.9
+SFX_LAVFI = "anoisesrc=color=pink:seed=20261122:amplitude=0.5"
+
+# Teaser vertical: crop 9:16 → 1080x1920 → B&W → zoom 1.08 (crop al tamaño final).
+FILTRO_TEASER_BW = (
+    "crop=ih*9/16:ih,scale=1080:1920,eq=saturation=0,"
+    "scale=1166:2074,crop=1080:1920,setsar=1"
+)
 
 # Sondeo de NVENC memoizado: se corre `ffmpeg -encoders` UNA vez por proceso
 # solo si RUNPOD_GPU está activo (issue: render GPU). Sin GPU env -> libx264
@@ -483,6 +497,91 @@ def _cortar_clip_horizontal(input_video: str, horizontal_clip: str, clip_start: 
     return False
 
 
+def _comando_teaser_bw(input_video: str, clip_start: float, teaser_path: str) -> list:
+    """ffmpeg: 5s del inicio del clip re-reproducidos en B&W con zoom 1.08 (9:16)."""
+    return [
+        FFMPEG_BIN, "-y",
+        "-ss", f"{clip_start:.3f}", "-i", input_video,
+        "-t", f"{TEASER_DURACION:.3f}",
+        "-vf", FILTRO_TEASER_BW,
+        *_args_codec_video("20"),
+        "-c:a", "aac", "-b:a", "128k",
+        "-movflags", "+faststart",
+        teaser_path,
+    ]
+
+
+def _stderr_de(result) -> str:
+    """Cola del stderr de ffmpeg para logging (hasta 800 chars)."""
+    return (result.stderr or "")[-800:]
+
+
+def _salida_ffmpeg_ok(result, path: str) -> bool:
+    """ffmpeg exitoso: rc=0 y archivo generado no vacío."""
+    return result.returncode == 0 and os.path.exists(path) and os.path.getsize(path) > 0
+
+
+def _generar_teaser_bw(input_video: str, clip_start: float, teaser_path: str) -> bool:
+    """Genera el teaser vertical B&W de 5s; False si ffmpeg falla o no produce archivo."""
+    result = subprocess.run(
+        _comando_teaser_bw(input_video, clip_start, teaser_path),
+        capture_output=True, text=True, timeout=300,
+    )
+    if not _salida_ffmpeg_ok(result, teaser_path):
+        logger.error("[video_processor] Teaser B&W FAILED (rc=%s): %s", result.returncode, _stderr_de(result))
+        return False
+    return True
+
+
+def _filtro_teaser_cuerpo() -> str:
+    """filter_complex del ensamble teaser(B&W)+cuerpo con SFX whoosh en la transición."""
+    fade = 0.1
+    delay_ms = int(max(0.0, TEASER_DURACION - SFX_DURACION + 0.25) * 1000)
+    return (
+        f"[0:v]fade=t=out:st={TEASER_DURACION - fade:.3f}:d={fade:.3f},setsar=1[v0];"
+        f"[1:v]fade=t=in:st=0:d={fade:.3f},setsar=1[v1];"
+        f"[0:a]afade=t=out:st={TEASER_DURACION - fade:.3f}:d={fade:.3f}[a0];"
+        f"[1:a]afade=t=in:st=0:d={fade:.3f}[a1];"
+        "[v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a];"
+        f"[2:a]volume={VOLUMEN_SFX},afade=t=in:st=0:d=0.08,"
+        f"afade=t=out:st={SFX_DURACION - 0.25:.3f}:d=0.25,adelay={delay_ms}|all=1[sfx];"
+        "[v][a][sfx]amix=inputs=2:duration=first:normalize=0[aout]"
+    )
+
+
+def _ensamblar_teaser_cuerpo(teaser_path: str, body_path: str, output_path: str) -> bool:
+    """Ensambla teaser(B&W 5s)+cuerpo a color con SFX whoosh (espejo de ffmpeg_service)."""
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        FFMPEG_BIN, "-y",
+        "-i", teaser_path, "-i", body_path,
+        "-f", "lavfi", "-t", f"{SFX_DURACION:.3f}", "-i", SFX_LAVFI,
+        "-filter_complex", _filtro_teaser_cuerpo(),
+        "-map", "[v]", "-map", "[aout]",
+        *_args_codec_video("20"),
+        "-c:a", "aac", "-b:a", "128k",
+        "-movflags", "+faststart",
+        output_path,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    if not _salida_ffmpeg_ok(result, output_path):
+        logger.error("[video_processor] Ensamble teaser+cuerpo FAILED (rc=%s): %s", result.returncode, _stderr_de(result))
+        return False
+    return True
+
+
+def _componer_teaser_worker(input_video: str, clip_start: float, body_path: str, output_video: str) -> bool:
+    """Teaser B&W 5s + ensamble; fallback: devolver solo el cuerpo a color si falla."""
+    with tempfile.TemporaryDirectory(prefix="teaser_worker_") as tdir:
+        teaser_path = os.path.join(tdir, "teaser.mp4")
+        if _generar_teaser_bw(input_video, clip_start, teaser_path):
+            if _ensamblar_teaser_cuerpo(teaser_path, body_path, output_video):
+                return True
+        logger.warning("[video_processor] Teaser/ensamble falló — devolviendo solo el cuerpo a color")
+        shutil.copyfile(body_path, output_video)
+        return os.path.exists(output_video) and os.path.getsize(output_video) > 0
+
+
 def process_clip_vertical(
     input_video: str,
     output_video: str,
@@ -513,15 +612,22 @@ def process_clip_vertical(
         duration = clip_end - clip_start
         if not _cortar_clip_horizontal(input_video, horizontal_clip, clip_start, duration):
             return False
-        
-        # 2. Generar ASS (incluye el hook como primer evento estilo Hook 0-3s)
-        generate_ass_from_segments(segments, clip_start, clip_end, ass_file, hook_text=hook_text)
-        
-        # 3. Reframe vertical + quemar subs + hook
-        return reframe_and_burn_subtitles(
+
+        # 2. ASS del cuerpo: subtítulos SOLO desde el cuerpo a color (issue #116).
+        # hook_text=None: el teaser es video B&W re-reproducido; el evento
+        # estilo Hook del ASS viejo (0-3s) queda solo para compatibilidad.
+        generate_ass_from_segments(segments, clip_start, clip_end, ass_file, hook_text=None)
+
+        # 3. Cuerpo vertical con subtítulos
+        body_path = os.path.join(tmpdir, "cuerpo.mp4")
+        if not reframe_and_burn_subtitles(
             horizontal_clip,
-            output_video,
+            body_path,
             ass_file=ass_file,
-            hook_text=hook_text,
+            hook_text=None,
             clip_start=clip_start
-        )
+        ):
+            return False
+
+        # 4. Teaser B&W 5s + ensamble (unificación worker/backend, issue #116)
+        return _componer_teaser_worker(input_video, clip_start, body_path, output_video)
