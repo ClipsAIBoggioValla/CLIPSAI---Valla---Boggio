@@ -4,6 +4,11 @@ import logging
 from pathlib import Path
 from typing import TypedDict
 
+# Banda del teaser estandarizado (issue #116) — misma constante que ffmpeg_service.
+HOOK_TEASER_MIN = 4.5
+HOOK_TEASER_MAX = 5.5
+TEASER_DURACION = 5.0
+
 logger = logging.getLogger(__name__)
 
 
@@ -199,11 +204,27 @@ def generate_ass_for_clip(
     return write_ass_file(segments, output_path, title=clip_title or "clipsai")
 
 
+def _normalizar_ventana(hook_start: float, hook_end: float, clip_start: float, clip_end: float) -> tuple[float, float]:
+    """Estandariza el teaser a ~5s recortado a la ventana del clip (issue #116).
+
+    Espejo de `ffmpeg_service._normalizar_ventana_hook`: así el shift del ASS
+    coincide SIEMPRE con el teaser que renderiza build_hook_clip, incluso si
+    el caller no normalizó antes.
+    """
+    dur = min(TEASER_DURACION, max(0.0, clip_end - clip_start))
+    inicio = min(max(hook_start, clip_start), max(clip_start, clip_end - dur))
+    return round(inicio, 3), round(inicio + dur, 3)
+
+
 def _validar_ventana_hook(hook_start: float, hook_end: float) -> None:
-    """Valida duración y rango del hook; ValueError si es inválido."""
+    """Valida duración y rango del hook; ValueError si es inválido.
+
+    Banda 4.5-5.5s (issue #116): la ventana ya llega normalizada a ~5s
+    (`_normalizar_ventana_hook` de ffmpeg_service) desde jobs/build_hook_clip.
+    """
     hook_dur = hook_end - hook_start
-    if not (2.5 < hook_dur < 5.5):
-        raise ValueError(f"Hook duracion {hook_dur:.3f}s debe estar estrictamente entre 2.5 y 5.5s")
+    if not (HOOK_TEASER_MIN < hook_dur < HOOK_TEASER_MAX):
+        raise ValueError(f"Hook duracion {hook_dur:.3f}s debe estar estrictamente entre {HOOK_TEASER_MIN} y {HOOK_TEASER_MAX}s")
     if not (0.0 <= hook_start < hook_end):
         raise ValueError(f"Rango de hook invalido: [{hook_start},{hook_end}]")
 
@@ -301,6 +322,7 @@ def generate_hooked_ass(
     output_path: str | Path,
     title: str = "clipsai",
 ) -> str:
+    hook_start, hook_end = _normalizar_ventana(hook_start, hook_end, clip_start, clip_end)
     hook_segs, clip_segs = _generate_hooked_segments(segments, clip_start, clip_end, hook_start, hook_end)
     all_shifted = sorted(hook_segs + clip_segs, key=lambda x: x["start"])
     return write_ass_file(all_shifted, output_path, title=title)
@@ -314,6 +336,7 @@ def build_hooked_ass_content(
     hook_end: float,
     title: str = "clipsai",
 ) -> str:
+    hook_start, hook_end = _normalizar_ventana(hook_start, hook_end, clip_start, clip_end)
     hook_segs, clip_segs = _generate_hooked_segments(segments, clip_start, clip_end, hook_start, hook_end)
     all_shifted = sorted(hook_segs + clip_segs, key=lambda x: x["start"])
     return generate_ass_content(all_shifted, title=title)

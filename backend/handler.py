@@ -358,6 +358,15 @@ def _hook_texto_de(clip: Any) -> str | None:
     return clip.hook_texto or None
 
 
+_SFX_MOODS_HANDLER = ("tension", "impact", "transition", "none")
+
+
+def _mood_valido_handler(sfx_mood: Any) -> str:
+    """mood del input RunPod con whitelist; default 'transition' si falta/inválido."""
+    mood = str(sfx_mood or "").strip().lower()
+    return mood if mood in _SFX_MOODS_HANDLER else "transition"
+
+
 def _subir_clip_a_r2(vertical_path: str, idx: int, bucket: str, video_id: str, clip: Any, clip_start: float, clip_end: float) -> dict[str, Any] | None:
     """Sube el clip vertical a R2; None si falla el upload."""
     try:
@@ -373,7 +382,10 @@ def _subir_clip_a_r2(vertical_path: str, idx: int, bucket: str, video_id: str, c
         return None
 
 
-def _procesar_clip_vertical(video_path: str, transcription_segments: list, clip: Any, idx: int, bucket: str, video_id: str) -> dict[str, Any] | None:
+def _procesar_clip_vertical(
+    video_path: str, transcription_segments: list, clip: Any, idx: int, bucket: str,
+    video_id: str, sfx_mood: str = "transition", enable_hook_teaser: bool = True,
+) -> dict[str, Any] | None:
     """Procesa un clip a vertical 9:16 con subs+hook y lo sube a R2. None si falla."""
     from video_processor import process_clip_vertical
 
@@ -391,7 +403,9 @@ def _procesar_clip_vertical(video_path: str, transcription_segments: list, clip:
         segments=transcription_segments,
         clip_start=clip_start,
         clip_end=clip_end,
-        hook_text=_hook_texto_de(clip)
+        hook_text=_hook_texto_de(clip),
+        sfx_mood=sfx_mood,
+        enable_hook_teaser=enable_hook_teaser,
     )
 
     if not success or not os.path.exists(vertical_path):
@@ -404,7 +418,10 @@ def _procesar_clip_vertical(video_path: str, transcription_segments: list, clip:
 MAX_RENDER_WORKERS = 3
 
 
-def _procesar_clips_verticales(video_path: str, transcription_segments: list, clips: list, bucket: str, video_id: str) -> list:
+def _procesar_clips_verticales(
+    video_path: str, transcription_segments: list, clips: list, bucket: str, video_id: str,
+    sfx_mood: str = "transition", enable_hook_teaser: bool = True,
+) -> list:
     """Procesa los clips en paralelo (ThreadPoolExecutor) preservando el orden.
 
     El trabajo es subprocess-bound (ffmpeg/R2), así que threads no compiten por
@@ -413,7 +430,10 @@ def _procesar_clips_verticales(video_path: str, transcription_segments: list, cl
     """
     with ThreadPoolExecutor(max_workers=MAX_RENDER_WORKERS) as pool:
         futures = {
-            idx: pool.submit(_procesar_clip_vertical, video_path, transcription_segments, clip, idx, bucket, video_id)
+            idx: pool.submit(
+                _procesar_clip_vertical, video_path, transcription_segments,
+                clip, idx, bucket, video_id, sfx_mood, enable_hook_teaser,
+            )
             for idx, clip in enumerate(clips)
         }
         resultados = [futuro.result() for futuro in futures.values()]
@@ -482,10 +502,14 @@ def process_video_job(job: dict[str, Any]) -> dict[str, Any]:
             return _resultado_fallo(result, video_id)
 
         bucket = os.getenv("BUCKET_NAME", "clipsai-videos").strip()
-        return _respuesta_completa(result, video_id, video_path, bucket)
+        return _respuesta_completa(
+            result, video_id, video_path, bucket,
+            sfx_mood=_mood_valido_handler(input_data.get("sfx_mood")),
+            enable_hook_teaser=input_data.get("enable_hook_teaser") is not False,
+        )
 
 
-def _respuesta_completa(result, video_id: str, video_path: Path, bucket: str) -> dict[str, Any]:
+def _respuesta_completa(result, video_id: str, video_path: Path, bucket: str, sfx_mood: str = "transition", enable_hook_teaser: bool = True) -> dict[str, Any]:
     """Procesa los clips del engine a verticales 9:16 y arma la respuesta COMPLETED."""
     clips = result.clips
     transcription_segments = getattr(result, 'transcription_segments', None) or []
@@ -499,7 +523,10 @@ def _respuesta_completa(result, video_id: str, video_path: Path, bucket: str) ->
     logger.info("Procesando clips verticales 9:16 + subs + hook...")
     from video_processor import process_clip_vertical
 
-    clips_verticales = _procesar_clips_verticales(video_path, transcription_segments, clips, bucket, video_id)
+    clips_verticales = _procesar_clips_verticales(
+        video_path, transcription_segments, clips, bucket, video_id,
+        sfx_mood=sfx_mood, enable_hook_teaser=enable_hook_teaser,
+    )
 
     logger.info("%s clips verticales procesados y subidos a R2", len(clips_verticales))
 

@@ -1088,7 +1088,7 @@ class TestHandlerRenderParalelo:
 
         idx_vistos = []
 
-        def fake(video_path, segments, clip, idx, bucket, video_id):
+        def fake(video_path, segments, clip, idx, bucket, video_id, sfx_mood="transition", enable_hook_teaser=True):
             idx_vistos.append(idx)
             resultado = respuestas[idx]
             if isinstance(resultado, Exception):
@@ -1128,7 +1128,7 @@ class TestHandlerRenderParalelo:
         activos: list = []
         pico = [0]
 
-        def fake(video_path, segments, clip, idx, bucket, video_id):
+        def fake(video_path, segments, clip, idx, bucket, video_id, sfx_mood="transition", enable_hook_teaser=True):
             activos.append(idx)
             pico[0] = max(pico[0], len(activos))
             time.sleep(0.05)
@@ -1193,3 +1193,129 @@ class TestHandlerParidadTranscripcion:
         # recibe el texto intacto y decide el auto-Whisper (_preparar_transcripcion).
         assert capturado["transcripcion"] == "hola\nmundo\nsin timestamps"
         assert capturado["video"].endswith("video.mp4")
+
+
+# ---------------------------------------------------------------- issue 116 (teaser B&W worker)
+
+
+class TestTeaserWorker116:
+    """Issue #116 en el worker: teaser B&W 5s, zoom 1.08, SFX y unificación."""
+
+    def test_comando_teaser_bw(self) -> None:
+        import video_processor as vp_mod
+
+        cmd = vp_mod._comando_teaser_bw("fuente.mp4", 12.5, "teaser.mp4")
+        assert cmd[cmd.index("-ss") + 1] == "12.500"
+        assert cmd[cmd.index("-t") + 1] == "5.000"
+        assert "eq=saturation=0" in cmd[cmd.index("-vf") + 1]
+        assert "1.08" in cmd[cmd.index("-vf") + 1]  # zoom 1.08 sobre 1080x1920
+
+    def test_filtro_teaser_cuerpo_sfx(self) -> None:
+        import video_processor as vp_mod
+
+        graph = vp_mod._filtro_teaser_cuerpo(con_sfx=True)
+        assert "concat=n=2:v=1:a=1" in graph
+        assert "volume=0.13" in graph
+        assert "adelay=" in graph
+        assert "amix=inputs=2:duration=first:normalize=0" in graph
+
+    def test_filtro_teaser_cuerpo_sin_sfx(self) -> None:
+        import video_processor as vp_mod
+
+        graph = vp_mod._filtro_teaser_cuerpo(con_sfx=False)
+        assert "amix" not in graph and "adelay" not in graph
+        assert graph.endswith("[v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a]")
+
+    def test_input_sfx_por_mood(self, tmp_path: Path, monkeypatch: Any) -> None:
+        import video_processor as vp_mod
+
+        # none -> sin SFX
+        assert vp_mod._input_sfx("none") is None
+        # mood inválido -> default transition
+        assert vp_mod._mood_valido("desconocido") == "transition"
+        # sin /app/sfx -> preset lavfi del mood
+        monkeypatch.setattr(vp_mod.os.path, "isfile", lambda p: False)
+        entrada_t = vp_mod._input_sfx("tension")
+        assert "-f" in entrada_t and "lavfi" in entrada_t
+        assert "brown" in " ".join(entrada_t)  # preset tension = ruido browniano
+        entrada_i = vp_mod._input_sfx("impact")
+        assert "sine=f=55" in " ".join(entrada_i)  # preset impact = sine grave
+        # con /app/sfx/{mood}.wav -> archivo (el mock matchea por sufijo .wav)
+        monkeypatch.setattr(vp_mod.os.path, "isfile", lambda p: str(p).endswith("tension.wav"))
+        entrada_wav = vp_mod._input_sfx("tension")
+        assert entrada_wav[0] == "-i"
+        assert entrada_wav[1].endswith("tension.wav")
+
+    def test_proceso_completo_con_teaser(self, tmp_path: Path, monkeypatch: Any) -> None:
+        """Flujo completo: cut -> body(ass) -> teaser(B&W) -> ensamble(lavfi+SFX)."""
+        import video_processor as vp_mod
+
+        input_video = tmp_path / "in.mp4"
+        input_video.write_bytes(b"v")
+        salida = tmp_path / "final.mp4"
+        cmds: list = []
+
+        def _run_ok(cmd, **kwargs):
+            cmds.append(list(cmd))
+            Path(cmd[-1]).write_bytes(b"x")
+            return SimpleNamespace(returncode=0, stderr="")
+
+        monkeypatch.setattr(vp_mod.subprocess, "run", Mock(side_effect=_run_ok))
+        assert vp_mod.process_clip_vertical(
+            str(input_video), str(salida), [{"start": 0, "end": 5, "text": "hola"}], 0, 20
+        ) is True
+
+        texto_cmds = [" ".join(c) for c in cmds]
+        teaser_cmds = [c for c in texto_cmds if "eq=saturation=0" in c]
+        assert len(teaser_cmds) == 1
+        ensamble = texto_cmds[-1]
+        assert "-f lavfi" in ensamble  # SFX lavfi
+        assert ensamble.endswith(str(salida))
+        body_cmd = next(c for c in texto_cmds if c.endswith("cuerpo.mp4"))
+        assert "crop=" in body_cmd  # body 9:16 con subs
+
+    def test_teaser_falla_devuelve_cuerpo(self, tmp_path: Path, monkeypatch: Any) -> None:
+        """Fallback: si el teaser falla, el cuerpo a color es el output final."""
+        import video_processor as vp_mod
+
+        input_video = tmp_path / "in.mp4"
+        input_video.write_bytes(b"v")
+        salida = tmp_path / "final.mp4"
+
+        def _run(cmd, **kwargs):
+            if "eq=saturation=0" in " ".join(cmd):  # teaser falla
+                return SimpleNamespace(returncode=1, stderr="boom")
+            Path(cmd[-1]).write_bytes(b"cuerpo")
+            return SimpleNamespace(returncode=0, stderr="")
+
+        monkeypatch.setattr(vp_mod.subprocess, "run", Mock(side_effect=_run))
+        assert vp_mod.process_clip_vertical(
+            str(input_video), str(salida), [{"start": 0, "end": 5, "text": "hola"}], 0, 20
+        ) is True
+        assert salida.read_bytes() == b"cuerpo"  # fallback = solo cuerpo
+
+    def test_ass_del_cuerpo_sin_evento_hook(self, tmp_path: Path) -> None:
+        """Subtítulos solo desde el cuerpo: el ASS del worker no lleva Dialogue estilo Hook."""
+        import video_processor as vp_mod
+
+        salida = tmp_path / "subtitles.ass"
+        # La llamada de producción pasa hook_text=None (el teaser es video B&W)
+        vp_mod.generate_ass_from_segments(
+            [{"start": 0, "end": 5, "text": "hola"}, {"start": 5, "end": 10, "text": "mundo"}],
+            0, 20, str(salida), hook_text=None,
+        )
+        contenido = salida.read_text(encoding="utf-8")
+        dialogues_hook = [l for l in contenido.splitlines() if l.startswith("Dialogue:") and ",Hook," in l]
+        assert dialogues_hook == []
+        assert "HOLA" in contenido  # los subtítulos del cuerpo sí están
+
+    def test_ass_con_hook_text_mantiene_compatibilidad(self, tmp_path: Path) -> None:
+        """Compat: si alguien pasa hook_text, el evento estilo Hook sigue existiendo."""
+        import video_processor as vp_mod
+
+        salida = tmp_path / "subtitles.ass"
+        vp_mod.generate_ass_from_segments(
+            [{"start": 0, "end": 5, "text": "hola"}], 0, 20, str(salida), hook_text="EL HOOK",
+        )
+        contenido = salida.read_text(encoding="utf-8")
+        assert any(l.startswith("Dialogue:") and ",Hook," in l for l in contenido.splitlines())
