@@ -138,18 +138,26 @@ class TestAssGenerator:
         assert Path(result).is_file()
         assert Path(result).read_text(encoding="utf-8").startswith("[Script Info]")
 
-    def test_hooked_validacion_de_rango_de_hook(self, tmp_path) -> None:
+    def test_hooked_ventana_larga_se_normaliza(self, tmp_path) -> None:
         from backend_fastapi.app.services.ass_generator import generate_hooked_ass
 
-        with pytest.raises(ValueError):
-            generate_hooked_ass(
-                [{"start": 0, "end": 10, "text": "hola"}],
-                clip_start=0,
-                clip_end=30,
-                hook_start=0,
-                hook_end=9,  # > 5.5 s
-                output_path=tmp_path / "clip.ass",
-            )
+        destino = tmp_path / "hooked.ass"
+        # Nuevo contrato (#116): un hook de 9s se NORMALIZA a 5s (no rechaza)
+        generate_hooked_ass(
+            [{"start": 0.0, "end": 3.0, "text": "frase hook"}, {"start": 6.0, "end": 8.0, "text": "cuerpo"}],
+            clip_start=5.0,
+            clip_end=30.0,
+            hook_start=0.0,
+            hook_end=9.0,
+            output_path=destino,
+        )
+        assert destino.exists()
+
+    def test_validar_ventana_hook_banda_invalida(self) -> None:
+        from backend_fastapi.app.services.ass_generator import _validar_ventana_hook
+
+        with pytest.raises(ValueError, match="entre 4.5 y 5.5"):
+            _validar_ventana_hook(0.0, 3.0)
 
     def test_hooked_genera_subtitulos_reordenados(self, tmp_path) -> None:
         from backend_fastapi.app.services.ass_generator import generate_hooked_ass
@@ -553,20 +561,39 @@ class TestHookTeaser116:
         assert "adelay" not in graph and "amix" not in graph
         assert maps == ["-map", "[v]"]
 
-    def test_ensamblar_hook_incluye_lavfi_sfx(self, tmp_path) -> None:
+    def test_ensamblar_hook_incluye_sfx_del_mood(self, tmp_path) -> None:
+        from backend_fastapi.app.services.ffmpeg_service import (
+            _ensamblar_hook, _filtro_y_maps, _input_sfx, _mood_valido,
+        )
+
+        hook_tmp = tmp_path / "hook.mp4"
+        clip_tmp = tmp_path / "clip.mp4"
+        out = tmp_path / "out.mp4"
+        graph, maps = _filtro_y_maps(0.2, 5.0, 30.0, has_audio=True, con_sfx=True)
+
+        patcher, runner, fs = _patch_subprocess_ffmpeg()
+        with patcher:
+            _ensamblar_hook(
+                hook_tmp, clip_tmp, out, graph, maps, has_audio=True,
+                sfx_input=_input_sfx(_mood_valido("impact")),
+            )
+        cmd = runner.call_args_list[-1].args[0]
+        assert "sine=f=55" in " ".join(cmd)  # preset impact
+
+    def test_ensamblar_hook_mood_none_sin_input(self, tmp_path) -> None:
         from backend_fastapi.app.services.ffmpeg_service import _ensamblar_hook, _filtro_y_maps
 
         hook_tmp = tmp_path / "hook.mp4"
         clip_tmp = tmp_path / "clip.mp4"
         out = tmp_path / "out.mp4"
-        graph, maps = _filtro_y_maps(0.2, 5.0, 30.0, has_audio=True)
+        graph, maps = _filtro_y_maps(0.2, 5.0, 30.0, has_audio=True, con_sfx=False)
 
         patcher, runner, fs = _patch_subprocess_ffmpeg()
         with patcher:
-            _ensamblar_hook(hook_tmp, clip_tmp, out, graph, maps, has_audio=True)
+            _ensamblar_hook(hook_tmp, clip_tmp, out, graph, maps, has_audio=True, sfx_input=None)
         cmd = runner.call_args_list[-1].args[0]
-        assert "-f" in cmd and "lavfi" in cmd
-        assert "anoisesrc" in " ".join(cmd)
+        assert "anoisesrc" not in " ".join(cmd)
+        assert "sine" not in " ".join(cmd)
 
     def test_build_hook_clip_teaser_normalizado_a_5s(self, tmp_path) -> None:
         from backend_fastapi.app.services.ffmpeg_service import build_hook_clip
@@ -604,6 +631,115 @@ class TestHookTeaser116:
             output_path=destino,
         )
         assert destino.exists()
+
+    # ------------------------------------------------------------ sfx_mood (issue #116)
+
+    def test_filtro_y_maps_por_mood(self) -> None:
+        from backend_fastapi.app.services.ffmpeg_service import _filtro_y_maps, _input_sfx, _mood_valido
+
+        # los 3 moods con input lavfi -> [aout]
+        for mood in ("tension", "impact", "transition"):
+            sfx_input = _input_sfx(_mood_valido(mood))
+            assert sfx_input is not None
+            graph, maps = _filtro_y_maps(0.2, 5.0, 30.0, has_audio=True, con_sfx=True)
+            assert "adelay=" in graph and "amix=inputs=2:duration=first:normalize=0" in graph
+            assert maps == ["-map", "[v]", "-map", "[aout]"]
+            # el preset lavfi del mood está en el input
+            assert any(mood == key for key in ("tension", "impact", "transition"))
+            assert _mood_valido(mood) == mood
+
+    def test_mood_none_omite_sfx(self) -> None:
+        from backend_fastapi.app.services.ffmpeg_service import _filtro_y_maps, _input_sfx, _mood_valido
+
+        assert _input_sfx("none") is None
+        assert _mood_valido("none") == "none"
+        graph, maps = _filtro_y_maps(0.2, 5.0, 30.0, has_audio=True, con_sfx=False)
+        assert "adelay" not in graph and "amix" not in graph
+        assert maps == ["-map", "[v]", "-map", "[a]"]
+
+    def test_mood_invalido_cae_en_default(self) -> None:
+        from backend_fastapi.app.services.ffmpeg_service import _mood_valido
+
+        assert _mood_valido("DESCONOCIDO") == "transition"
+        assert _mood_valido(None) == "transition"
+
+    def test_input_sfx_prefiere_archivo_del_mood(self, tmp_path, monkeypatch) -> None:
+        from backend_fastapi.app.services import ffmpeg_service as fs
+
+        monkeypatch.setattr(fs.Path, "is_file", lambda self: str(self).endswith("impact.wav"))
+        sfx_input = fs._input_sfx("impact")
+        assert sfx_input[0] == "-i"
+        assert sfx_input[1].endswith("impact.wav")
+
+    def test_build_hook_clip_con_mood_impact(self, tmp_path) -> None:
+        from backend_fastapi.app.services.ffmpeg_service import build_hook_clip
+
+        video = tmp_path / "in.mp4"
+        video.write_bytes(b"x")
+        salida = tmp_path / "hook.mp4"
+
+        patcher, runner, _ = _patch_subprocess_ffmpeg()
+        with patcher:
+            build_hook_clip(video, 5.0, 30.0, 0.0, 3.0, salida, sfx_mood="impact")
+        ensamble = runner.call_args_list[-1].args[0]
+        # el input del SFX es lavfi (backend no tiene /app/sfx) del preset impact
+        assert "sine=f=55" in " ".join(ensamble)
+
+    def test_render_sin_hook_teaser_usa_cut(self, tmp_path) -> None:
+        """enable_hook_teaser=False en _render: hook_sel ignorado -> cut directo + ASS simple."""
+        from backend_fastapi.app.routers import jobs as jobs_mod
+
+        video = tmp_path / "in.mp4"
+        video.write_bytes(b"x")
+        ass_path = tmp_path / "sub.ass"
+        segmentos = [{"start": 10.0, "end": 30.0, "text": "hola"}]
+
+        build_hook = Mock()
+        cut = Mock(return_value=str(tmp_path / "cut.mp4"))
+        with patch("backend_fastapi.app.services.ffmpeg_service.build_hook_clip", build_hook), patch(
+            "backend_fastapi.app.services.ffmpeg_service.cut_segment", cut
+        ), patch("backend_fastapi.app.services.ass_generator.write_ass_file", Mock()):
+            jobs_mod._generar_ass(10.0, 40.0, segmentos, None, "teaser", None)
+            # Con enable_hook_teaser=False el hook_sel llega None al render:
+            # _cortar_clip_intermedio usa cut_segment (sin build_hook_clip).
+            jobs_mod._cortar_clip_intermedio(video, 10.0, 40.0, None, "teaser", tmp_path / "t.mp4")
+        build_hook.assert_not_called()
+        cut.assert_called_once()
+
+    def test_render_config_flag_hook_teaser(self) -> None:
+        from backend.core.schemas import RenderConfig
+
+        config = RenderConfig()
+        assert config.enable_hook_teaser is True
+        assert config.sfx_mood == "transition"
+        config_off = RenderConfig(enable_hook_teaser=False, sfx_mood="impact")
+        assert config_off.enable_hook_teaser is False
+        assert config_off.sfx_mood == "impact"
+
+    def test_retrim_request_flag_hook_teaser(self) -> None:
+        from backend.api.routes.retrim import RetrimRequest
+
+        body = RetrimRequest(start_time=10.0, end_time=40.0)
+        assert body.enable_hook_teaser is True
+        assert body.sfx_mood == "transition"
+        body_off = RetrimRequest(start_time=10.0, end_time=40.0, enable_hook_teaser=False, sfx_mood="impact")
+        assert body_off.enable_hook_teaser is False
+        assert body_off.sfx_mood == "impact"
+
+    def test_guardia_paridad_teaser_backend_worker(self) -> None:
+        """Contrato #116: ffmpeg_service y video_processor no divergen."""
+        from backend_fastapi.app.services import ffmpeg_service as fs
+        import video_processor as vp
+
+        tokens_compartidos = ("eq=saturation=0", "1.08", "volume=0.13", "adelay=", "amix=inputs=2:duration=first:normalize=0")
+        for token in tokens_compartidos:
+            assert token in fs.FILTRO_TEASER_BW + fs._filtro_sfx_whoosh(5.0), f"backend sin {token}"
+            assert token in vp.FILTRO_TEASER_BW + vp._filtro_teaser_cuerpo(True), f"worker sin {token}"
+        assert fs.HOOK_TEASER_DURACION == vp.TEASER_DURACION == 5.0
+        assert fs.SFX_DURACION == vp.SFX_DURACION == 0.9
+        assert fs.VOLUMEN_SFX == vp.VOLUMEN_SFX == 0.13
+        assert fs.SFX_PRESETS_LAVFI.keys() == vp.SFX_PRESETS_LAVFI.keys()
+        assert fs.SFX_PRESETS_LAVFI == vp.SFX_PRESETS_LAVFI
 
     def test_hook_service_prompt_apunta_a_5s(self) -> None:
         from backend_fastapi.app.services.hook_service import _build_hook_prompt

@@ -1088,7 +1088,7 @@ class TestHandlerRenderParalelo:
 
         idx_vistos = []
 
-        def fake(video_path, segments, clip, idx, bucket, video_id):
+        def fake(video_path, segments, clip, idx, bucket, video_id, sfx_mood="transition", enable_hook_teaser=True):
             idx_vistos.append(idx)
             resultado = respuestas[idx]
             if isinstance(resultado, Exception):
@@ -1128,7 +1128,7 @@ class TestHandlerRenderParalelo:
         activos: list = []
         pico = [0]
 
-        def fake(video_path, segments, clip, idx, bucket, video_id):
+        def fake(video_path, segments, clip, idx, bucket, video_id, sfx_mood="transition", enable_hook_teaser=True):
             activos.append(idx)
             pico[0] = max(pico[0], len(activos))
             time.sleep(0.05)
@@ -1208,16 +1208,43 @@ class TestTeaserWorker116:
         assert cmd[cmd.index("-ss") + 1] == "12.500"
         assert cmd[cmd.index("-t") + 1] == "5.000"
         assert "eq=saturation=0" in cmd[cmd.index("-vf") + 1]
-        assert "1166:2074" in cmd[cmd.index("-vf") + 1]  # zoom 1.08 sobre 1080x1920
+        assert "1.08" in cmd[cmd.index("-vf") + 1]  # zoom 1.08 sobre 1080x1920
 
     def test_filtro_teaser_cuerpo_sfx(self) -> None:
         import video_processor as vp_mod
 
-        graph = vp_mod._filtro_teaser_cuerpo()
+        graph = vp_mod._filtro_teaser_cuerpo(con_sfx=True)
         assert "concat=n=2:v=1:a=1" in graph
         assert "volume=0.13" in graph
         assert "adelay=" in graph
         assert "amix=inputs=2:duration=first:normalize=0" in graph
+
+    def test_filtro_teaser_cuerpo_sin_sfx(self) -> None:
+        import video_processor as vp_mod
+
+        graph = vp_mod._filtro_teaser_cuerpo(con_sfx=False)
+        assert "amix" not in graph and "adelay" not in graph
+        assert graph.endswith("[v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a]")
+
+    def test_input_sfx_por_mood(self, tmp_path: Path, monkeypatch: Any) -> None:
+        import video_processor as vp_mod
+
+        # none -> sin SFX
+        assert vp_mod._input_sfx("none") is None
+        # mood inválido -> default transition
+        assert vp_mod._mood_valido("desconocido") == "transition"
+        # sin /app/sfx -> preset lavfi del mood
+        monkeypatch.setattr(vp_mod.os.path, "isfile", lambda p: False)
+        entrada_t = vp_mod._input_sfx("tension")
+        assert "-f" in entrada_t and "lavfi" in entrada_t
+        assert "brown" in " ".join(entrada_t)  # preset tension = ruido browniano
+        entrada_i = vp_mod._input_sfx("impact")
+        assert "sine=f=55" in " ".join(entrada_i)  # preset impact = sine grave
+        # con /app/sfx/{mood}.wav -> archivo (el mock matchea por sufijo .wav)
+        monkeypatch.setattr(vp_mod.os.path, "isfile", lambda p: str(p).endswith("tension.wav"))
+        entrada_wav = vp_mod._input_sfx("tension")
+        assert entrada_wav[0] == "-i"
+        assert entrada_wav[1].endswith("tension.wav")
 
     def test_proceso_completo_con_teaser(self, tmp_path: Path, monkeypatch: Any) -> None:
         """Flujo completo: cut -> body(ass) -> teaser(B&W) -> ensamble(lavfi+SFX)."""

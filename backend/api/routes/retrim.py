@@ -18,6 +18,8 @@ router = APIRouter(prefix="/clips", tags=["clips-retrim"])
 class RetrimRequest(BaseModel):
     start_time: float = Field(..., ge=0, description="Nuevo inicio en segundos")
     end_time: float = Field(..., ge=0, description="Nuevo fin en segundos")
+    enable_hook_teaser: bool = Field(default=True, description="Hook Teaser B&W 5s en el re-render (issue #116)")
+    sfx_mood: str = Field(default="transition", description="'tension'|'impact'|'transition'|'none'")
 
     def validate_range(self) -> None:
         if self.end_time <= self.start_time:
