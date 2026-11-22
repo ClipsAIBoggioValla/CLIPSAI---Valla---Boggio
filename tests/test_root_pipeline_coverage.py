@@ -639,3 +639,107 @@ class TestLLMFallback:
         exc = ConnectionError("boom")
         exc.response = SimpleNamespace(status_code=502)
         assert "status=502" in main_mod._mensaje_error_proveedor(exc)
+
+
+# ------------------------------------------------------------------ issue 115 (timestamps + hook_service)
+
+
+class TestEngineTranscripcionTimestamps:
+    """Issue #115: transcripción sin timestamps -> Whisper automático en el engine."""
+
+    def test_txt_plano_dispara_whisper(self, tmp_path: Path, monkeypatch: Any) -> None:
+        original = tmp_path / "trans.txt"
+        original.write_text("hola que tal\nesto es texto plano\nsin timestamps", encoding="utf-8")
+        formatted = tmp_path / "formatted.txt"
+        whisper_llamado = Mock(
+            side_effect=lambda audio, salida: Path(salida).write_text(
+                "00:00:01 - hola\n00:00:05 - mundo\n00:00:09 - fin", encoding="utf-8"
+            )
+        )
+        monkeypatch.setattr(engine_mod, "_transcribir_con_whisper", whisper_llamado)
+
+        error = engine_mod._preparar_transcripcion(
+            str(tmp_path), str(tmp_path / "audio.mp3"), str(original), str(formatted)
+        )
+
+        assert error is None
+        whisper_llamado.assert_called_once()
+        assert "00:00:01 - hola" in formatted.read_text(encoding="utf-8")
+
+    def test_txt_con_timestamps_no_dispara_whisper(self, tmp_path: Path, monkeypatch: Any) -> None:
+        original = tmp_path / "trans.txt"
+        original.write_text("00:00:01 - hola\n00:00:05 - mundo\n00:00:09 - fin", encoding="utf-8")
+        formatted = tmp_path / "formatted.txt"
+        whisper_llamado = Mock(side_effect=AssertionError("no debe llamar Whisper"))
+        monkeypatch.setattr(engine_mod, "_transcribir_con_whisper", whisper_llamado)
+
+        error = engine_mod._preparar_transcripcion(
+            str(tmp_path), str(tmp_path / "audio.mp3"), str(original), str(formatted)
+        )
+
+        assert error is None
+        whisper_llamado.assert_not_called()
+        contenido = formatted.read_text(encoding="utf-8")
+        assert "00:00:01 - hola" in contenido and "00:00:09 - fin" in contenido
+
+    def test_valida_provista_sin_timestamps_lanza(self, tmp_path: Path) -> None:
+        archivo = tmp_path / "f.txt"
+        archivo.write_text("linea uno\nlinea dos\nlinea tres", encoding="utf-8")
+        with pytest.raises(ValueError, match="sin timestamps"):
+            engine_mod._transcripcion_valida_provista(str(archivo))
+
+    def test_transcripcion_con_timestamps_unit(self) -> None:
+        assert engine_mod._transcripcion_con_timestamps("00:00:01 - a\n0:05 - b\n1:02:03 - c") is True
+        assert engine_mod._transcripcion_con_timestamps("linea uno\nlinea dos") is False
+        assert engine_mod._transcripcion_con_timestamps("") is False
+
+
+class TestWhisperWordTimestamps:
+    """Issue #115: faster-whisper corre con word_timestamps=True; formato de salida idéntico."""
+
+    def test_transcribe_recibe_word_timestamps_true(self, tmp_path: Path, monkeypatch: Any) -> None:
+        segmento = SimpleNamespace(start=61.0, end=63.0, text="hola")
+        info = SimpleNamespace(duration=10.0)
+        capturado: dict = {}
+
+        class FakeModel:
+            def transcribe(self, audio_path, **kwargs):
+                capturado.update(kwargs)
+                return iter([segmento]), info
+
+        monkeypatch.setattr(wt_mod.time, "time", Mock(return_value=1.0))
+        salida = tmp_path / "s.txt"
+        wt_mod._transcribir_segmentos(FakeModel(), "a.wav", "es", str(salida))
+
+        assert capturado["word_timestamps"] is True
+        # Paridad de formato: 'M:SS - texto' idéntico a word_timestamps=False
+        assert salida.read_text(encoding="utf-8") == f"{wt_mod.segundos_a_ms(61.0)} - hola\n"
+
+    def test_engine_importa_whisper_con_words(self, monkeypatch: Any, tmp_path: Path) -> None:
+        """_transcribir_con_whisper delega en transcribir_audio (que usa words)."""
+        llamado = Mock(
+            side_effect=lambda audio, salida: Path(salida).write_text(
+                "00:00:01 - hola\n00:00:05 - mundo\n00:00:09 - fin", encoding="utf-8"
+            )
+        )
+        monkeypatch.setitem(sys.modules, "whisper_transcriber", SimpleNamespace(transcribir_audio=llamado))
+        engine_mod._transcribir_con_whisper("audio.mp3", str(tmp_path / "formatted.txt"))
+        llamado.assert_called_once_with("audio.mp3", str(tmp_path / "formatted.txt"))
+
+
+class TestHookServiceUnificado:
+    """Issue #115: app/services re-exporta el hook_service canónico (misma función)."""
+
+    def test_reexport_es_la_funcion_canonica(self) -> None:
+        import app.services.hook_service as app_hs
+        from backend_fastapi.app.services import hook_service as canonica
+
+        assert app_hs.detect_hooks is canonica.detect_hooks
+        assert app_hs.detect_hooks_from_transcript_file is canonica.detect_hooks_from_transcript_file
+        assert app_hs.HookClip is canonica.HookClip
+
+    def test_reexport_smoke_mock_hooks(self, monkeypatch: Any) -> None:
+        import app.services.hook_service as app_hs
+
+        resultado = app_hs.detect_hooks([], mock=True)
+        assert isinstance(resultado, list)
