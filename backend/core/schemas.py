@@ -100,6 +100,9 @@ class RenderConfig(BaseModel):
     resolution: str = Field(default="1080x1920", pattern=r"^\d+x\d+$")
     fps: int = Field(default=30, ge=24, le=60)
     loudnorm_enabled: bool = True
+    # Hook Teaser (issue #116): ON por defecto; False = cuerpo directo sin teaser ni shift.
+    enable_hook_teaser: bool = True
+    sfx_mood: str = Field(default="transition", description="'tension'|'impact'|'transition'|'none'")
 
     @field_validator("caption_style")
     @classmethod

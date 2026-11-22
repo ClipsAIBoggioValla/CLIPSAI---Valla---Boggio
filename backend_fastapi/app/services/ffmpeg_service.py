@@ -11,6 +11,14 @@ ZOOM_TEASER = 1.08              # zoom leve sobre la ventana del hook
 VOLUMEN_SFX = 0.13              # whoosh ≤ -18 dB respecto al diálogo
 SFX_DURACION = 0.9              # duración del whoosh generado con lavfi
 SFX_LAVFI = "anoisesrc=color=pink:seed=20261122:amplitude=0.5"
+SFX_DIR = "/app/sfx"
+SFX_PRESETS_LAVFI = {
+    "tension": "anoisesrc=color=brown:seed=117:r=48000:a=0.5,lowpass=f=600",
+    "impact": "sine=f=55:r=48000",
+    "transition": "anoisesrc=color=pink:seed=116:r=48000:a=0.6,lowpass=f=1200",
+}
+MOOD_DEFAULT = "transition"
+_SFX_MOODS = ("tension", "impact", "transition", "none")
 
 # B&W + zoom: desatura el teaser y hace zoom-in 1.08 recortando al tamaño original.
 FILTRO_TEASER_BW = (
@@ -398,8 +406,25 @@ def _tiene_pista_audio(src: Path) -> bool:
     return bool(audio_probe.stdout.strip())
 
 
+def _mood_valido(sfx_mood: str | None) -> str:
+    """mood con whitelist; default 'transition' si falta o es inválido."""
+    mood = str(sfx_mood or "").strip().lower()
+    return mood if mood in _SFX_MOODS else MOOD_DEFAULT
+
+
+def _input_sfx(sfx_mood: str) -> list | None:
+    """Args del input SFX según mood; None si mood='none' (sin SFX)."""
+    if sfx_mood == "none":
+        return None
+    wav = Path(SFX_DIR) / f"{sfx_mood}.wav"
+    if wav.is_file():
+        return ["-i", str(wav)]
+    preset = SFX_PRESETS_LAVFI.get(sfx_mood, SFX_PRESETS_LAVFI[MOOD_DEFAULT])
+    return ["-f", "lavfi", "-t", f"{SFX_DURACION:.3f}", "-i", preset]
+
+
 def _filtro_sfx_whoosh(hook_dur: float) -> str:
-    """Cadena del SFX whoosh (ruido rosa lavfi) para la transición teaser→cuerpo.
+    """Cadena del SFX whoosh para la transición teaser→cuerpo.
 
     Nivel ≤ -18 dB respecto al diálogo (`volume=0.13`), fades de 80/250 ms y
     arranque ~250 ms antes del corte entre segmentos (criterio #116).
@@ -411,11 +436,14 @@ def _filtro_sfx_whoosh(hook_dur: float) -> str:
     )
 
 
-def _filtro_y_maps(transition_seconds: float, hook_dur: float, clip_dur: float, has_audio: bool) -> tuple[str, list[str]]:
+def _filtro_y_maps(
+    transition_seconds: float, hook_dur: float, clip_dur: float, has_audio: bool, con_sfx: bool = True
+) -> tuple[str, list[str]]:
     """filter_complex y maps del ensamble hook+cuerpo (con o sin audio).
 
     Atenúa 100ms al final del teaser y 100ms al inicio del cuerpo (transición
-    total 200ms) y, con audio, mezcla un SFX whoosh sutil en la transición.
+    total 200ms) y, con audio + con_sfx, mezcla un SFX whoosh sutil en la
+    transición.
     """
     fade_edge = min(transition_seconds / 2.0, hook_dur / 2.0, clip_dur / 2.0)
     hook_fade_start = max(0.0, hook_dur - fade_edge)
@@ -429,10 +457,15 @@ def _filtro_y_maps(transition_seconds: float, hook_dur: float, clip_dur: float, 
         f"[0:a]afade=t=out:st={hook_fade_start:.3f}:d={fade_edge:.3f}[a0];"
         f"[1:a]afade=t=in:st=0:d={fade_edge:.3f}[a1];"
         "[v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a];"
-        f"{_filtro_sfx_whoosh(hook_dur)};"
-        "[v][a][sfx]amix=inputs=2:duration=first:normalize=0[aout]"
     )
-    return video + audio, ["-map", "[v]", "-map", "[aout]"]
+    if not con_sfx:
+        return video + audio, ["-map", "[v]", "-map", "[a]"]
+    return (
+        video + audio
+        + f"{_filtro_sfx_whoosh(hook_dur)};"
+        + "[v][a][sfx]amix=inputs=2:duration=first:normalize=0[aout]",
+        ["-map", "[v]", "-map", "[aout]"],
+    )
 
 
 def _exigir_archivo_ensamble(out: Path) -> None:
@@ -449,12 +482,15 @@ def _exigir_salida_ensamble(out: Path, result) -> None:
     _exigir_archivo_ensamble(out)
 
 
-def _ensamblar_hook(hook_tmp: Path, clip_tmp: Path, out: Path, filter_graph: str, maps: list[str], has_audio: bool) -> None:
-    """Corre ffmpeg para ensamblar teaser+cuerpo (con SFX lavfi si hay audio) y valida la salida."""
+def _ensamblar_hook(
+    hook_tmp: Path, clip_tmp: Path, out: Path, filter_graph: str, maps: list[str],
+    has_audio: bool, sfx_input: list | None = None,
+) -> None:
+    """Corre ffmpeg para ensamblar teaser+cuerpo (input SFX según mood) y valida la salida."""
     out.parent.mkdir(parents=True, exist_ok=True)
     command = ["ffmpeg", "-y", "-i", str(hook_tmp), "-i", str(clip_tmp)]
-    if has_audio:
-        command.extend(["-f", "lavfi", "-t", f"{SFX_DURACION:.3f}", "-i", SFX_LAVFI])
+    if sfx_input:
+        command.extend(sfx_input)
     command.extend(["-filter_complex", filter_graph, *maps])
     command.extend(["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18"])
     if has_audio:
@@ -485,6 +521,7 @@ def build_hook_clip(
     hook_end: float,
     output_path: str | Path,
     transition_seconds: float = 0.2,
+    sfx_mood: str = MOOD_DEFAULT,
 ) -> str:
     src = Path(input_video)
     out = Path(output_path)
@@ -502,6 +539,7 @@ def build_hook_clip(
         raise ValueError("transition_seconds debe estar entre 0 y 0.2 segundos")
     import tempfile
 
+    sfx_input = _input_sfx(_mood_valido(sfx_mood))
     tmpdir = Path(tempfile.mkdtemp(prefix="hook_"))
     hook_tmp = tmpdir / "hook.mp4"
     clip_tmp = tmpdir / "clip.mp4"
@@ -509,8 +547,10 @@ def build_hook_clip(
         _cortar_teaser_bw(src, hook_start, hook_end, hook_tmp)
         cut_segment(src, clip_start, clip_end, clip_tmp)
         has_audio = _tiene_pista_audio(src)
-        filter_graph, maps = _filtro_y_maps(transition_seconds, hook_dur, clip_dur, has_audio)
-        _ensamblar_hook(hook_tmp, clip_tmp, out, filter_graph, maps, has_audio)
+        filter_graph, maps = _filtro_y_maps(
+            transition_seconds, hook_dur, clip_dur, has_audio, con_sfx=sfx_input is not None
+        )
+        _ensamblar_hook(hook_tmp, clip_tmp, out, filter_graph, maps, has_audio, sfx_input)
         return str(out)
     finally:
         _limpiar_tmpdir_hook(tmpdir, hook_tmp, clip_tmp)
