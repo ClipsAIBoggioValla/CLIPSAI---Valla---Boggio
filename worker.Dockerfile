@@ -50,6 +50,22 @@ RUN set -eux; \
 # Asegurar que /usr/local/bin esté primero en el PATH
 ENV PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH}"
 
+# SFX por mood (issue #116): síntesis propia con lavfi (libres de derechos,
+# seed fija = determinístico). El mix aplica volume=0.13 (<= -18 dB) y adelay
+# en el ensamble; aquí solo se generan los .wav base en /app/sfx/.
+RUN set -eux; mkdir -p /app/sfx; \
+    ffmpeg -hide_banner -loglevel error -y \
+      -f lavfi -i "anoisesrc=color=brown:seed=117:r=48000:a=0.5" \
+      -af "lowpass=f=600,afade=t=in:d=0.55,afade=t=out:st=0.35:d=0.35" -t 0.9 /app/sfx/tension.wav; \
+    ffmpeg -hide_banner -loglevel error -y \
+      -f lavfi -i "sine=f=55:r=48000:d=0.7" \
+      -af "volume=0.8,afade=t=out:st=0.15:d=0.55" -t 0.7 /app/sfx/impact.wav; \
+    ffmpeg -hide_banner -loglevel error -y \
+      -f lavfi -i "anoisesrc=color=pink:seed=116:r=48000:a=0.6" \
+      -af "lowpass=f=1200,afade=t=in:d=0.6,afade=t=out:st=0.3:d=0.3" -t 0.9 /app/sfx/transition.wav; \
+    chmod -R a+rX /app/sfx; \
+    test -s /app/sfx/tension.wav && test -s /app/sfx/impact.wav && test -s /app/sfx/transition.wav
+
 # Checks endurecidos: el binario BtbN debe listar AMBOS encoders (se listan
 # sin driver presente; la libnvidia-encode.so.1 se resuelve en runtime en RunPod).
 RUN /usr/local/bin/ffmpeg -hide_banner -encoders 2>/dev/null | grep -E "h264_nvenc" \

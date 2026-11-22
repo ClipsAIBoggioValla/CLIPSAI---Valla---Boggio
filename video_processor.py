@@ -29,8 +29,18 @@ SFX_LAVFI = "anoisesrc=color=pink:seed=20261122:amplitude=0.5"
 # Teaser vertical: crop 9:16 → 1080x1920 → B&W → zoom 1.08 (crop al tamaño final).
 FILTRO_TEASER_BW = (
     "crop=ih*9/16:ih,scale=1080:1920,eq=saturation=0,"
-    "scale=1166:2074,crop=1080:1920,setsar=1"
+    "scale=trunc(1080*1.08/2)*2:trunc(1920*1.08/2)*2,crop=1080:1920,setsar=1"
 )
+
+# SFX por mood (issue #116): preset lavfi de fallback si /app/sfx/{mood}.wav
+# no existe en la imagen. El mix aplica volume=0.13 (<= -18 dB) + adelay.
+SFX_PRESETS_LAVFI = {
+    "tension": "anoisesrc=color=brown:seed=117:r=48000:a=0.5,lowpass=f=600",
+    "impact": "sine=f=55:r=48000",
+    "transition": "anoisesrc=color=pink:seed=116:r=48000:a=0.6,lowpass=f=1200",
+}
+SFX_DIR = "/app/sfx"
+MOOD_DEFAULT = "transition"
 
 # Sondeo de NVENC memoizado: se corre `ffmpeg -encoders` UNA vez por proceso
 # solo si RUNPOD_GPU está activo (issue: render GPU). Sin GPU env -> libx264
@@ -533,36 +543,71 @@ def _generar_teaser_bw(input_video: str, clip_start: float, teaser_path: str) ->
     return True
 
 
-def _filtro_teaser_cuerpo() -> str:
-    """filter_complex del ensamble teaser(B&W)+cuerpo con SFX whoosh en la transición."""
+def _mood_valido(sfx_mood: str | None) -> str:
+    """mood con whitelist; default 'transition' si falta o es inválido."""
+    mood = str(sfx_mood or "").strip().lower()
+    return mood if mood in SFX_PRESETS_LAVFI or mood == "none" else MOOD_DEFAULT
+
+
+def _input_sfx(sfx_mood: str) -> list | None:
+    """Args del input SFX según mood. None si mood='none' (sin SFX).
+
+    Prefiere /app/sfx/{mood}.wav (generado en build); fallback al preset
+    lavfi del mood; 'none' omite el SFX por completo.
+    """
+    if sfx_mood == "none":
+        return None
+    wav = os.path.join(SFX_DIR, f"{sfx_mood}.wav")
+    if os.path.isfile(wav):
+        return ["-i", wav]
+    preset = SFX_PRESETS_LAVFI.get(sfx_mood, SFX_PRESETS_LAVFI[MOOD_DEFAULT])
+    return ["-f", "lavfi", "-t", f"{SFX_DURACION:.3f}", "-i", preset]
+
+
+def _filtro_teaser_cuerpo(con_sfx: bool) -> str:
+    """filter_complex del ensamble teaser(B&W)+cuerpo; SFX whoosh solo si con_sfx."""
     fade = 0.1
     delay_ms = int(max(0.0, TEASER_DURACION - SFX_DURACION + 0.25) * 1000)
-    return (
+    base = (
         f"[0:v]fade=t=out:st={TEASER_DURACION - fade:.3f}:d={fade:.3f},setsar=1[v0];"
         f"[1:v]fade=t=in:st=0:d={fade:.3f},setsar=1[v1];"
         f"[0:a]afade=t=out:st={TEASER_DURACION - fade:.3f}:d={fade:.3f}[a0];"
         f"[1:a]afade=t=in:st=0:d={fade:.3f}[a1];"
-        "[v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a];"
-        f"[2:a]volume={VOLUMEN_SFX},afade=t=in:st=0:d=0.08,"
-        f"afade=t=out:st={SFX_DURACION - 0.25:.3f}:d=0.25,adelay={delay_ms}|all=1[sfx];"
-        "[v][a][sfx]amix=inputs=2:duration=first:normalize=0[aout]"
+    )
+    if not con_sfx:
+        return base + "[v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a]"
+    return (
+        base
+        + "[v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a];"
+        + f"[2:a]volume={VOLUMEN_SFX},afade=t=in:st=0:d=0.08,"
+        + f"afade=t=out:st={SFX_DURACION - 0.25:.3f}:d=0.25,adelay={delay_ms}|all=1[sfx];"
+        + "[v][a][sfx]amix=inputs=2:duration=first:normalize=0[aout]"
     )
 
 
-def _ensamblar_teaser_cuerpo(teaser_path: str, body_path: str, output_path: str) -> bool:
-    """Ensambla teaser(B&W 5s)+cuerpo a color con SFX whoosh (espejo de ffmpeg_service)."""
+def _maps_teaser_cuerpo(con_sfx: bool) -> list:
+    """Maps del ensamble: [aout] con SFX mezclado, [a] sin SFX."""
+    return ["-map", "[v]", "-map", "[aout]" if con_sfx else "[a]"]
+
+
+def _ensamblar_teaser_cuerpo(
+    teaser_path: str, body_path: str, output_path: str, sfx_mood: str = MOOD_DEFAULT
+) -> bool:
+    """Ensambla teaser(B&W 5s)+cuerpo a color con SFX del mood (espejo de ffmpeg_service)."""
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        FFMPEG_BIN, "-y",
-        "-i", teaser_path, "-i", body_path,
-        "-f", "lavfi", "-t", f"{SFX_DURACION:.3f}", "-i", SFX_LAVFI,
-        "-filter_complex", _filtro_teaser_cuerpo(),
-        "-map", "[v]", "-map", "[aout]",
+    sfx_input = _input_sfx(sfx_mood)
+    con_sfx = sfx_input is not None
+    cmd = [FFMPEG_BIN, "-y", "-i", teaser_path, "-i", body_path]
+    if sfx_input:
+        cmd.extend(sfx_input)
+    cmd.extend([
+        "-filter_complex", _filtro_teaser_cuerpo(con_sfx),
+        *_maps_teaser_cuerpo(con_sfx),
         *_args_codec_video("20"),
         "-c:a", "aac", "-b:a", "128k",
         "-movflags", "+faststart",
         output_path,
-    ]
+    ])
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     if not _salida_ffmpeg_ok(result, output_path):
         logger.error("[video_processor] Ensamble teaser+cuerpo FAILED (rc=%s): %s", result.returncode, _stderr_de(result))
@@ -570,16 +615,27 @@ def _ensamblar_teaser_cuerpo(teaser_path: str, body_path: str, output_path: str)
     return True
 
 
-def _componer_teaser_worker(input_video: str, clip_start: float, body_path: str, output_video: str) -> bool:
+def _copiar_cuerpo_como_fallback(body_path: str, output_video: str) -> bool:
+    """Fallback #116: el cuerpo a color es el output final (sin teaser)."""
+    shutil.copyfile(body_path, output_video)
+    return os.path.exists(output_video) and os.path.getsize(output_video) > 0
+
+
+def _componer_teaser_worker(
+    input_video: str, clip_start: float, body_path: str, output_video: str,
+    sfx_mood: str = MOOD_DEFAULT, enable_hook_teaser: bool = True,
+) -> bool:
     """Teaser B&W 5s + ensamble; fallback: devolver solo el cuerpo a color si falla."""
+    if not enable_hook_teaser:
+        logger.info("[video_processor] enable_hook_teaser=False — salida: solo cuerpo a color")
+        return _copiar_cuerpo_como_fallback(body_path, output_video)
     with tempfile.TemporaryDirectory(prefix="teaser_worker_") as tdir:
         teaser_path = os.path.join(tdir, "teaser.mp4")
         if _generar_teaser_bw(input_video, clip_start, teaser_path):
-            if _ensamblar_teaser_cuerpo(teaser_path, body_path, output_video):
+            if _ensamblar_teaser_cuerpo(teaser_path, body_path, output_video, sfx_mood):
                 return True
         logger.warning("[video_processor] Teaser/ensamble falló — devolviendo solo el cuerpo a color")
-        shutil.copyfile(body_path, output_video)
-        return os.path.exists(output_video) and os.path.getsize(output_video) > 0
+        return _copiar_cuerpo_como_fallback(body_path, output_video)
 
 
 def process_clip_vertical(
@@ -588,7 +644,9 @@ def process_clip_vertical(
     segments: List[Dict[str, Any]],
     clip_start: float,
     clip_end: float,
-    hook_text: str | None = None
+    hook_text: str | None = None,
+    sfx_mood: str = MOOD_DEFAULT,
+    enable_hook_teaser: bool = True,
 ) -> bool:
     """Procesa un clip completo: corta + reframe vertical + quema subs + hook.
     
@@ -630,4 +688,7 @@ def process_clip_vertical(
             return False
 
         # 4. Teaser B&W 5s + ensamble (unificación worker/backend, issue #116)
-        return _componer_teaser_worker(input_video, clip_start, body_path, output_video)
+        return _componer_teaser_worker(
+            input_video, clip_start, body_path, output_video,
+            sfx_mood=_mood_valido(sfx_mood), enable_hook_teaser=enable_hook_teaser,
+        )
