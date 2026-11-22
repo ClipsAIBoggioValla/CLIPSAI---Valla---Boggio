@@ -132,8 +132,8 @@ CRITERIOS VIRALIDAD BASE (ordena por potencial):
 
 REGLAS ESTRICTAS:
 - Clip: 15.0 <= (end_time - start_time) <= 60.0
-- Hook: 3.0 <= duration <= 6.0, y hook.start_time >= clip.start_time y hook.end_time <= clip.end_time
-- Hook duration = hook.end_time - hook.start_time debe ser 3-6
+- Hook: 4.5 <= duration <= 5.5 (OBJETIVO 5.0s - teaser de video estandarizado), y hook.start_time >= clip.start_time y hook.end_time <= clip.end_time
+- Hook duration = hook.end_time - hook.start_time debe ser 4.5-5.5
 - Usa timestamps EXACTOS de la transcripcion (no inventes fuera de rango)
 - hook.text debe coincidir literal con frase de la transcripcion en ese rango y ser frase completa sin muletilla final
 - viral_score 80-100 para estructura gancho potente + clip coherente (ver scoring arriba)

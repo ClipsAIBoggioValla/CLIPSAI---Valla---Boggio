@@ -311,16 +311,29 @@ def _parsear_rango_clip(clip_start: float, clip_end: float) -> tuple[float, floa
         return None
 
 
-def _hook_teaser_aceptado(hook_selection: dict) -> tuple | None:
-    """Teaser de Claude si cumple duración 2.5-5.5s, curiosity ≥8 y standalone. None si se rechaza."""
+def _hook_aceptable(duration: float, score: int, standalone: bool) -> bool:
+    """Banda 4.5-5.5s (objetivo 5s, issue #116) + curiosity ≥8 + standalone."""
+    from ..services.ffmpeg_service import HOOK_TEASER_MAX, HOOK_TEASER_MIN
+
+    return HOOK_TEASER_MIN < duration < HOOK_TEASER_MAX and score >= 8 and standalone
+
+
+def _mood_de_seleccion(hook_selection: dict, sfx_mood: str) -> str:
+    """sfx_mood efectivo: hook LLM -> sfx_mood del render -> default 'transition'."""
+    return hook_selection.get("sfx_mood") or sfx_mood or "transition"
+
+
+def _hook_teaser_aceptado(hook_selection: dict, sfx_mood: str = "") -> tuple | None:
+    """Teaser de Claude si cumple duración 4.5-5.5s (objetivo 5s, issue #116), curiosity ≥8 y standalone. None si se rechaza."""
     try:
         hook_start = float(hook_selection["start_time"])
         hook_end = float(hook_selection["end_time"])
         duration = hook_end - hook_start
         score = int(hook_selection.get("curiosity_score", 0))
         standalone = hook_selection.get("makes_sense_standalone") is True
-        if 2.5 < duration < 5.5 and score >= 8 and standalone:
-            return hook_start, hook_end, hook_selection
+        if _hook_aceptable(duration, score, standalone):
+            mood = _mood_de_seleccion(hook_selection, sfx_mood)
+            return hook_start, hook_end, {**hook_selection, "sfx_mood": mood}
         logger.warning(
             "[jobs] teaser rechazado: duration=%.3fs curiosity=%s standalone=%s; se usa apertura in-clip",
             duration,
@@ -415,6 +428,23 @@ def _modo_hook_sel(hook_sel: tuple[float, float, dict | None]) -> str:
     return str(hook_meta.get("mode", "teaser"))
 
 
+def _hook_in_clip_ok(hs: float, he: float, clip_start: float, clip_end: float) -> bool:
+    """Hook in-clip dentro del cuerpo."""
+    return clip_start <= hs < he <= clip_end
+
+
+def _hook_banda_ok(hs: float, he: float) -> bool:
+    """Hook dentro de la banda 4.5-5.5s (objetivo 5s, issue #116)."""
+    from ..services.ffmpeg_service import HOOK_TEASER_MAX, HOOK_TEASER_MIN
+
+    return HOOK_TEASER_MIN < (he - hs) < HOOK_TEASER_MAX
+
+
+def _hook_posicion_ok(hs: float, he: float, hook_mode: str, clip_start: float, clip_end: float) -> bool:
+    """True si el modo no exige in-clip, o el hook está dentro del cuerpo."""
+    return hook_mode != "in_clip" or _hook_in_clip_ok(hs, he, clip_start, clip_end)
+
+
 def _validar_hook_sel(hook_sel: tuple[float, float, dict | None] | None, clip_start: float, clip_end: float) -> None:
     if hook_sel is None:
         return
@@ -422,9 +452,9 @@ def _validar_hook_sel(hook_sel: tuple[float, float, dict | None] | None, clip_st
     hs = float(hs)
     he = float(he)
     hook_mode = _modo_hook_sel(hook_sel)
-    if not (2.5 < (he - hs) < 5.5):
-        raise ValueError(f"Hook duración {(he-hs):.3f}s debe estar estrictamente entre 2.5 y 5.5s")
-    if hook_mode == "in_clip" and not (clip_start <= hs < he <= clip_end):
+    if not _hook_banda_ok(hs, he):
+        raise ValueError(f"Hook duración {(he-hs):.3f}s debe estar estrictamente entre 4.5 y 5.5s")
+    if not _hook_posicion_ok(hs, he, hook_mode, clip_start, clip_end):
         raise ValueError(f"Hook in-clip [{hs},{he}] fuera del cuerpo [{clip_start},{clip_end}]")
 
 
@@ -497,14 +527,20 @@ def _clip_titulo_desde_segmentos(segments: list[dict], clip_start: float, clip_e
 
 
 def _ass_teaser(clip_start: float, clip_end: float, segments: list[dict], hook_sel: tuple, ass_path_obj: Path, clip_title: str | None) -> None:
-    """ASS con hook: desplaza los subtítulos por el teaser antepuesto."""
+    """ASS con hook: desplaza los subtítulos por el teaser antepuesto.
+
+    La ventana se normaliza a ~5s (issue #116) para que el shift del ASS
+    coincida EXACTAMENTE con el teaser que renderiza build_hook_clip.
+    """
     hs, he, _ = hook_sel
     from ..services.ass_generator import generate_hooked_ass
+    from ..services.ffmpeg_service import _normalizar_ventana_hook
 
+    hs, he = _normalizar_ventana_hook(hs, he, clip_start, clip_end)
     # Convertir segments a SubtitleSegment type
     segs_for_ass = [{"start": float(s["start"]), "end": float(s["end"]), "text": str(s["text"])} for s in segments]
     generate_hooked_ass(segs_for_ass, clip_start, clip_end, hs, he, ass_path_obj, title=clip_title or "clipsai")
-    logger.info("[jobs] ASS hooked generado %s (hook %.1f-%.1f)", ass_path_obj, hs, he)
+    logger.info("[jobs] ASS hooked generado %s (hook %.1f-%.1f, teaser normalizado 5s)", ass_path_obj, hs, he)
 
 
 def _ass_simple(clip_start: float, clip_end: float, segments: list[dict], ass_path_obj: Path, clip_title: str | None) -> None:
@@ -559,13 +595,23 @@ def _logear_probe_reframe(trimmed_path: Path) -> None:
         logger.warning("[jobs] no se pudo propear trimmed_path: %s", probe_err)
 
 
-def _cortar_clip_intermedio(src: Path, clip_start: float, clip_end: float, hook_sel: tuple | None, hook_mode: str, trimmed_path: Path) -> None:
+def _mood_teaser(hook_sel: tuple | None, sfx_mood: str) -> str:
+    """mood efectivo del teaser: hook_selection.sfx_mood -> sfx_mood del render -> default."""
+    meta = hook_sel[2] if hook_sel else None
+    return _mood_de_seleccion({"sfx_mood": (meta or {}).get("sfx_mood")}, sfx_mood)
+
+
+def _cortar_clip_intermedio(
+    src: Path, clip_start: float, clip_end: float,
+    hook_sel: tuple | None, hook_mode: str, trimmed_path: Path,
+    sfx_mood: str = "transition",
+) -> None:
     """a) Recortar por timestamps (o componer primero el teaser y el clip)."""
     from ..services.ffmpeg_service import build_hook_clip, cut_segment
 
     if hook_sel and hook_mode == "teaser":
         hs, he, _ = hook_sel
-        build_hook_clip(src, clip_start, clip_end, hs, he, trimmed_path)
+        build_hook_clip(src, clip_start, clip_end, hs, he, trimmed_path, sfx_mood=_mood_teaser(hook_sel, sfx_mood))
     else:
         cut_segment(src, clip_start, clip_end, trimmed_path)
 
@@ -639,8 +685,17 @@ def _render_clip_with_ass_and_hook(
     job_id: uuid.UUID,
     clip_index: int,
     clip_title: str | None,
+    enable_hook_teaser: bool = True,
+    sfx_mood: str = "transition",
 ) -> tuple[str, dict]:
-    """Construye cada clip en orden: recorte → crop 9:16 → subtítulos ASS."""
+    """Construye cada clip en orden: recorte → crop 9:16 → subtítulos ASS.
+
+    `enable_hook_teaser=False` (issue #116): render sin teaser — el hook_sel
+    se ignora (cut directo + ASS simple sin shift).
+    """
+    if not enable_hook_teaser:
+        hook_sel = None
+        logger.info("[jobs] enable_hook_teaser=False — render sin teaser para clip %s", clip_index)
     clip_start, clip_end = _validar_args_render(video_path, clip_start, clip_end, hook_sel, clip_index)
     meta: dict = {"hook_applied": False, "ass_applied": False, "render": "fallback"}
     src = Path(video_path)

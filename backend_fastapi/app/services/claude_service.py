@@ -210,6 +210,11 @@ def _build_output_schema(sentence_ids: list[str]) -> dict[str, Any]:
                                     "end_sentence_id": {"type": "string", "enum": sentence_ids},
                                     "curiosity_score": {"type": "integer", "minimum": 1, "maximum": 10},
                                     "makes_sense_standalone": {"type": "boolean"},
+                                    # Opcional (issue #116): tono del SFX del teaser; default none.
+                                    "sfx_mood": {
+                                        "type": "string",
+                                        "enum": ["tension", "impact", "transition", "none"],
+                                    },
                                 },
                             },
                         },
@@ -259,6 +264,7 @@ REGLAS ESTRICTAS:
 - No devuelvas ni estimes timestamps flotantes; los límites de tiempo se resolverán desde las palabras de Whisper
 - Selecciona límites de oración completos; mantén juntas las palabras consecutivas de cada oración
 - Cada hook_candidate debe tener start_sentence_id, end_sentence_id, curiosity_score (entero 1-10) y makes_sense_standalone (booleano)
+- Opcional: sfx_mood por hook_candidate ("tension" | "impact" | "transition" | "none") según el tono del teaser; default "none" si no aplica
 - Prohibido iniciar hook_candidates con conectores o muletillas: "Y...", "Bueno...", "Entonces...", "Porque...", "O sea...", "Eh...", "Este..."
 - Un hook válido es una oración completa con sujeto, verbo y predicado, o una pregunta directa con autonomía semántica propia
 - Evalúa curiosidad y autonomía independientemente; si ningún candidato alcanza curiosity_score >= 8 y autonomía true, has_hook debe ser false
@@ -683,6 +689,15 @@ def _ids_hook_validos(hook_start_id: str, hook_end_id: str) -> bool:
     return _es_id_oracion(hook_start_id) and _es_id_oracion(hook_end_id)
 
 
+_SFX_MOODS = ("tension", "impact", "transition", "none")
+
+
+def _sfx_mood_de(candidate) -> str:
+    """sfx_mood del hook candidate con whitelist; "none" si falta o es inválido (issue #116)."""
+    mood = str(candidate.get("sfx_mood", "none")).strip().lower() if isinstance(candidate, dict) else "none"
+    return mood if mood in _SFX_MOODS else "none"
+
+
 def _curiosity_de_candidate(candidate) -> int | None:
     """curiosity_score como entero; None si no es numérico."""
     try:
@@ -716,6 +731,7 @@ def _hook_candidate_valido(candidate) -> dict | None:
             "end_sentence_id": hook_end_id,
             "curiosity_score": curiosity_score,
             "makes_sense_standalone": standalone,
+            "sfx_mood": _sfx_mood_de(candidate),
         }
     return None
 
@@ -811,6 +827,7 @@ def _hook_candidate_posicion_valido(candidate, sentence_positions: dict) -> dict
             "end_sentence_id": hook_end_id,
             "curiosity_score": curiosity_score,
             "makes_sense_standalone": standalone,
+            "sfx_mood": _sfx_mood_de(candidate),
         }
     return None
 
