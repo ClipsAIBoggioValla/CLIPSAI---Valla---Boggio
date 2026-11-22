@@ -386,7 +386,7 @@ class TestRenderClipConAssYHook:
             jobs_router._render_clip_with_ass_and_hook(
                 str(archivo), 10.0, 11.0, [], None, uuid_lib.uuid4(), 0, None
             )
-        with pytest.raises(ValueError, match="entre 2.5 y 5.5"):
+        with pytest.raises(ValueError, match="entre 4.5 y 5.5"):
             jobs_router._render_clip_with_ass_and_hook(
                 str(archivo), 10.0, 30.0, [], (11.0, 12.0, {"mode": "teaser"}), uuid_lib.uuid4(), 0, None
             )
