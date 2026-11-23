@@ -19,6 +19,12 @@ logger.setLevel(logging.INFO)
 
 FFMPEG_BIN = "/usr/local/bin/ffmpeg"
 
+# Zoom dinámico por picos RMS (issue #117): zoompan con `it`, fps fijo.
+ZOOM_MAX_BODY = 1.12
+ZOOM_RAMPA = 0.2               # 200ms de subida/bajada por pico
+ZOOM_TOP_K = 10                # máx. picos por clip (expresión acotada)
+ZOOM_FPS = 30                  # fps fijo: cero desfasaje A/V con nvenc
+
 # ---- Hook Teaser unificado con backend (issue #116) --------------------------
 TEASER_DURACION = 5.0          # teaser de video de 5s (mismo estándar que ffmpeg_service)
 ZOOM_TEASER = 1.08             # zoom leve sobre la ventana del hook
@@ -199,7 +205,8 @@ def _segmento_recortado(s: Dict[str, Any], clip_start: float, clip_end: float) -
     return {
         "start": cs - clip_start,
         "end": ce - clip_start,
-        "text": txt
+        "text": txt,
+        "emoji": s.get("emoji"),  # issue #117: emoji contextual (None si no hay)
     }
 
 
@@ -218,8 +225,31 @@ def _evento_hook_ass(hook_text: str, clip_start: float, clip_end: float) -> str:
     return f"Dialogue: 0,0:00:00.00,{eh}:{em:02d}:{es:05.2f},Hook,,0,0,0,,{hook_clean}\n"
 
 
+def _texto_escapado_ass(texto: str) -> str:
+    """Texto en mayúsculas con escape de ASS/ffmpeg."""
+    text = str(texto).upper().replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
+    return " ".join(text.split())
+
+
+def _texto_con_emoji(texto: str, emoji: str | None) -> str:
+    """Texto con override inline de Noto Color Emoji (issue #117); sin emoji = texto plano."""
+    escapado = _texto_escapado_ass(texto)
+    seguro = _emoji_seguro(emoji)
+    if not seguro:
+        return escapado
+    return f"{{\\fnNoto Color Emoji}}{seguro}{{\\fnDejaVu Sans}} {escapado}"
+
+
+def _emoji_seguro(emoji: str | None) -> str:
+    """Emoji saneado para un override ASS; '' si es vacío, 'none' o inseguro."""
+    limpio = str(emoji).strip()[:12]
+    if any((not limpio, limpio.lower() == "none", not limpio.isprintable())):
+        return ""
+    return limpio.replace("{", "").replace("}", "").replace("\\", "")
+
+
 def _evento_dialogue_ass(seg: dict) -> str:
-    """Evento Dialogue de un segmento (escape ffmpeg + uppercase)."""
+    """Evento Dialogue de un segmento (escape ffmpeg + uppercase + emoji opcional)."""
     start_h = int(seg["start"] // 3600)
     start_m = int((seg["start"] % 3600) // 60)
     start_s = seg["start"] % 60
@@ -227,8 +257,7 @@ def _evento_dialogue_ass(seg: dict) -> str:
     end_m = int((seg["end"] % 3600) // 60)
     end_s = seg["end"] % 60
 
-    text = seg["text"].upper().replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
-    text = " ".join(text.split())
+    text = _texto_con_emoji(seg.get("text", ""), seg.get("emoji"))
 
     return f"Dialogue: 0,{start_h}:{start_m:02d}:{start_s:05.2f},{end_h}:{end_m:02d}:{end_s:05.2f},Default,,0,0,0,,{text}\n"
 
@@ -330,8 +359,8 @@ def _filtro_ass(ass_file: str) -> str | None:
     return None
 
 
-def _construir_filtergraph(ass_file: str | None) -> list:
-    """Filtergraph de crop + scale + setsar + ass opcional."""
+def _construir_filtergraph(ass_file: str | None, picos_zoom: List[float] | None = None) -> list:
+    """Filtergraph de crop + scale + zoompan (picos RMS) + setsar + ass opcional."""
     filters = []
 
     # 1. Crop-primero (evita frames gigantes de 3413px)
@@ -339,6 +368,13 @@ def _construir_filtergraph(ass_file: str | None) -> list:
 
     # 2. Scale a 1080x1920
     filters.append("scale=1080:1920")
+
+    # 2b. Zoom dinámico por picos RMS (issue #117): con `it` (tiempo de entrada
+    # del zoompan) y fps=30 explícito para cero desfasaje A/V con nvenc.
+    filtro_zoom = _filtro_zoompan(picos_zoom)
+    if filtro_zoom:
+        filters.append(filtro_zoom)
+
     filters.append("setsar=1")
 
     # 3. Quemar subtítulos ASS si existe
@@ -348,6 +384,31 @@ def _construir_filtergraph(ass_file: str | None) -> list:
             filters.append(filtro)
 
     return filters
+
+
+def _ventana_pico(t_pico: float, rampa: float = ZOOM_RAMPA) -> str:
+    """Término de zoom para un pico: sube 200ms, mantiene ~200ms, baja 200ms."""
+    return (
+        f"clip((it-{t_pico:.3f})/{rampa:.3f},0,1)"
+        f"*clip(({t_pico + 2 * rampa:.3f}-it)/{rampa:.3f},0,1)"
+    )
+
+
+def _filtro_zoompan(picos: List[float] | None, fps: int = ZOOM_FPS, zoom_max: float = ZOOM_MAX_BODY) -> str:
+    """zoompan guiado por picos RMS (issue #117): 1.0 -> 1.12 -> 1.0.
+
+    Usa `it` (input time de zoompan; `t` no existe en vf_zoompan) y fps
+    explícito con d=1 para que la duración nunca se altere respecto al audio.
+    Sin picos devuelve "" -> filtergraph estático (fallback CA-4).
+    """
+    if not picos:
+        return ""
+    picos_acotados = sorted(picos)[:ZOOM_TOP_K]
+    terminos = ",".join(_ventana_pico(p) for p in picos_acotados)
+    return (
+        f"fps={fps},zoompan=z='1+{(zoom_max - 1):.2f}*max({terminos},0)':"
+        f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=1080x1920:fps={fps}"
+    )
 
 
 def _log_filtergraph(vf: str) -> None:
@@ -424,7 +485,8 @@ def reframe_and_burn_subtitles(
     ass_file: str | None = None,
     hook_text: str | None = None,
     clip_start: float = 0.0,
-    timeout_seconds: int = 300
+    timeout_seconds: int = 300,
+    picos_zoom: List[float] | None = None,
 ) -> bool:
     """Reframe vertical 9:16 + quema subtítulos ASS + hook opcional.
     
@@ -435,17 +497,18 @@ def reframe_and_burn_subtitles(
         hook_text: Sin efecto en este filtro (se integra en el ASS); se mantiene por compatibilidad de firma
         clip_start: Inicio del clip en segundos (para hook timing)
         timeout_seconds: Timeout de ffmpeg
+        picos_zoom: Picos RMS relativos al cuerpo (zoompan 1.0->1.12, issue #117)
     
     Returns:
         True si éxito, False si falla
     """
     # Construir filtergraph
-    filters = _construir_filtergraph(ass_file)
+    filters = _construir_filtergraph(ass_file, picos_zoom=picos_zoom)
 
     # NOTA: sin drawtext — el ffmpeg estático de RunPod no tiene libfreetype
     # ("No such filter: 'drawtext'", rc=8). El hook se QUEMA VÍA ASS:
     # generate_ass_from_segments lo agrega como primer evento con estilo "Hook"
-    # (arriba, 0-3s). Este filtergraph solo usa crop+scale+setsar+ass.
+    # (arriba, 0-3s). Este filtergraph usa crop+scale+zoompan+setsar+ass.
 
     vf = ",".join(filters)
 
@@ -647,6 +710,7 @@ def process_clip_vertical(
     hook_text: str | None = None,
     sfx_mood: str = MOOD_DEFAULT,
     enable_hook_teaser: bool = True,
+    picos_zoom: List[float] | None = None,
 ) -> bool:
     """Procesa un clip completo: corta + reframe vertical + quema subs + hook.
     
@@ -657,6 +721,9 @@ def process_clip_vertical(
         clip_start: Inicio del clip en segundos
         clip_end: Fin del clip en segundos
         hook_text: Texto del hook (opcional)
+        sfx_mood: Tono del SFX del teaser ('tension'|'impact'|'transition'|'none')
+        enable_hook_teaser: False = cuerpo directo sin teaser ni shift (issue #116)
+        picos_zoom: Picos RMS del cuerpo (tiempo relativo al cuerpo) para zoompan (issue #117)
     
     Returns:
         True si éxito, False si falla
@@ -676,14 +743,15 @@ def process_clip_vertical(
         # estilo Hook del ASS viejo (0-3s) queda solo para compatibilidad.
         generate_ass_from_segments(segments, clip_start, clip_end, ass_file, hook_text=None)
 
-        # 3. Cuerpo vertical con subtítulos
+        # 3. Cuerpo vertical con subtítulos + zoompan por picos RMS (issue #117)
         body_path = os.path.join(tmpdir, "cuerpo.mp4")
         if not reframe_and_burn_subtitles(
             horizontal_clip,
             body_path,
             ass_file=ass_file,
             hook_text=None,
-            clip_start=clip_start
+            clip_start=clip_start,
+            picos_zoom=picos_zoom
         ):
             return False
 

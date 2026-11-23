@@ -61,16 +61,28 @@ def _copiar_si_ya_vertical(source: Path, output: Path) -> bool:
     return False
 
 
-def _comando_reframe(source: Path, output: Path) -> list[str]:
-    """Comando ffmpeg de crop-primero para 9:16."""
+def _filtro_reframe(picos: list[float] | None = None) -> str:
+    """Crop-primero + scale + zoompan por picos + setsar (issue #117)."""
+    from .ffmpeg_service import _filtro_zoompan
+
     # Crop-primero (evita frames intermedios gigantes de 3413px que causan OOM en Render)
     # Para input 1280x720 (16:9):
     #   1. crop calcula 405x720 (centrado, manteniendo aspect ratio 9:16)
     #   2. scale escala a 1080x1920
-    crop_filter = (
-        f"crop='if(gt(iw/ih,9/16),ih*9/16,iw)':'if(gt(iw/ih,9/16),ih,iw*16/9)',"
-        f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},setsar=1"
-    )
+    filtros = [
+        f"crop='if(gt(iw/ih,9/16),ih*9/16,iw)':'if(gt(iw/ih,9/16),ih,iw*16/9)'",
+        f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}",
+    ]
+    zoom = _filtro_zoompan(picos or [])
+    if zoom:
+        filtros.append(zoom)
+    filtros.append("setsar=1")
+    return ",".join(filtros)
+
+
+def _comando_reframe(source: Path, output: Path, picos: list[float] | None = None) -> list[str]:
+    """Comando ffmpeg de crop-primero para 9:16 (+ zoompan si hay picos)."""
+    crop_filter = _filtro_reframe(picos)
     logger.info("[editor] reframe_video applying filter: %s", crop_filter)
     return [
         "ffmpeg",
@@ -95,11 +107,11 @@ def _comando_reframe(source: Path, output: Path) -> list[str]:
     ]
 
 
-def _ejecutar_ffmpeg_reframe(source: Path, output: Path, timeout_seconds: int):
+def _ejecutar_ffmpeg_reframe(source: Path, output: Path, timeout_seconds: int, picos: list[float] | None = None):
     """Corre ffmpeg para el reencuadre; RuntimeError ante arranque/timeout."""
     try:
         return subprocess.run(
-            _comando_reframe(source, output), capture_output=True, text=True, timeout=timeout_seconds
+            _comando_reframe(source, output, picos), capture_output=True, text=True, timeout=timeout_seconds
         )
     except FileNotFoundError as exc:
         raise RuntimeError("No se pudo reencuadrar a 9:16: FFmpeg no está instalado o no está en PATH") from exc
@@ -175,9 +187,11 @@ def reframe_video(
     output_video: str | Path,
     aspect_ratio: Literal["9:16"] = "9:16",
     timeout_seconds: int = 300,
+    picos: list[float] | None = None,
 ) -> str:
     """Recorta al centro y escala el video a 1080x1920; nunca devuelve el original.
 
+    `picos` (issue #117): timestamps RMS relativos al clip para zoompan 1.0→1.12.
     El crop es FFmpeg-only, por lo que no depende de OpenCV, PyTorch o MediaPipe.
     Cualquier fallo se propaga como RuntimeError con el motivo concreto.
     """
@@ -190,7 +204,7 @@ def reframe_video(
     if _copiar_si_ya_vertical(source, output):
         return str(output)
 
-    result = _ejecutar_ffmpeg_reframe(source, output, timeout_seconds)
+    result = _ejecutar_ffmpeg_reframe(source, output, timeout_seconds, picos)
     if result.returncode != 0:
         _fallar_reframe(result, output)
     _validar_salida_reframe(output)

@@ -33,6 +33,7 @@ class ClipInfo:
     score: int
     primer_segundo: str
     motivo: str
+    emojis: Optional[List[Dict[str, Any]]] = None  # issue #117: 1 emoji cada 4-6 palabras
 
 
 @dataclass
@@ -45,6 +46,7 @@ class ProcesamientoResultado:
     error_tipo: Optional[str] = None
     error_detalle: Optional[str] = None
     transcription_segments: Optional[List[Dict[str, Any]]] = None
+    picos_rms: Optional[List[float]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convierte el resultado a diccionario para serialización JSON."""
@@ -56,12 +58,17 @@ class ProcesamientoResultado:
             "error_tipo": self.error_tipo,
             "error_detalle": self.error_detalle,
             "transcription_segments": self.transcription_segments or [],
+            "picos_rms": self.picos_rms or [],
         }
 
     @classmethod
-    def exito_resultado(cls, clips: List[ClipInfo], carpeta_salida: str, transcription_segments: Optional[List[Dict[str, Any]]] = None) -> "ProcesamientoResultado":
+    def exito_resultado(
+        cls, clips: List[ClipInfo], carpeta_salida: str,
+        transcription_segments: Optional[List[Dict[str, Any]]] = None,
+        picos_rms: Optional[List[float]] = None,
+    ) -> "ProcesamientoResultado":
         """Factory para resultado exitoso."""
-        return cls(exito=True, clips=clips, carpeta_salida=carpeta_salida, transcription_segments=transcription_segments)
+        return cls(exito=True, clips=clips, carpeta_salida=carpeta_salida, transcription_segments=transcription_segments, picos_rms=picos_rms)
 
     @classmethod
     def error_resultado(cls, error: str, error_tipo: str = "Error", error_detalle: str = "") -> "ProcesamientoResultado":
@@ -375,13 +382,14 @@ def _leer_clips_info(clips_dir: str) -> list[ClipInfo]:
                 score=info.get("score", 0),
                 primer_segundo=info.get("primer_segundo", ""),
                 motivo=info.get("motivo", ""),
+                emojis=info.get("emojis"),
             ))
     return clips_resultado
 
 
-def _paso_extraer_y_analizar_audio(video_original: str, audio_path: str) -> tuple:
+def _paso_extraer_y_analizar_audio(video_original: str, audio_path: str, trabajo_dir: str) -> tuple:
     """Extrae el audio y lo analiza (opcional). Devuelve (datos_audio, error|None)."""
-    from main import extraer_audio
+    from main import extraer_audio, analizar_audio_video
 
     try:
         extraer_audio(video_original, audio_path)
@@ -392,17 +400,18 @@ def _paso_extraer_y_analizar_audio(video_original: str, audio_path: str) -> tupl
             error_detalle=traceback.format_exc()
         )
 
-    return _datos_audio_opcionales(audio_path), None
+    salida_audio = os.path.join(trabajo_dir, "audio.json")
+    return _datos_audio_opcionales(audio_path, salida_audio), None
 
 
-def _datos_audio_opcionales(audio_path: str) -> list:
+def _datos_audio_opcionales(audio_path: str, salida_audio: str = "audio.json") -> list:
     """Analiza el audio si el módulo está disponible; [] si falla o no está."""
     from main import analizar_audio_video, AUDIO_ANALYZER_AVAILABLE
 
     datos_audio: list = []
     if AUDIO_ANALYZER_AVAILABLE:
         try:
-            datos_audio = analizar_audio_video(audio_path)
+            datos_audio = analizar_audio_video(audio_path, salida_path=salida_audio)
         except Exception:
             # No es fatal, continuamos sin datos de audio
             datos_audio = []
@@ -441,16 +450,22 @@ def _paso_obtener_clips_ia(texto_para_ia: str, datos_audio: list, datos_enriquec
         return None, _error_ia_desde_excepcion(e)
 
 
-def _resultado_vacio_con_segmentos(clips_dir: str, transcription_segments: list) -> ProcesamientoResultado:
+def _resultado_vacio_con_segmentos(
+    clips_dir: str, transcription_segments: list, picos_rms: Optional[List[float]] = None,
+) -> ProcesamientoResultado:
     """Resultado exitoso sin clips, conservando los segmentos de transcripción."""
     return ProcesamientoResultado.exito_resultado(
         clips=[],
         carpeta_salida=clips_dir,
-        transcription_segments=transcription_segments
+        transcription_segments=transcription_segments,
+        picos_rms=picos_rms
     )
 
 
-def _paso_generar_archivos(video_original: str, clips_ia: list, clips_dir: str, transcription_segments: list) -> ProcesamientoResultado:
+def _paso_generar_archivos(
+    video_original: str, clips_ia: list, clips_dir: str, transcription_segments: list,
+    picos_rms: Optional[List[float]] = None,
+) -> ProcesamientoResultado:
     """Valida los clips de la IA y genera los videos. Devuelve el resultado final."""
     from main import validar_clips, procesar_clips
 
@@ -458,7 +473,7 @@ def _paso_generar_archivos(video_original: str, clips_ia: list, clips_dir: str, 
     if not clips_validos:
         # Respuesta válida pero vacía - no es un error, el video no tiene clips relevantes
         print(f"[engine] IA no encontró clips válidos (devolvió {len(clips_ia)} clips, ninguno pasó validación)")
-        return _resultado_vacio_con_segmentos(clips_dir, transcription_segments)
+        return _resultado_vacio_con_segmentos(clips_dir, transcription_segments, picos_rms)
 
     try:
         archivos_generados = procesar_clips(video_original, clips_validos, clips_dir)
@@ -472,32 +487,44 @@ def _paso_generar_archivos(video_original: str, clips_ia: list, clips_dir: str, 
     if not archivos_generados:
         # Si no se generaron archivos, retornar éxito con 0 clips
         print(f"[engine] No se generaron archivos de clip, retornando resultado vacío")
-        return _resultado_vacio_con_segmentos(clips_dir, transcription_segments)
+        return _resultado_vacio_con_segmentos(clips_dir, transcription_segments, picos_rms)
 
     # 5/6. Leer info de clips generados y resultado exitoso
     return ProcesamientoResultado.exito_resultado(
         clips=_leer_clips_info(clips_dir),
         carpeta_salida=clips_dir,
-        transcription_segments=transcription_segments
+        transcription_segments=transcription_segments,
+        picos_rms=picos_rms
     )
 
 
+def _cargar_picos_zoom(trabajo_dir: str) -> Optional[List[float]]:
+    """Picos RMS del sidecar de audio; [] si audio_analyzer o el archivo no están."""
+    try:
+        from audio_analyzer import cargar_picos
+        return cargar_picos(os.path.join(trabajo_dir, "audio.json"))
+    except Exception:
+        return []
+
+
 def _pasos_previos(trabajo_dir: str, video_original: str, transcripcion_original: str) -> tuple:
-    """Audio → análisis → transcripción → datos IA. Devuelve (estado|None, error|None)."""
+    """Audio → análisis → transcripción → datos IA. Devuelve (datos, picos, error|None)."""
     # 4.1 Extraer audio
     audio_path = os.path.join(trabajo_dir, "audio.mp3")
-    datos_audio, error = _paso_extraer_y_analizar_audio(video_original, audio_path)
+    datos_audio, error = _paso_extraer_y_analizar_audio(video_original, audio_path, trabajo_dir)
     if error is not None:
-        return None, error
+        return None, [], error
+    picos_rms = _cargar_picos_zoom(trabajo_dir)
 
     # 4.3 Parsear transcripción o usar Whisper si está vacía
     transcripcion_formatted = os.path.join(trabajo_dir, "transcripcion_formatted.txt")
     error_transcripcion = _preparar_transcripcion(trabajo_dir, audio_path, transcripcion_original, transcripcion_formatted)
     if error_transcripcion is not None:
-        return None, error_transcripcion
+        return None, picos_rms, error_transcripcion
 
     # 4.4 Preparar datos para IA
-    return _paso_datos_ia(transcripcion_formatted, datos_audio)
+    datos, error = _paso_datos_ia(transcripcion_formatted, datos_audio)
+    return datos, picos_rms, error
 
 
 def _ejecutar_pipeline_interno(
@@ -520,7 +547,7 @@ def _ejecutar_pipeline_interno(
     )
 
     # 4.1-4.4 Audio, análisis, transcripción y datos para IA
-    datos, error = _pasos_previos(trabajo_dir, video_original, transcripcion_original)
+    datos, picos_rms, error = _pasos_previos(trabajo_dir, video_original, transcripcion_original)
     if error is not None:
         return error
     datos_audio, texto_para_ia, datos_enriquecidos, transcription_segments = datos
@@ -531,7 +558,7 @@ def _ejecutar_pipeline_interno(
         return error
 
     # 4.6 Validar clips + 4.7 Generar clips de video
-    return _paso_generar_archivos(video_original, clips_ia, clips_dir, transcription_segments)
+    return _paso_generar_archivos(video_original, clips_ia, clips_dir, transcription_segments, picos_rms)
 
 
 def procesar_video(video_path: str, transcripcion_path: str) -> ProcesamientoResultado:
