@@ -498,19 +498,59 @@ def _segmento_datos(s: dict) -> tuple[float, float, str] | None:
     return st, en, txt
 
 
+def _segmento_en_ventana(st: float, en: float, clip_start: float, clip_end: float) -> bool:
+    """True si el segmento [st, en] cruza la ventana del clip."""
+    return not (en < clip_start or st > clip_end)
+
+
 def _segmento_shift(s: dict, clip_start: float, clip_end: float) -> dict | None:
     """Segmento validado y shifteado a 0. None si no entra en la ventana del clip."""
     datos = _segmento_datos(s)
     if datos is None:
         return None
     st, en, txt = datos
-    if en < clip_start or st > clip_end:
+    if not _segmento_en_ventana(st, en, clip_start, clip_end):
         return None
     cs = max(st, clip_start)
     ce = min(en, clip_end)
     if ce > cs:
-        return {"start": cs - clip_start, "end": ce - clip_start, "text": txt}
+        return {
+            "start": cs - clip_start,
+            "end": ce - clip_start,
+            "text": txt,
+            "emoji": s.get("emoji"),  # issue #117
+        }
     return None
+
+
+def _emojis_en_ventana(emojis: list[dict] | None, clip_start: float, clip_end: float) -> list[dict]:
+    """Emojis cuyo 'segundo' absoluto cae dentro del clip (issue #117)."""
+    return [
+        entrada for entrada in (emojis or [])
+        if clip_start <= float(entrada.get("segundo", -1)) < clip_end
+    ]
+
+
+def _emoji_en_segmento(seg: dict, emojis: list[dict]) -> str | None:
+    """Emoji cuyo segundo cae dentro del segmento; None si no hay."""
+    st = float(seg.get("start", 0))
+    en = float(seg.get("end", 0))
+    return next(
+        (str(e.get("emoji")) for e in emojis if st <= float(e.get("segundo", -1)) < en),
+        None,
+    )
+
+
+def _emojis_a_segmentos(segments: list[dict], emojis: list[dict] | None, clip_start: float, clip_end: float) -> list[dict]:
+    """Asigna a cada segmento el emoji contextual que cae en su ventana."""
+    en_ventana = _emojis_en_ventana(emojis, clip_start, clip_end)
+    if not en_ventana:
+        return segments
+    resultado = []
+    for seg in segments:
+        emoji = _emoji_en_segmento(seg, en_ventana)
+        resultado.append({**seg, "emoji": emoji} if emoji else seg)
+    return resultado
 
 
 def _clip_titulo_desde_segmentos(segments: list[dict], clip_start: float, clip_end: float) -> list[dict]:
@@ -538,7 +578,10 @@ def _ass_teaser(clip_start: float, clip_end: float, segments: list[dict], hook_s
 
     hs, he = _normalizar_ventana_hook(hs, he, clip_start, clip_end)
     # Convertir segments a SubtitleSegment type
-    segs_for_ass = [{"start": float(s["start"]), "end": float(s["end"]), "text": str(s["text"])} for s in segments]
+    segs_for_ass = [
+        {"start": float(s["start"]), "end": float(s["end"]), "text": str(s["text"]), "emoji": s.get("emoji")}
+        for s in segments
+    ]
     generate_hooked_ass(segs_for_ass, clip_start, clip_end, hs, he, ass_path_obj, title=clip_title or "clipsai")
     logger.info("[jobs] ASS hooked generado %s (hook %.1f-%.1f, teaser normalizado 5s)", ass_path_obj, hs, he)
 
@@ -687,11 +730,13 @@ def _render_clip_with_ass_and_hook(
     clip_title: str | None,
     enable_hook_teaser: bool = True,
     sfx_mood: str = "transition",
+    emojis: list[dict] | None = None,
 ) -> tuple[str, dict]:
     """Construye cada clip en orden: recorte → crop 9:16 → subtítulos ASS.
 
     `enable_hook_teaser=False` (issue #116): render sin teaser — el hook_sel
     se ignora (cut directo + ASS simple sin shift).
+    `emojis` (issue #117): emojis contextuales {segundo, emoji} del clip.
     """
     if not enable_hook_teaser:
         hook_sel = None
@@ -701,6 +746,9 @@ def _render_clip_with_ass_and_hook(
     src = Path(video_path)
     _validar_video_fuente(video_path, src)
 
+    # Emojis contextuales por grupo de subtítulos (issue #117).
+    segments_con_emoji = _emojis_a_segmentos(segments, emojis, clip_start, clip_end)
+
     # Directorio final persistente
     out_dir = STORAGE_CLIPS_DIR / str(job_id)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -709,7 +757,7 @@ def _render_clip_with_ass_and_hook(
 
     # Preparar ASS
     hook_mode = _modo_de_hook(hook_sel)
-    ass_path_obj = _generar_ass(clip_start, clip_end, segments, hook_sel, hook_mode, clip_title) if segments else None
+    ass_path_obj = _generar_ass(clip_start, clip_end, segments_con_emoji, hook_sel, hook_mode, clip_title) if segments_con_emoji else None
 
     # Construir el clip intermedio; todos los caminos pasan obligatoriamente por crop 9:16.
     try:
@@ -1292,11 +1340,32 @@ def _tags_del_item(item: dict) -> Any:
     return tags
 
 
+def _titulo_del_item(item: dict) -> Any:
+    """Título del item con los alias conocidos; 'Clip' si ninguno viene."""
+    for clave in ("title", "titulo", "titulo_sugerido", "name"):
+        valor = item.get(clave)
+        if valor:
+            return valor
+    return "Clip"
+
+
+def _emojis_del_item(item: dict) -> list:
+    """Emojis del item normalizados a lista (issue #117)."""
+    emojis = item.get("emojis")
+    return emojis if isinstance(emojis, list) else []
+
+
 def _parsear_clip_item(item: dict, idx: int) -> dict:
     """Normaliza un item del payload del engine: title, start/end (con clamp), score y tags."""
-    title = item.get("title") or item.get("titulo") or item.get("titulo_sugerido") or item.get("name") or "Clip"
     start, end = _tiempos_del_item(item, idx)
-    return {"title": title, "start": start, "end": end, "score_val": _score_del_item(item), "tags": _tags_del_item(item)}
+    return {
+        "title": _titulo_del_item(item),
+        "start": start,
+        "end": end,
+        "score_val": _score_del_item(item),
+        "tags": _tags_del_item(item),
+        "emojis": _emojis_del_item(item),
+    }
 
 
 def _hook_fallback_por_fallo(start: float, end: float) -> tuple:
@@ -1471,7 +1540,8 @@ def _renderar_clip_item(
     try:
         # Pasar segments/hook solo si ASS/Hook habilitado, pero siempre renderizar físico
         final_path, render_meta = _render_clip_with_ass_and_hook(
-            video.filepath, float(datos["start"]), float(datos["end"]), segments, hook_sel, job.id, idx, _titulo_recortado(datos["title"])
+            video.filepath, float(datos["start"]), float(datos["end"]), segments, hook_sel, job.id, idx,
+            _titulo_recortado(datos["title"]), emojis=datos.get("emojis"),
         )
         final_storage = final_path
         tipo_render = render_meta.get("render", "fallback")
