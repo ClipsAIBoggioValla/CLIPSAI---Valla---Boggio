@@ -1,10 +1,10 @@
 /**
- * Helpers puros compartidos entre la capa de servicios de React y Vue.
+ * Helpers puros de la capa de servicios de frontend_react.
  *
- * Son funciones sin dependencia del cliente HTTP (fetch vs axios) ni del
- * framework, por eso pueden vivir en el paquete comun `frontend_common`.
+ * Son funciones sin dependencia del cliente HTTP (fetch) ni del
+ * framework, por eso viven en el paquete comun `frontend_common`.
  * Los metodos que SI dependen del cliente HTTP (upload, login, etc.) se
- * mantienen en cada frontend.
+ * mantienen en el frontend.
  */
 import type { JobResponse, VideoUploadResponse } from '../types/api'
 

@@ -7,10 +7,8 @@ node_modules
 .vscode
 .idea
 
-# Frontends y otros backends
-frontend_react
-frontend_vue
-backend_express
+# Stacks legacy archivados (Issue #110)
+archive
 spark-admin-1.0.0
 
 # Artefactos de build y caches
