@@ -1,5 +1,5 @@
 /* Páginas legales (Issue 33) — estilos sobre tokens spark.css.
-   Copia idéntica en frontend_vue/src/assets/legal.css para paridad. */
+   Single source of truth: frontend_react lo importa vía shim. */
 
 .legal-page {
   min-height: 100vh;

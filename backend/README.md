@@ -45,5 +45,6 @@ from backend.core.interfaces import ITranscriber, IViralityEngine
 ```
 
 ## Próximos pasos
-- Wirear `backend_fastapi` y `backend_express` para que importen `backend.core.schemas` en vez de sus schemas duplicados.
-- `docker-compose` monta `backend` como volumen para ambos backends.
+- Wirear `backend_fastapi` para que importe `backend.core.schemas` en vez de sus schemas duplicados.
+- `docker-compose` monta `backend` como volumen para el backend FastAPI.
+- El backend Express legacy se archivó en `archive/backend_express/` (Issue #110).

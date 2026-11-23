@@ -1,5 +1,5 @@
 /* Landing pública (Issue 32) — estilos propios sobre los tokens de spark.css.
-   Copia idéntica en frontend_vue/src/assets/landing.css para mantener la paridad. */
+   Single source of truth: frontend_react lo importa vía shim. */
 
 html { scroll-behavior: smooth; }
 

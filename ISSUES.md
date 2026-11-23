@@ -24,7 +24,7 @@
 
 | # | Título (corto) | Responsable | Semana | Estado real | Delta real pendiente |
 |---|---|---|---|---|---|
-| #110 | Archivar Express/Vue + fijar `frontend_common` | B | 1 | ⚠️ Parcial | Mover `backend_express/`+`frontend_vue/` a `archive/`; limpiar compose/`dev:up`; docs a un solo stack (el lado `frontend_common` ya está hecho) |
+| #110 | Archivar Express/Vue + fijar `frontend_common` | B | 1 | ✅ Hecho (23-nov-2026) | ~~Mover `backend_express/`+`frontend_vue/` a `archive/`; limpiar compose/`dev:up`; docs a un solo stack~~ → resuelto en rama `chore/issue-110-archive-legacy` (`git mv` a `archive/`, compose 4 servicios, `frontend_react` con `frontend_common` `file:` + Dockerfile contexto raíz, docs actualizadas) |
 | #111 | Rotar keys + cifrar tokens OAuth + rate limit | B | 1 | ⚠️ Parcial | Cablear `vault.py` (AESGCM) a `social_accounts` (hoy texto plano); `slowapi` en `/auth/*` y presign; `JWT_SECRET` guard en prod; rotar `sk-ant` + purgar historial; `.env.example` (`VAULT_KEY`, `RUNPOD_WEBHOOK_SECRET`, `R2_PUBLIC_URL`) |
 | #112 | SSRF guard en `backend/handler.py` | A | 1 | ⚠️ Parcial | Cablear `validate_url()` en `_descargar_stream`/`_download_file` (guard y tests ya existen); `allow_redirects=True` actual sin validar |
 | #113 | Webhooks RunPod (HMAC) en vez de polling | B | 1 | ❌ Pendiente | Todo: `routers/webhooks.py`, HMAC, disparo `/run`, idempotencia, timeout 30 min, fallback runsync |
@@ -43,7 +43,9 @@
 | #126 | Scheduler de publicaciones + calendario | B | 4 | ⚠️ Parcial | `ScheduledPost` (schemas) y estado DB `scheduled` existen. Falta: `scheduled_for` en clips, APScheduler, endpoint con fecha, UI de fecha/calendario |
 | #127 | Analytics de métricas reales de posts | B | 4 | ❌ Pendiente | Todo: `/metrics` es de proceso interno; sin ingesta de vistas/likes por plataforma |
 
-**Resumen:** HECHO 0 · PARCIAL 12 (#110, #111, #112, #114, #115, #116, #117, #119, #120, #121, #122, #126) · PENDIENTE 6 (#113, #118, #123, #124, #125, #127).
+**Resumen (auditoría 18-nov, histórico):** HECHO 0 · PARCIAL 12 (#110, #111, #112, #114, #115, #116, #117, #119, #120, #121, #122, #126) · PENDIENTE 6 (#113, #118, #123, #124, #125, #127).
+
+> **Actualización 23-nov-2026:** **#110 implementado** — `backend_express/` y `frontend_vue/` archivados con `git mv` en `archive/backend_express/` y `archive/frontend_vue/` (historial intacto), compose reducido a `db + backend_fastapi + frontend_react + ngrok`, `dev:up` levanta solo db+fastapi, y `frontend_react` compila aislado con `npm ci --prefix frontend_react` (dependencia `frontend_common: file:../frontend_common`). Los scripts `audit:parity`/`audit:openapi` quedan archivados con la carpeta.
 Las semanas objetivo del backlog original (1→4) siguen siendo realistas, pero la Fase 1 tiene hoy
 más avance del asumido en el lado A (stub yt-dlp, guard listo) y cero en la parte crítica de B
 (cifrado de tokens y rate limit sin cablear).
@@ -112,16 +114,16 @@ más avance del asumido en el lado A (stub yt-dlp, guard listo) y cero en la par
 | Infra DB + Docker | ✅ | Postgres 15 + volumen + healthcheck + 01-init-schema.sql idempotente + triggers |
 | Motor IA (Python) | ✅ | `main.py` pipeline completo + `engine.py` wrapper estable + `engine_subprocess.py` |
 | FastAPI (referencia) | ✅ | 22 endpoints, auth JWT, videos/jobs/clips, export, metrics, stats, docs Swagger + **Issue 21 cableado engine real** |
-| Express (espejo) | ✅ ~90% | Auth/videos/jobs/clips/metrics/stats/users + **Issue 30 Swagger /docs** `swagger-ui-express` + `swagger-jsdoc` |
+| Express (archivado) | 📦 | Movido a `archive/backend_express/` (Issue #110) — ya no se despliega; Swagger y paridad 1:1 quedaron verificados en su momento |
 | React | ✅ ~95% | Auth, Upload dropzone neon, JobStatus polling, Dashboard recharts, Biblioteca 1 fila, Settings, Layout cyber-tech |
-| Vue | ✅ ~95% | Paridad 1:1 React (Pinia/axios, barras CSS, guards) |
+| Vue (archivado) | 📦 | Movido a `archive/frontend_vue/` (Issue #110) — ya no se despliega; paridad 1:1 con React quedó verificada en su momento (Pinia/axios, barras CSS, guards) |
 | Diseño Spark Admin | ✅ | `spark.css` dark `#0B0F17/#080C14/#121824` + lime `#B4F105` — Issue #34 |
 | Subtítulos/Hook | ✅ | **Issue 29** `ass_generator.generate_hooked_ass` + `ffmpeg_service.build_hook_clip` + `burn_subtitles` integrado en `jobs._run_job` con fallback degradado |
 | Publicación | ✅ | **Issues 27–28** publicación real TikTok/YouTube/Instagram + **Issue 23** ngrok callbacks |
 | OAuth | ✅ | **Issues 24–26** YouTube/Google, Instagram Graph, TikTok Content Posting |
 | DB Cuentas Sociales | ✅ | **Issue 22** `social_accounts` schema + `user_social_accounts` |
 | Seguridad | ⚠️ | JWT/bcrypt OK pero `.env.example` filtra ANTHROPIC_API_KEY, falta rotación `BFG` |
-| Compose completo | ⚠️ | `db` + `backend_fastapi` + `backend_express` listo; frontends `preview` pendiente Issue 31–35 |
+| Compose completo | ✅ | 4 servicios: `db` + `backend_fastapi` + `frontend_react` + `ngrok` (Issue #110: Express/Vue archivados) |
 | Docs OpenAPI | ✅ | FastAPI `/docs` + Express `/docs` + `/openapi.json` paridad 1.0.0 |
 
 ---
