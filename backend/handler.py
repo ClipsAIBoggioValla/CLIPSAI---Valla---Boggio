@@ -382,9 +382,49 @@ def _subir_clip_a_r2(vertical_path: str, idx: int, bucket: str, video_id: str, c
         return None
 
 
+def _picos_de_clip(picos: list, clip_start: float, clip_end: float) -> list:
+    """Picos RMS dentro del clip, en tiempo RELATIVO al cuerpo (zoompan usa `it`)."""
+    return [round(p - clip_start, 3) for p in (picos or []) if clip_start <= p < clip_end]
+
+
+def _emoji_del_segmento(seg: dict, emojis: list) -> str | None:
+    """Emoji del hook cuyo 'segundo' cae dentro del segmento. None si no hay."""
+    st, en = float(seg.get("start", 0)), float(seg.get("end", 0))
+    return next(
+        (e["emoji"] for e in emojis if st <= float(e.get("segundo", -1)) < en),
+        None,
+    )
+
+
+def _copia_con_emoji(seg: dict, emojis: list) -> dict:
+    """Copia del segmento con el emoji asignado (issue #117)."""
+    copia = dict(seg)
+    mood = _emoji_del_segmento(seg, emojis)
+    if mood:
+        copia["emoji"] = mood
+    return copia
+
+
+def _emojis_de_ventana(emojis: list | None, clip_start: float, clip_end: float) -> list:
+    """Emojis cuyo 'segundo' absoluto cae dentro del clip (issue #117)."""
+    return [
+        e for e in (emojis or [])
+        if clip_start <= float(e.get("segundo", -1)) < clip_end
+    ]
+
+
+def _emojis_a_segmentos(segments: list, emojis: list | None, clip_start: float, clip_end: float) -> list:
+    """Asigna a los segmentos del clip el emoji cuyo segundo (absoluto) cae dentro."""
+    en_ventana = _emojis_de_ventana(emojis, clip_start, clip_end)
+    if not en_ventana:
+        return segments
+    return [_copia_con_emoji(seg, en_ventana) for seg in segments]
+
+
 def _procesar_clip_vertical(
     video_path: str, transcription_segments: list, clip: Any, idx: int, bucket: str,
     video_id: str, sfx_mood: str = "transition", enable_hook_teaser: bool = True,
+    picos_rms: list | None = None,
 ) -> dict[str, Any] | None:
     """Procesa un clip a vertical 9:16 con subs+hook y lo sube a R2. None si falla."""
     from video_processor import process_clip_vertical
@@ -393,6 +433,13 @@ def _procesar_clip_vertical(
     clip_start = _ts_a_segundos_handler(clip.inicio)
     clip_end = _ts_a_segundos_handler(clip.fin)
 
+    # Zoom dinámico por picos RMS (issue #117): picos del clip, relativos al cuerpo
+    picos_zoom = _picos_de_clip(picos_rms, clip_start, clip_end)
+    # Emojis contextuales por grupo de subtítulos (issue #117)
+    segments_emoji = _emojis_a_segmentos(
+        transcription_segments, getattr(clip, "emojis", None), clip_start, clip_end,
+    )
+
     # Procesar clip vertical
     horizontal_path = clip.archivo
     vertical_path = horizontal_path.replace(".mp4", "_vertical.mp4")
@@ -400,12 +447,13 @@ def _procesar_clip_vertical(
     success = process_clip_vertical(
         input_video=str(video_path),
         output_video=vertical_path,
-        segments=transcription_segments,
+        segments=segments_emoji,
         clip_start=clip_start,
         clip_end=clip_end,
         hook_text=_hook_texto_de(clip),
         sfx_mood=sfx_mood,
         enable_hook_teaser=enable_hook_teaser,
+        picos_zoom=picos_zoom,
     )
 
     if not success or not os.path.exists(vertical_path):
@@ -420,7 +468,7 @@ MAX_RENDER_WORKERS = 3
 
 def _procesar_clips_verticales(
     video_path: str, transcription_segments: list, clips: list, bucket: str, video_id: str,
-    sfx_mood: str = "transition", enable_hook_teaser: bool = True,
+    sfx_mood: str = "transition", enable_hook_teaser: bool = True, picos_rms: list | None = None,
 ) -> list:
     """Procesa los clips en paralelo (ThreadPoolExecutor) preservando el orden.
 
@@ -429,10 +477,11 @@ def _procesar_clips_verticales(
     colisiones entre workers.
     """
     with ThreadPoolExecutor(max_workers=MAX_RENDER_WORKERS) as pool:
+        extra = (picos_rms,) if picos_rms else ()
         futures = {
             idx: pool.submit(
                 _procesar_clip_vertical, video_path, transcription_segments,
-                clip, idx, bucket, video_id, sfx_mood, enable_hook_teaser,
+                clip, idx, bucket, video_id, sfx_mood, enable_hook_teaser, *extra,
             )
             for idx, clip in enumerate(clips)
         }
@@ -526,6 +575,7 @@ def _respuesta_completa(result, video_id: str, video_path: Path, bucket: str, sf
     clips_verticales = _procesar_clips_verticales(
         video_path, transcription_segments, clips, bucket, video_id,
         sfx_mood=sfx_mood, enable_hook_teaser=enable_hook_teaser,
+        picos_rms=getattr(result, "picos_rms", None),
     )
 
     logger.info("%s clips verticales procesados y subidos a R2", len(clips_verticales))

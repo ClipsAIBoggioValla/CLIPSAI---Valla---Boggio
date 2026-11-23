@@ -142,7 +142,9 @@ def _eventos_top_ordenados(eventos: List[Dict]) -> List[Dict]:
     return eventos_top
 
 
-def analizar_audio_video(audio_path: str = "audio.mp3", max_eventos: int = 30) -> List[Dict]:
+def analizar_audio_video(
+    audio_path: str = "audio.mp3", salida_path: str = "audio.json", max_eventos: int = 30
+) -> List[Dict]:
     """Analiza el audio usando el módulo audio_analyzer."""
     print("[2/6] Analizando audio...")
 
@@ -151,7 +153,7 @@ def analizar_audio_video(audio_path: str = "audio.mp3", max_eventos: int = 30) -
         return []
 
     try:
-        eventos = analizar_audio(audio_path, "audio.json")
+        eventos = analizar_audio(audio_path, salida_path)
         _agregar_momentos_cluster(eventos)
 
         eventos_top = _eventos_top_ordenados(eventos)
@@ -540,7 +542,8 @@ REGLAS OBLIGATORIAS DE DURACIÓN:
 "primer_segundo": "frase exacta con la que arranca el clip",
 "motivo": "explicación de por qué es viral en 1 oración",
 "tipo_contenido": "exclusiva",
-"audio_score": 8
+"audio_score": 8,
+"emojis": [{{"segundo": 12.5, "emoji": "🔥"}}, {{"segundo": 27.0, "emoji": "😱"}}]
 }}
 
 CAMPOS OBLIGATORIOS:
@@ -554,6 +557,7 @@ CAMPOS OBLIGATORIOS:
 - motivo: por qué este momento específico va a generar engagement
 - tipo_contenido: uno de [exclusiva, analisis, emocion, prediccion, controversia]
 - audio_score: 1-10 basado en los datos de audio en ese rango de tiempo
+- emojis: OPCIONAL (issue #117) - hasta 5 emojis contextuales por clip, 1 cada 4-6 palabras de los subtítulos (sin spam); segundo = timestamp ABSOLUTO de la transcripción dentro del clip; omite el campo si no aportan
 
 REGLAS FINALES:
 - Asigná un score del 1 al 10, pero incluí todos los clips que tengan al menos un 5
@@ -1051,6 +1055,40 @@ def _duracion_valida(i: int, inicio_seg: int, fin_seg: int) -> bool:
     return True
 
 
+EMOJIS_VALIDOS_MAX = 5
+EMOJI_LARGO_MAX = 12  # emoji + ZWJ/selector de variación pueden sumar varios chars
+
+
+def _emoji_limpio(valor: Any) -> str:
+    """Emoji saneado (sin llaves/backslash/control); '' si es vacío o 'none'."""
+    emoji = str(valor).strip()[:EMOJI_LARGO_MAX]
+    if any((not emoji, emoji.lower() == "none", not emoji.isprintable())):
+        return ""
+    return emoji.replace("{", "").replace("}", "").replace("\\", "")
+
+
+def _emoji_valido(entry: Dict) -> Optional[Dict]:
+    """Entrada {segundo, emoji} saneada. None si es inválida."""
+    emoji = _emoji_limpio(entry.get("emoji"))
+    try:
+        segundo = float(entry.get("segundo"))
+    except (TypeError, ValueError):
+        return None
+    if not emoji:
+        return None
+    if segundo < 0:
+        return None
+    return {"segundo": round(segundo, 3), "emoji": emoji}
+
+
+def _emojis_validos(emojis: Any) -> List[Dict]:
+    """Hasta 5 emojis contextuales saneados por clip; [] si no aportan (issue #117)."""
+    if not isinstance(emojis, list):
+        return []
+    validos = [_emoji_valido(e) for e in emojis if isinstance(e, dict)]
+    return [e for e in validos if e is not None][:EMOJIS_VALIDOS_MAX]
+
+
 def _clip_valido(i: int, clip: Dict) -> Optional[Dict]:
     """Normaliza un clip de IA a formato final. None si no pasa la validación."""
     segs = _campos_ts_de_clip(i, clip)
@@ -1085,6 +1123,7 @@ def _clip_valido(i: int, clip: Dict) -> Optional[Dict]:
         "primer_segundo": clip.get("primer_segundo", ""),
         "motivo": clip.get("motivo", ""),
         "tipo_contenido": clip.get("tipo_contenido", "otro"),
+        "emojis": _emojis_validos(clip.get("emojis")),
     }
 
 
@@ -1208,6 +1247,7 @@ def procesar_clips(video_entrada: str, clips: List[Dict], carpeta: str) -> List[
                 "score": clip.get("score", 0),
                 "primer_segundo": clip.get("primer_segundo", ""),
                 "motivo": clip.get("motivo", ""),
+                "emojis": clip.get("emojis", []),
             })
         else:
             print(f"      ✗ Falló")
