@@ -2,8 +2,8 @@
  * Contenido editorial de la landing pública (Issue 32).
  *
  * Un único lugar para el copy de hero, pasos, motor, features y footer.
- * El equivalente Vue vive en frontend_vue/src/components/landing/landingData.ts
- * y se mantiene 1:1 con este archivo (paridad de frontends ~100%).
+ * Consumido por frontend_react vía shim (single source of truth).
+ * El frontend Vue legacy se archivó en archive/frontend_vue/ (Issue #110).
  */
 
 export const LANDING_SITE_URL = 'https://clipsai.xyz'
@@ -175,9 +175,7 @@ export const LANDING_STACK = [
   'faster-whisper',
   'scikit-learn',
   'FastAPI',
-  'Express',
   'React',
-  'Vue',
   'PostgreSQL',
 ]
 

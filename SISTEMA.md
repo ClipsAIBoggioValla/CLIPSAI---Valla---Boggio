@@ -4,7 +4,9 @@
 >
 > **Propósito:** describir de arriba a abajo qué es el sistema, qué hace hoy, con qué lo hace, cómo se estructura el código y qué falta — para decidir nuevas issues y onboarding. Está pensado como insumo para tomar decisiones sobre los próximos pasos (ver §17.6).
 >
-> **Última actualización: 18 de noviembre de 2026** — **Fase 5 de calidad MERGEADA a `main`** (PR #108: Compl 352 → 47 bloques con helpers CC ≤ 4; 669 tests, 82 %; detalle en §17.3 y `ISSUES_CALIDAD_PENDIENTES.md`) y **PR #109** (`fix/tiktok-integration`: redirect_uri consistente connect/exchange de TikTok, tarjeta de TikTok restaurada en Integraciones). **Auditoría de código del backlog #110-#127 ejecutada el 18-nov-2026** contra `main` (`85a9bc6`): 0 issues 100 % hechos, **12 PARCIALES, 6 PENDIENTES** — estado real, evidencia y delta por issue en §17.7 (y en el cuerpo de cada issue en GitHub, con sección "🔍 Auditoría de código — 18-nov-2026").
+> **Última actualización: 23 de noviembre de 2026** — **Issue #110: stack comercial único FastAPI + React.** `backend_express/` y `frontend_vue/` se movieron con `git mv` a `archive/backend_express/` y `archive/frontend_vue/` (historial intacto). `docker-compose.yml` quedó en **4 servicios** (`db`, `backend_fastapi`, `frontend_react`, `ngrok`); `frontend_react` consume `frontend_common` como dependencia `file:../frontend_common` (build aislado con `npm ci --prefix frontend_react`) y su Dockerfile usa la raíz del repo como contexto. Las secciones sobre Express/Vue (§9, columnas Vue de §10, filas legacy de §12/§14) se conservan como **referencia histórica del stack archivado**.
+>
+> **Actualización previa: 18 de noviembre de 2026** — **Fase 5 de calidad MERGEADA a `main`** (PR #108: Compl 352 → 47 bloques con helpers CC ≤ 4; 669 tests, 82 %; detalle en §17.3 y `ISSUES_CALIDAD_PENDIENTES.md`) y **PR #109** (`fix/tiktok-integration`: redirect_uri consistente connect/exchange de TikTok, tarjeta de TikTok restaurada en Integraciones). **Auditoría de código del backlog #110-#127 ejecutada el 18-nov-2026** contra `main` (`85a9bc6`): 0 issues 100 % hechos, **12 PARCIALES, 6 PENDIENTES** — estado real, evidencia y delta por issue en §17.7 (y en el cuerpo de cada issue en GitHub, con sección "🔍 Auditoría de código — 18-nov-2026").
 
 ---
 
@@ -64,7 +66,7 @@ Video (.mp4/.mov/.avi) + Transcripción (.txt/.srt)
 - Gestión de usuarios, videos, jobs y clips vía API con autenticación JWT
 - Interfaz web (subida, seguimiento, biblioteca, dashboard, integraciones)
 - Persistencia en PostgreSQL dockerizada
-- Dual stack: 2 backends (FastAPI y Express) con paridad de endpoints; 2 frontends (React y Vue) con paridad de vistas; misma DB y mismo JWT
+- ~~Dual stack: 2 backends (FastAPI y Express) con paridad de endpoints; 2 frontends (React y Vue) con paridad de vistas; misma DB y mismo JWT~~ → **Stack único FastAPI + React (Issue #110)**: Express y Vue se archivaron en `archive/` (referencia histórica en §9 y §10)
 - Procesamiento **opcional** delegado a GPU serverless (RunPod) con almacenamiento en Cloudflare R2 y subida directa desde el navegador (§18)
 - Despliegue en la nube (Render + Vercel) además de la pila local con Docker Compose
 
@@ -92,7 +94,7 @@ Video (.mp4/.mov/.avi) + Transcripción (.txt/.srt)
 - **Persistencia:** PostgreSQL 15 con volumen `clipsai_postgres_data`
 - **Disponibilidad:** procesamiento asíncrono no bloqueante (`BackgroundTasks` / `setImmediate`)
 - **Mantenibilidad:** paridad verificable entre backends/frontends; motor desacoplado de la capa web
-- **Desplegabilidad:** `docker compose up -d --build` levanta los 6 servicios
+- **Desplegabilidad:** `docker compose up -d --build` levanta los 4 servicios (Issue #110)
 
 ### 1.5 Objetivos específicos y medibles
 
@@ -108,6 +110,8 @@ Video (.mp4/.mov/.avi) + Transcripción (.txt/.srt)
 ---
 
 ## 2. Arquitectura de despliegue
+
+> **Nota (Issue #110):** el diagrama incluye el stack legacy Express :3001 / Vue :5173, hoy archivado en `archive/`. El despliegue activo es **db + backend_fastapi + frontend_react + ngrok** (4 servicios).
 
 ```
               ┌──────────────────────────────────────────────┐
@@ -158,12 +162,12 @@ Video (.mp4/.mov/.avi) + Transcripción (.txt/.srt)
 
 | Capa | Tech | Notas |
 |------|------|-------|
-| Orquestación | Docker + Compose v2 + `start-dev.ps1` | 6 servicios, healthchecks |
+| Orquestación | Docker + Compose v2 + `start-dev.ps1` | 4 servicios (db, backend_fastapi, frontend_react, ngrok), healthchecks — Issue #110 |
 | DB | PostgreSQL 15 + `uuid-ossp` | triggers `updated_at`, CHECK `lower()` case-insensitive |
 | Backend #1 | Python 3.11 + FastAPI 0.115 + SQLAlchemy 2.0 sync + Pydantic 2 + python-jose + bcrypt + uvicorn | `redirect_slashes=False`, lifespan migrations |
-| Backend #2 | Node 20 + Express 4.19 + pg 8.11 + jsonwebtoken + bcryptjs + multer + tsx + TS 5.5 + swagger-jsdoc | `type:module`, pool normaliza `postgresql+psycopg2://` |
+| Backend #2 (archivado) | Node 20 + Express 4.19 + pg 8.11 + jsonwebtoken + bcryptjs + multer + tsx + TS 5.5 + swagger-jsdoc | **ARCHIVADO en `archive/backend_express/` (Issue #110)** — `type:module`, pool normaliza `postgresql+psycopg2://` |
 | Frontend #1 | React 18.3 + TS 5.5 + react-router 6 + Context + Tailwind 3.4 + Vite 5.3 + recharts | `fetch` apiClient, `useJobPolling` 2s |
-| Frontend #2 | Vue 3.4 + TS 5.5 + vue-router 4 + Pinia 2 + Axios + Tailwind 3.4 + Vite 5.3 | interceptors 401→/login, composable polling |
+| Frontend #2 (archivado) | Vue 3.4 + TS 5.5 + vue-router 4 + Pinia 2 + Axios + Tailwind 3.4 + Vite 5.3 | **ARCHIVADO en `archive/frontend_vue/` (Issue #110)** — interceptors 401→/login, composable polling |
 | Motor IA | Python + librosa + faster-whisper large-v3-turbo + scikit-learn KMeans + Anthropic/OpenAI/OpenRouter/DeepSeek + FFmpeg | pipeline `extraer_audio→analizar→formatear→enriquecer→LLM→validar→cortar` |
 | Worker serverless | RunPod Serverless (GPU CUDA 12.1, PyTorch image) + `worker.Dockerfile` | `backend/handler.py` → `engine.procesar_video` → `video_processor` 9:16 → R2 (§18) |
 | Almacenamiento | Cloudflare R2 (API S3) + dominio público `videos.clipsai.xyz` | presign SigV4 manual (`s3.ts`) o boto3 (FastAPI); subida directa del front |
@@ -189,7 +193,7 @@ Video (.mp4/.mov/.avi) + Transcripción (.txt/.srt)
 │
 ├── .env                         # variables reales (gitignored) — ver .env.example
 ├── .env.example                 # plantilla (key con placeholder; la key real quedó en git history, ver §15)
-├── docker-compose.yml           # 6 servicios: db, 2 backends, 2 frontends, ngrok
+├── docker-compose.yml           # 4 servicios: db, backend_fastapi, frontend_react, ngrok (Issue #110)
 ├── worker.Dockerfile            # imagen del worker RunPod GPU (§18) — CI → Docker Hub
 ├── start-dev.ps1                # orquestación híbrida/docker (-Docker, -Down, -Logs)
 ├── package.json / package-lock.json   # npm workspaces: frontend_common/react/vue
@@ -240,7 +244,8 @@ Video (.mp4/.mov/.avi) + Transcripción (.txt/.srt)
 │       ├── tasks/subtitle_pipeline.py
 │       └── api/v1/endpoints/subtitles.py
 │
-├── backend_express/             # Backend #2 (espejo ~100%)
+├── archive/                     # Stacks legacy archivados (Issue #110, git mv con historial)
+│   ├── backend_express/         # Backend #2 legacy (espejo ~100%, ya no se despliega)
 │   ├── Dockerfile / package.json / tsconfig.json
 │   └── src/
 │       ├── index.ts app.ts      # cors + mounts + Swagger /docs + /openapi.json
@@ -268,7 +273,7 @@ Video (.mp4/.mov/.avi) + Transcripción (.txt/.srt)
 │       ├── styles/spark.css + landing.css + legal.css  # shims → frontend_common/styles
 │       └── types/api.ts         # shim → frontend_common/types/api
 │
-├── frontend_vue/                # Frontend #2 (paridad 1:1)
+│   └── frontend_vue/            # Frontend #2 legacy (paridad 1:1, ya no se despliega)
 │   ├── vite.config.ts (port 5173) / package.json
 │   └── src/
 │       ├── main.ts App.vue router/index.ts (guards + VITE_ALLOW_ANONYMOUS)
@@ -326,8 +331,8 @@ Video (.mp4/.mov/.avi) + Transcripción (.txt/.srt)
 | Publicación real | `backend_fastapi/app/services/publish_service.py` + `tiktok|youtube|instagram_service.py` |
 | OAuth connectors | `backend_fastapi/app/routers/social_auth.py` |
 | Contratos compartidos | `backend/core/schemas.py` + `interfaces.py` |
-| Procesamiento serverless (RunPod) | `worker.Dockerfile` + `backend/handler.py` + `backend_fastapi/app/services/runpod_service.py` + `backend_express/src/services/runpod.ts` (§18) |
-| Subida directa a R2 / presign | `backend_express/src/services/s3.ts` (SigV4 manual) · FastAPI `app/routers/videos.py` (boto3) |
+| Procesamiento serverless (RunPod) | `worker.Dockerfile` + `backend/handler.py` + `backend_fastapi/app/services/runpod_service.py` (legacy Express: `archive/backend_express/src/services/runpod.ts`) (§18) |
+| Subida directa a R2 / presign | FastAPI `app/routers/videos.py` (boto3) · legacy Express: `archive/backend_express/src/services/s3.ts` (SigV4 manual) |
 | Render 9:16 en el worker | `video_processor.py` (`process_clip_vertical`) + `backend_fastapi/app/services/editor.py` |
 | Limpieza de storage | `backend_fastapi/app/services/storage_cleanup.py` |
 | Frontend compartido | `frontend_common/` (npm workspaces) |
@@ -524,6 +529,8 @@ backend/
 
 ## 9. Backend Express (espejo — paridad 1:1 verificada)
 
+> **⚠️ ARCHIVADO (Issue #110, 23-nov-2026):** este backend vive ahora en `archive/backend_express/` y ya no se despliega ni se mantiene. La sección se conserva como referencia histórica de la paridad dual-stack. El stack comercial es solo FastAPI (§8).
+
 **Estructura:** `src/app.ts` (cors, mounts, Swagger) + `src/db/index.ts` (pg.Pool, normaliza `postgresql+psycopg2://`) + `src/middleware/auth.ts` (jwt.verify HS256, mensajes "Token expirado/inválido") + `src/docs/swagger.ts` (OpenAPI 3.0, Issue 30) + `src/services/s3.ts` (presign SigV4 manual, sin aws-sdk) + `src/services/runpod.ts` (polling `/runsync`) + `src/routes/subtitles.ts`, `src/routes/socialAuth.ts`, `src/routes/apiVideos.ts`.
 
 | Ruta | Implementación |
@@ -592,6 +599,8 @@ Express 401.
 
 ## 10. Frontends React / Vue
 
+> **⚠️ Vue ARCHIVADO (Issue #110, 23-nov-2026):** `frontend_vue/` vive ahora en `archive/frontend_vue/` y ya no se despliega. El frontend activo es solo React; las columnas y notas Vue de esta sección son referencia histórica de la paridad. `frontend_common/` sigue siendo el single source of truth consumido por React (dependencia `file:../frontend_common`).
+
 ### 10.1 Paridad (≈95%)
 
 | Dimensión | React (`frontend_react`) | Vue (`frontend_vue`) |
@@ -629,7 +638,7 @@ Express 401.
 
 ### 10.4 `frontend_common/` — paquete compartido (npm workspaces)
 
-- Raíz `package.json` declara `"workspaces": ["frontend_common","frontend_react","frontend_vue"]`; Vue lo lista como dependencia (`"frontend_common": "*"`) y ambos resuelven vía `tsconfig` `paths: {"frontend_common/*": ["../frontend_common/*"]}`.
+- Raíz `package.json` declara `"workspaces": ["frontend_common","frontend_react"]` (Issue #110: Vue archivado); React lo lista como dependencia `"frontend_common": "file:../frontend_common"` (build aislado con `npm ci --prefix frontend_react`) y resuelve vía `tsconfig` `paths: {"frontend_common/*": ["../frontend_common/*"]}` + alias en `vite.config.ts`.
 - Contenido: `types/api.ts` (tipos de la API, incl. `RunPodProcessedClip`/`RunPodProcessResponse`), `services/shared.ts` (`uploadFileToSignedUrl`, `triggerBlobDownload`, `normalizeVideo`, `normalizeJob`, `buildClipListQuery`), helpers de clip-library, `landingData`/`landingSeo`, los 3 CSS (`spark`, `landing`, `legal`) y `public/` (favicon, OG image, robots, sitemap) — **single source of truth**: los archivos en cada frontend son shims de 1 línea (`export * from 'frontend_common/...'` / `@import url('frontend_common/styles/...')`).
 - `publicDir: '../frontend_common/public'` en ambos `vite.config.ts`.
 
@@ -642,7 +651,7 @@ Express 401.
 
 ## 11. Tema y diseño Cyber-Tech Dark
 
-`spark.css` unificado en ambos frontends (`frontend_react/src/styles/` y `frontend_vue/src/assets/`), derivado de la plantilla Spark Admin (tokens ya extraídos en `docs/design-reference.md`).
+`spark.css` vive en `frontend_common/styles/` y React lo importa vía shim (`frontend_react/src/styles/`); la copia Vue quedó archivada en `archive/frontend_vue/` (Issue #110). Derivado de la plantilla Spark Admin (tokens ya extraídos en `docs/design-reference.md`).
 
 - **Tokens:** `--bg-app:#0B0F17`, `--bg-sidebar:#080C14`, `--bg-card:#121824`, `--border-subtle:rgba(255,255,255,0.08)`, `--text-primary:#F1F5F9`, `--text-secondary:#94A3B8`, `--brand-lime:#B4F105`, glow `0 0 20px rgba(180,241,5,0.35)`.
 - **Sidebar:** link active `rgba(180,241,5,0.12)` + border + glow.
@@ -662,11 +671,11 @@ Express 401.
 
 ```bash
 cp .env.example .env     # completar JWT_SECRET, OAuth, LLM keys, NGROK_AUTHTOKEN
-# Opción A (6 servicios Docker):
+# Opción A (4 servicios Docker):
 docker compose up -d --build
-docker compose ps        # 6 healthy
+docker compose ps        # 4 healthy
 # Opción B (híbrida):
-.\start-dev.ps1          # infra Docker + React/Vue locales + ngrok
+.\start-dev.ps1          # infra Docker + React local + ngrok
 .\start-dev.ps1 -Docker  # todo Docker
 .\start-dev.ps1 -Down    # baja todo (mantiene postgres_data)
 .\start-dev.ps1 -Logs
@@ -675,11 +684,11 @@ docker compose ps        # 6 healthy
 | Servicio | URL |
 |---|---|
 | React | http://localhost:3000 |
-| Vue | http://localhost:5173 |
 | FastAPI | http://localhost:8000 · Swagger `/docs` |
-| Express | http://localhost:3001 · Swagger `/docs` |
 | Postgres | localhost:5432 |
 | Ngrok | https://api.clipsai.xyz (inspect `http://localhost:4040`) |
+
+> Los servicios legacy Express :3001 y Vue :5173 se archivaron en `archive/` (Issue #110) y ya no los levanta compose.
 
 ### 12.2 Sin UI (curl — mismo JWT para :8000 y :3001)
 
@@ -818,7 +827,7 @@ BACKEND_FASTAPI_PORT=8000
 BACKEND_EXPRESS_PORT=3001
 ```
 
-Frontends: `frontend_react/.env` y `frontend_vue/.env` → `VITE_API_URL`. Opcional `VITE_ALLOW_ANONYMOUS=true` para modo sin auth.
+Frontends: `frontend_react/.env` → `VITE_API_URL`. Opcional `VITE_ALLOW_ANONYMOUS=true` para modo sin auth.
 
 `config.py` de FastAPI fuerza los `*_REDIRECT_URI` a `PUBLIC_BACKEND_URL` si contienen URLs ngrok temporales.
 
@@ -826,15 +835,13 @@ Frontends: `frontend_react/.env` y `frontend_vue/.env` → `VITE_API_URL`. Opcio
 
 ## 14. Docker Compose y orquestación
 
-`docker-compose.yml` — 6 servicios:
+`docker-compose.yml` — 4 servicios (Issue #110: Express y Vue archivados en `archive/`):
 
 | Servicio | Imagen/build | Puerto | Notas |
 |---|---|---|---|
 | `db` | `postgres:15-alpine` | 5432 | volume `postgres_data`, `init-scripts/` read-only, healthcheck `pg_isready` |
-| `backend_fastapi` | `./backend_fastapi` | 8000 | ffmpeg+curl en imagen, `./storage:/app/storage`, env LLM+OAuth, healthcheck curl |
-| `backend_express` | `./backend_express` | 3001 | env DB+JWT+LLM, healthcheck node fetch |
-| `frontend_react` | `node:20-alpine` | 3000 | `npm install && npm run dev --host`, hot-reload `CHOKIDAR_USEPOLLING`, `depends_on` fastapi healthy |
-| `frontend_vue` | `node:20-alpine` | 5173 | idem |
+| `backend_fastapi` | contexto raíz + `backend_fastapi/Dockerfile` | 8000 | ffmpeg+curl en imagen, `./storage:/app/storage`, env LLM+OAuth, healthcheck curl |
+| `frontend_react` | `node:20-alpine` | 3000 | `npm install && npm run dev --host`, hot-reload `CHOKIDAR_USEPOLLING`, mounts `./frontend_react:/app` + `./frontend_common:/frontend_common`, `depends_on` fastapi healthy |
 | `ngrok` | `ngrok/ngrok:latest` | 4040 | `http backend_fastapi:8000 --domain=api.clipsai.xyz`, `NGROK_AUTHTOKEN` |
 
 Red `clipsai-net` bridge; volumen nombrado `clipsai_postgres_data`. `down` conserva datos; `down -v` los borra.
@@ -844,7 +851,7 @@ Red `clipsai-net` bridge; volumen nombrado `clipsai_postgres_data`. `down` conse
 - `backend_fastapi` se builda con **contexto raíz** (el Dockerfile necesita `backend/` para `api/routes/{retrim,stream}.py` y el `docker-sitecustomize.py`).
 - El worker comparte `./storage` con los backends en dev, pero en producción la comunicación es vía R2 (no vía volumen).
 - **Despliegue en la nube (Issue 47):** `backend_fastapi/render.yaml` es un blueprint de Render (web service + Postgres managed + disco 10 GB en `/var/data`); las secrets se cargan con `sync: false` desde el dashboard. Fronts en Vercel.
-- `start-dev.ps1`: `-Docker` (todo compose), default (híbrido: `docker compose up -d db backend_fastapi backend_express` + frontends locales con `concurrently` + ngrok), `-Down`, `-Logs`. Scripts npm raíz equivalentes: `dev`, `dev:full`, `dev:docker`, `dev:ngrok`, `install:all`.
+- `start-dev.ps1`: `-Docker` (todo compose), default (híbrido: `docker compose up -d db backend_fastapi` + React local con `concurrently` + ngrok), `-Down`, `-Logs`. Scripts npm raíz equivalentes: `dev`, `dev:full`, `dev:docker`, `dev:ngrok`, `install:all`.
 
 ---
 
@@ -878,17 +885,17 @@ Red `clipsai-net` bridge; volumen nombrado `clipsai_postgres_data`. `down` conse
 | `scripts/verify-issue5.sh` | CRUD clips |
 | `scripts/test_hooks.py`, `scripts/test_subtitles.py` | pruebas de hook y subtítulos |
 | `scripts/make_og_image.py` | genera `public/og-clipsai.png` (1200×630) para ambos frontends |
-| `backend_express/scripts/audit-openapi.mjs` | rutas montadas = rutas documentadas (`npm run audit:openapi`) |
-| `backend_express/scripts/audit-parity.mjs` | FastAPI ↔ Express ruta por ruta contra `fastapi-routes.json` (`npm run audit:parity`) |
+| `archive/backend_express/scripts/audit-openapi.mjs` | (archivado, Issue #110) rutas montadas = rutas documentadas |
+| `archive/backend_express/scripts/audit-parity.mjs` | (archivado, Issue #110) FastAPI ↔ Express ruta por ruta contra `fastapi-routes.json` |
 | `limpiar.py` | limpia artefactos del motor |
 | `start-dev.ps1` | orquestación del stack |
 | `.github/workflows/docker-build.yml` | CI: build+push de `worker.Dockerfile` a Docker Hub en push a `dev` |
 
 **Validación:**
-- Typecheck frontends: `npm run typecheck` (React `tsc --noEmit`, Vue `vue-tsc --noEmit`).
+- Typecheck frontend: `cd frontend_react && npm run typecheck` (`tsc --noEmit`).
 - Build: `npm run build` → `dist/`.
 - Express: `npm run typecheck`, `curl /health`, `curl /docs`.
-- **Paridad backends (Issue 6):** `cd backend_express && npm run audit:openapi && npm run audit:parity` (el script ya compila en Windows vía `pathToFileURL`).
+- ~~**Paridad backends (Issue 6):** `cd backend_express && npm run audit:openapi && npm run audit:parity`~~ — archivado con Express en `archive/backend_express/` (Issue #110); el stack activo es solo FastAPI.
 - Infra: `docker compose logs -f`, `docker compose ps`, `curl :8000/health`, `curl :8000/docs`.
 - Pipeline Issue 29: `test_issue_29_pipeline.py` (ffprobe 9:16, ASS PlayRes, fallback).
 - Landing Issue 32: `npm run build` + `npx lighthouse http://localhost:3000/ --only-categories=seo` (SEO 100/100) + `curl /robots.txt` + `curl /sitemap.xml`.
@@ -939,11 +946,11 @@ Fuentes: [`ISSUES.md`](./ISSUES.md) (backlog detallado) y [`docs/EVALUACION.md`]
 
 | Área | Estado | Detalle |
 |------|--------|---------|
-| Infra DB + Docker | ✅ | Postgres 15 + volumen + healthcheck + DDL idempotente + 6 servicios compose |
+| Infra DB + Docker | ✅ | Postgres 15 + volumen + healthcheck + DDL idempotente + 4 servicios compose (Issue #110) |
 | Motor IA | ✅ | `main.py` + wrapper `engine.py` + `engine_subprocess.py` + prompt 1–5 clips |
 | FastAPI | ✅ | ~78 operaciones, auth, videos/jobs/clips, publish, subtitles, social, export, metrics, docs, sample, retrim/stream |
-| Express | ✅ 100% superficie | paridad 1:1 verificada (`npm run audit:parity`); **divergencias de comportamiento** en jobs/publicación (ver §9) |
-| React / Vue | ✅ ~95% | auth, upload (dropzone + subida directa R2), jobs, dashboard, biblioteca con SSE, settings, integraciones, landing, legales |
+| Express (archivado) | 📦 | Movido a `archive/backend_express/` (Issue #110); paridad 1:1 verificada en su momento (`npm run audit:parity`); divergencias de comportamiento documentadas en §9 |
+| React | ✅ ~95% | auth, upload (dropzone + subida directa R2), jobs, dashboard, biblioteca con SSE, settings, integraciones, landing, legales · Vue archivado en `archive/frontend_vue/` (Issue #110) |
 | Subtítulos + Hook | ✅ | Issue 29 — `ENABLE_ASS_HOOK=True` en `jobs`; en worker vía `video_processor.py` |
 | OAuth + Publish real | ✅ | Issues 22–28 — YouTube/Instagram/TikTok + SSE de estado en UI |
 | Docs OpenAPI | ✅ | FastAPI `/docs` + Express `/docs`, `/openapi.json`, `/redoc` |
@@ -1027,9 +1034,11 @@ código real de `main`. **Ninguno está 100 % implementado**: no se cerró ningu
 parciales fueron editados con su estado, evidencia `archivo:línea` y delta real; los 6 pendientes
 siguen abiertos sin cambios. Resumen:
 
+> **Actualización 23-nov-2026:** **#110 completado** (rama `chore/issue-110-archive-legacy`, PR contra `main` con `Closes #110`): `git mv` de `backend_express/` y `frontend_vue/` a `archive/`, compose en 4 servicios, `dev:up` solo db+fastapi, `frontend_react` con `frontend_common` como dependencia `file:` + Dockerfile de contexto raíz, y docs a stack único. La tabla siguiente es el snapshot histórico de la auditoría del 18-nov.
+
 | Issue | Estado real | Lo que YA existe | Delta real que falta |
 |---|---|---|---|
-| #110 Archivar Express/Vue + `frontend_common` | ⚠️ PARCIAL | `frontend_common` fijado en `frontend_react/package.json:16`, alias en `vite.config.ts:13`, `publicDir` correcto | No existe `archive/`; compose sigue con servicios `backend_express`/`frontend_vue`; docs en modo dual-stack |
+| #110 Archivar Express/Vue + `frontend_common` | ✅ HECHO (23-nov-2026) | `frontend_common` fijado en `frontend_react/package.json:16`, alias en `vite.config.ts:13`, `publicDir` correcto | ~~No existe `archive/`; compose sigue con servicios `backend_express`/`frontend_vue`; docs en modo dual-stack~~ → resuelto: `archive/` creado, compose 4 servicios, docs a stack único |
 | #111 Rotar keys + cifrar tokens + rate limit | ⚠️ PARCIAL | `vault.py` (AESGCM, `VAULT_KEY`) + tests; `rate_limiter.py` módulo listo | Vault **sin cablear** (tokens OAuth en texto plano); sin `slowapi`/`express-rate-limit`; `JWT_SECRET` default débil; key `sk-ant` sigue en git history; `.env.example` sin `VAULT_KEY`/`RUNPOD_WEBHOOK_SECRET`/`R2_PUBLIC_URL` |
 | #112 SSRF en worker | ⚠️ PARCIAL | `ssrf_guard.py` completo (IMDS/privadas/DNS) + `TestSSRFGuard` (5+ payloads) | `backend/handler.py` descarga con `requests.get(allow_redirects=True)` sin `validate_url` (0 referencias al guard) |
 | #113 Webhooks RunPod HMAC | ❌ PENDIENTE | — | Sin `routers/webhooks.py`, sin HMAC, sin `/run`+webhook: FastAPI y Express siguen con `/runsync` + polling `/status` |
@@ -1080,19 +1089,19 @@ siguen abiertos sin cambios. Resumen:
 
 | Backend | Cliente | Endpoints / hooks |
 |---|---|---|
-| Express | `src/services/runpod.ts` (port 1:1 del Python) | `POST /api/videos/upload-url`, `POST /api/videos/process` (`routes/apiVideos.ts`) |
+| Express (archivado) | `archive/backend_express/src/services/runpod.ts` (port 1:1 del Python) | `POST /api/videos/upload-url`, `POST /api/videos/process` (`routes/apiVideos.ts`) — legacy, Issue #110 |
 | FastAPI | `app/services/runpod_service.py` | `POST /api/videos/upload-url` (`videos.py:64`), `POST /api/videos/process` (`videos.py:91`) |
 | FastAPI (delegación indirecta) | `services/engine.py:345-368` → `run_clip_engine()`; `services/whisper_service.py:283` → `transcribe_video()` | llamados desde `routers/jobs.py:_run_job` y `tasks/subtitle_pipeline.py` |
 
 **Comportamiento:** si `RUNPOD_API_KEY` y `RUNPOD_ENDPOINT_ID` tienen valor → delega; si no → procesamiento local. Cuando el worker devuelve clips con `url_r2`, FastAPI marca el job `COMPLETED` al 100 % **sin render local** (`result_metadata._source="runpod_r2"`, `tags._render="runpod_r2"`, `tags.has_ass=true` — commit `9a0e409`).
 
-⚠️ **Express no delega en jobs**: `routes/jobs.ts` hace `spawnSync('python', [engine.py, ...])` local con timeout 20 s. Ver divergencias §9.
+⚠️ **Express no delegaba en jobs** (histórico, hoy archivado en `archive/backend_express/` — Issue #110): `routes/jobs.ts` hacía `spawnSync('python', [engine.py, ...])` local con timeout 20 s. Ver divergencias §9.
 
 ### 18.3 Cloudflare R2 y subida directa
 
-- **`backend_express/src/services/s3.ts`**: presign **SigV4 manual sin aws-sdk** (canonical request, `UNSIGNED-PAYLOAD`, path-style `<endpoint>/<bucket>/<key>` que R2 acepta). FastAPI usa `boto3`.
+- **`archive/backend_express/src/services/s3.ts`** (legacy, Issue #110): presign **SigV4 manual sin aws-sdk** (canonical request, `UNSIGNED-PAYLOAD`, path-style `<endpoint>/<bucket>/<key>` que R2 acepta). El flujo activo usa **FastAPI con `boto3`**.
 - **Flujo:** 1) `POST /api/videos/upload-url {file_name, file_type}` → `{upload_url (PUT presign 900 s), file_key: uploads/{uuid}{ext}`; 2) el front sube con `uploadFileToSignedUrl()` (PUT directo, **el archivo no pasa por el backend**); 3) `POST /api/videos/process` con exactamente uno de `file_key` (GET presign 3600 s) o `video_url`, más `transcription_url` o `transcription_text` + `video_id` → dispara RunPod.
-- **Consumidores:** `frontend_common/services/shared.ts`, `DirectUploadPanel.tsx`, `services/api.ts` (React) y `api/services.ts` (Vue).
+- **Consumidores:** `frontend_common/services/shared.ts`, `DirectUploadPanel.tsx` y `services/api.ts` (React).
 - **Dominio público:** las URLs `*.r2.cloudflarestorage.com` son privadas (403); se usa `R2_PUBLIC_URL` o el default `https://videos.clipsai.xyz` (commit `42a5574`).
 - ⚠️ `R2_PUBLIC_URL` **no está en `.env.example`** (el worker usa el default).
 
@@ -1113,7 +1122,7 @@ siguen abiertos sin cambios. Resumen:
 
 1. **Sincronización de código:** el pipeline RunPod+R2 está 59 commits adelante de `origin/main` (§17.4); Render despliega `origin/main` y el worker se builda desde `dev`.
 2. **`frontend_common` en Docker:** los contenedores de fronts montan solo `./frontend_*` e instalan sin npm workspaces → los shims `export * from 'frontend_common/...'` pueden no resolver (falta `npm install` en raíz o alias en Vite/Docker).
-3. **Express fuera del flujo serverless** (spawnSync local, timeout 20 s, sin ASS+hook).
+3. ~~**Express fuera del flujo serverless** (spawnSync local, timeout 20 s, sin ASS+hook)~~ — resuelto por archivado de Express (Issue #110).
 4. **`R2_PUBLIC_URL` sin documentar** en `.env.example`.
 5. **Costos/escalabilidad:** RunPod cobra por GPU activa; no hay mecanismo de cola ni reintentos visibles en la UI si el job serverless falla (el front ve el job de la DB).
 6. **Seguridad del flujo:** los `video_url`/`transcription_url` que recibe el handler deben validarse contra SSRF (existe `backend/core/security/ssrf_guard.py` — verificar que esté cableado en `handler.py`).

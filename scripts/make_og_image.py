@@ -19,7 +19,6 @@ BORDER = (255, 255, 255, 16)
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TARGETS = [
     REPO_ROOT / "frontend_react" / "public" / "og-clipsai.png",
-    REPO_ROOT / "frontend_vue" / "public" / "og-clipsai.png",
 ]
 
 
