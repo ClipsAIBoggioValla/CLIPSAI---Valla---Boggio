@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 # Banda del teaser estandarizado (issue #116) — misma constante que ffmpeg_service.
 HOOK_TEASER_MIN = 4.5
@@ -16,6 +16,7 @@ class SubtitleSegment(TypedDict):
     start: float
     end: float
     text: str
+    emoji: NotRequired[str | None]  # issue #117: emoji contextual del grupo
 
 
 ASS_STYLE_VERTICAL = (
@@ -148,6 +149,22 @@ def _end_limitado(start: float, end: float, min_duration: float, max_duration: f
     return end
 
 
+def _emoji_seguro(emoji: str | None) -> str:
+    """Emoji saneado para un override ASS; '' si es vacío, 'none' o inseguro."""
+    limpio = str(emoji).strip()[:12]
+    if any((not limpio, limpio.lower() == "none", not limpio.isprintable())):
+        return ""
+    return limpio.replace("{", "").replace("}", "").replace("\\", "")
+
+
+def _prefijo_emoji(emoji: str | None) -> str:
+    """Override inline Noto Color Emoji + vuelta a DejaVu Sans (issue #117)."""
+    seguro = _emoji_seguro(emoji)
+    if not seguro:
+        return ""
+    return f"{{\\fnNoto Color Emoji}}{seguro}{{\\fnDejaVu Sans}} "
+
+
 def _segment_to_dialogue(seg, *, min_duration, max_duration, max_chars_per_line):
     """Línea 'Dialogue: ...' del segmento; None si se descarta."""
     campos = _campos_segmento(seg)
@@ -162,7 +179,8 @@ def _segment_to_dialogue(seg, *, min_duration, max_duration, max_chars_per_line)
     if not text:
         return None
     wrapped = _wrap_text(text, max_chars=max_chars_per_line)
-    return f"Dialogue: 0,{_format_ass_time(start)},{_format_ass_time(end)},Default,,0,0,0,,{wrapped}"
+    emoji = _prefijo_emoji(seg.get("emoji"))
+    return f"Dialogue: 0,{_format_ass_time(start)},{_format_ass_time(end)},Default,,0,0,0,,{emoji}{wrapped}"
 
 
 def write_ass_file(
@@ -253,14 +271,17 @@ def _ventana_de_trabajo(segments: list, clip_start: float, clip_end: float) -> t
     return window_start, window_end
 
 
-def _seg_del_rango(st: float, en: float, txt: str, rango_start: float, rango_end: float, base: float) -> SubtitleSegment | None:
+def _seg_del_rango(
+    st: float, en: float, txt: str, rango_start: float, rango_end: float,
+    base: float, emoji: str | None = None,
+) -> SubtitleSegment | None:
     """Segmento recortado al rango con base de desplazamiento; None si queda vacío."""
     if en < rango_start or st > rango_end:
         return None
     cs = max(st, rango_start)
     ce = min(en, rango_end)
     if ce > cs:
-        return SubtitleSegment(start=cs - base, end=ce - base, text=txt)
+        return SubtitleSegment(start=cs - base, end=ce - base, text=txt, emoji=emoji)
     return None
 
 
@@ -277,12 +298,13 @@ def _segs_de_segmento(
     st = float(s.get("start", 0))
     en = float(s.get("end", 0))
     txt = str(s.get("text", "")).strip()
+    emoji = s.get("emoji")
     if not txt or en <= st:
         return None, None
     # Segmentos para el hook
-    hook_seg = _seg_del_rango(st, en, txt, hook_start, hook_end, hook_start)
+    hook_seg = _seg_del_rango(st, en, txt, hook_start, hook_end, hook_start, emoji)
     # Segmentos para el clip (usar ventana ampliada si es necesario)
-    clip_seg = _seg_del_rango(st, en, txt, window_start, window_end, clip_start - hook_dur)
+    clip_seg = _seg_del_rango(st, en, txt, window_start, window_end, clip_start - hook_dur, emoji)
     return hook_seg, clip_seg
 
 

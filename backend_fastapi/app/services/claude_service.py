@@ -219,6 +219,20 @@ def _build_output_schema(sentence_ids: list[str]) -> dict[str, Any]:
                             },
                         },
                         "has_hook": {"type": "boolean"},
+                        # Opcional (issue #117): emojis contextuales por grupo de subtítulos.
+                        "emojis": {
+                            "type": "array",
+                            "maxItems": 5,
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "required": ["segundo", "emoji"],
+                                "properties": {
+                                    "segundo": {"type": "number", "minimum": 0},
+                                    "emoji": {"type": "string", "maxLength": 12},
+                                },
+                            },
+                        },
                     },
                 },
             }
@@ -265,6 +279,7 @@ REGLAS ESTRICTAS:
 - Selecciona límites de oración completos; mantén juntas las palabras consecutivas de cada oración
 - Cada hook_candidate debe tener start_sentence_id, end_sentence_id, curiosity_score (entero 1-10) y makes_sense_standalone (booleano)
 - Opcional: sfx_mood por hook_candidate ("tension" | "impact" | "transition" | "none") según el tono del teaser; default "none" si no aplica
+- Opcional: emojis por clip = hasta 5 objetos {{"segundo": <float ABSOLUTO en el video>, "emoji": "<1 emoji>"}}; 1 emoji contextual cada 4-6 palabras de subtítulos (sin spam); omite el campo si no aportan
 - Prohibido iniciar hook_candidates con conectores o muletillas: "Y...", "Bueno...", "Entonces...", "Porque...", "O sea...", "Eh...", "Este..."
 - Un hook válido es una oración completa con sujeto, verbo y predicado, o una pregunta directa con autonomía semántica propia
 - Evalúa curiosidad y autonomía independientemente; si ningún candidato alcanza curiosity_score >= 8 y autonomía true, has_hook debe ser false
@@ -676,6 +691,7 @@ def _validar_clip_candidato(c: dict) -> dict | None:
         "title": title,
         "hook_candidates": hook_candidates,
         "has_hook": _has_hook_efectivo(raw_has_hook, hook_candidates),
+        "emojis": _emojis_validos(c.get("emojis")),
     }
 
 
@@ -696,6 +712,36 @@ def _sfx_mood_de(candidate) -> str:
     """sfx_mood del hook candidate con whitelist; "none" si falta o es inválido (issue #116)."""
     mood = str(candidate.get("sfx_mood", "none")).strip().lower() if isinstance(candidate, dict) else "none"
     return mood if mood in _SFX_MOODS else "none"
+
+
+def _emoji_limpio(valor) -> str:
+    """Emoji saneado (sin llaves/backslash/control); '' si es vacío o 'none'."""
+    emoji = str(valor).strip()[:12]
+    if any((not emoji, emoji.lower() == "none", not emoji.isprintable())):
+        return ""
+    return emoji.replace("{", "").replace("}", "").replace("\\", "")
+
+
+def _emoji_valido(entry) -> dict | None:
+    """Entrada {segundo, emoji} saneada. None si es inválida (issue #117)."""
+    try:
+        emoji = _emoji_limpio(entry.get("emoji"))
+        segundo = float(entry.get("segundo"))
+    except (AttributeError, TypeError, ValueError):
+        return None
+    if not emoji:
+        return None
+    if segundo < 0:
+        return None
+    return {"segundo": round(segundo, 3), "emoji": emoji}
+
+
+def _emojis_validos(emojis) -> list[dict]:
+    """Hasta 5 emojis contextuales saneados por clip; [] si no aportan."""
+    if not isinstance(emojis, list):
+        return []
+    validos = [_emoji_valido(entrada) for entrada in emojis]
+    return [entrada for entrada in validos if entrada is not None][:5]
 
 
 def _curiosity_de_candidate(candidate) -> int | None:
