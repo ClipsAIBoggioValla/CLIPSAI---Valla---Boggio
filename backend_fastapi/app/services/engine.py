@@ -940,6 +940,7 @@ def _mapear_clip_claude(clip_raw: dict, sentence_map: dict) -> dict | None:
             "end_sentence_id": end_sentence_id,
             "has_hook": bool(hook_selection["has_hook"]),
             "hook_selection": hook_selection,
+            "emojis": clip_raw.get("emojis", []),
             "titulo": titulo,
             "titulo_sugerido": titulo,
             "score": float(clip_raw.get("score", 8)),

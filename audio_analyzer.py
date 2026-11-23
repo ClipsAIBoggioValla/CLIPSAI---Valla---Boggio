@@ -28,6 +28,10 @@ TIPOS_EVENTO_SCORE = {
     'silencio': 0
 }
 
+# Zoom dinámico por RMS (issue #117): top-K picos de énfasis vocal.
+PICO_ZOOM_TOP_K = 10
+PICO_ZOOM_SEPARACION = 1.5
+
 
 def cargar_audio(ruta: str) -> Tuple[np.ndarray, int]:
     """Carga un archivo de audio y retorna la señal y sample rate."""
@@ -248,6 +252,52 @@ def guardar_json(eventos: List[Dict], ruta: str = "audio.json") -> None:
         json.dump(eventos, f, indent=2, ensure_ascii=False)
 
 
+def _esta_separado(t: float, picos: List[float], separacion_min: float) -> bool:
+    """True si t está a >= separacion_min de todos los picos ya elegidos."""
+    return all(abs(t - p) >= separacion_min for p in picos)
+
+
+def _picos_para_zoom(
+    rms, tiempos,
+    top_k: int = PICO_ZOOM_TOP_K, separacion_min: float = PICO_ZOOM_SEPARACION,
+) -> List[float]:
+    """Timestamps (s) de los top-K picos de énfasis vocal (issue #117).
+
+    Ordena por intensidad de RMS y elige greedy respetando una separación
+    mínima entre picos para que las ventanas de zoom no se solapen.
+    """
+    ordenados = sorted(zip(rms, tiempos), key=lambda par: -par[0])
+    picos: List[float] = []
+    for _, t in ordenados:
+        if len(picos) >= top_k:
+            break
+        if _esta_separado(float(t), picos, separacion_min):
+            picos.append(round(float(t), 3))
+    return sorted(picos)
+
+
+def _ruta_picos(salida_path: str) -> str:
+    """Ruta del sidecar `*_picos.json` derivada del JSON de audio."""
+    base, _ = os.path.splitext(str(salida_path))
+    return f"{base}_picos.json"
+
+
+def guardar_picos_zoom(picos: List[float], ruta: str = "audio_picos.json") -> None:
+    """Guarda los picos de zoom (lista de floats) en un JSON."""
+    with open(ruta, "w", encoding="utf-8") as f:
+        json.dump(picos, f)
+
+
+def cargar_picos(salida_path: str = "audio.json") -> List[float]:
+    """Lee el sidecar de picos de zoom (`*_picos.json`); [] si no existe o falla."""
+    try:
+        with open(_ruta_picos(salida_path), "r", encoding="utf-8") as f:
+            picos = json.load(f)
+        return [float(p) for p in picos]
+    except Exception:
+        return []
+
+
 def _features_de_eventos(eventos: List[Dict]) -> tuple:
     """Matriz de features (ts, intensidad, tipo) y su índice de evento."""
     features = []
@@ -327,6 +377,15 @@ def detectar_momentos_virales_clustering(
         return _orden_por_intensidad(eventos)
 
 
+def _guardar_momentos_virales(eventos_dict: List[Dict]) -> None:
+    """Guarda el clustering de momentos virales (best-effort, issue #117)."""
+    try:
+        momentos_virales = detectar_momentos_virales_clustering(eventos_dict, n_clusters=10)
+        guardar_json(momentos_virales, "momentos_virales.json")
+    except Exception:
+        pass
+
+
 def analizar_audio(audio_path: str = "audio.mp3", salida_path: str = "audio.json") -> List[Dict]:
     """
     Función principal: analiza un archivo de audio y genera audio.json.
@@ -357,20 +416,18 @@ def analizar_audio(audio_path: str = "audio.mp3", salida_path: str = "audio.json
         eventos = normalizar_intensidad(eventos)
         
         eventos = filtrar_eventos(eventos, intensidad_min=3.0)
-        
+
+        # Sidecar de picos RMS para zoompan (issue #117): se escribe SIEMPRE,
+        # incluso sin eventos, para que el render tenga zoom si hay énfasis vocal.
+        guardar_picos_zoom(_picos_para_zoom(rms, tiempos), _ruta_picos(salida_path))
+
         if not eventos:
             return []
-        
+
         eventos_dict = eventos_a_dict(eventos)
         guardar_json(eventos_dict, salida_path)
-        
-        try:
-            momentos_virales = detectar_momentos_virales_clustering(eventos_dict, n_clusters=10)
-            guardar_json(momentos_virales, "momentos_virales.json")
-        except Exception as e:
-            pass
-        
-        
+        _guardar_momentos_virales(eventos_dict)
+
         return eventos_dict
         
     except FileNotFoundError as e:

@@ -307,7 +307,7 @@ class TestRunJobHeavy:
         dest_dir = tmp_path / "renders"
         dest_dir.mkdir()
 
-        def fake_render(video_path, clip_start, clip_end, segments, hook_sel, job_id, idx, title):
+        def fake_render(video_path, clip_start, clip_end, segments, hook_sel, job_id, idx, title, **kwargs):
             salida = dest_dir / f"clip_{idx}.mp4"
             salida.write_bytes(b"rendido")
             return str(salida), {"render": "hook+ass", "hook_applied": True, "ass_applied": True}

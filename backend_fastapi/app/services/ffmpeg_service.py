@@ -25,6 +25,37 @@ FILTRO_TEASER_BW = (
     f"eq=saturation=0,scale=trunc(iw*{ZOOM_TEASER}/2)*2:trunc(ih*{ZOOM_TEASER}/2)*2,crop=iw:ih"
 )
 
+# Zoom dinámico por picos RMS (issue #117) — espejo exacto de video_processor.py.
+ZOOM_MAX_BODY = 1.12
+ZOOM_RAMPA = 0.2               # 200ms de subida/bajada por pico
+ZOOM_TOP_K = 10                # máx. picos por clip (expresión acotada)
+ZOOM_FPS = 30                  # fps fijo: cero desfasaje A/V con nvenc
+
+
+def _ventana_pico(t_pico: float, rampa: float = ZOOM_RAMPA) -> str:
+    """Término de zoom para un pico: sube 200ms, mantiene ~200ms, baja 200ms."""
+    return (
+        f"clip((it-{t_pico:.3f})/{rampa:.3f},0,1)"
+        f"*clip(({t_pico + 2 * rampa:.3f}-it)/{rampa:.3f},0,1)"
+    )
+
+
+def _filtro_zoompan(picos: list[float], fps: int = ZOOM_FPS, zoom_max: float = ZOOM_MAX_BODY) -> str:
+    """zoompan guiado por picos RMS (issue #117): 1.0 -> 1.12 -> 1.0.
+
+    Usa `it` (tiempo de entrada; `t` no existe en vf_zoompan) y fps explícito
+    con d=1 para que la duración nunca se altere respecto al audio.
+    Sin picos devuelve \"\" -> filtergraph estático (fallback CA-4).
+    """
+    if not picos:
+        return ""
+    picos_acotados = sorted(picos)[:ZOOM_TOP_K]
+    terminos = ",".join(_ventana_pico(p) for p in picos_acotados)
+    return (
+        f"fps={fps},zoompan=z='1+{(zoom_max - 1):.2f}*max({terminos},0)':"
+        f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=1080x1920:fps={fps}"
+    )
+
 
 def _normalizar_ventana_hook(
     hook_start: float, hook_end: float, clip_start: float, clip_end: float
