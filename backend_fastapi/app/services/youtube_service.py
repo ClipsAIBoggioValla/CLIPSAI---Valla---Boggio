@@ -31,6 +31,7 @@ from .social_common import (
     require_access_token,
     validate_user_id,
 )
+from .token_crypto import cifrar_token
 
 
 
@@ -216,9 +217,9 @@ def _actualizar_cuenta_youtube(
     platform_username: str,
 ) -> SocialAccount:
     """Actualiza la cuenta YouTube existente y persiste cambios."""
-    existing.access_token = access_token
+    existing.access_token = cifrar_token(access_token)
     if refresh_token:
-        existing.refresh_token = refresh_token
+        existing.refresh_token = cifrar_token(refresh_token)
     existing.token_expires_at = expires_at
     if username_real:
         existing.platform_username = platform_username
@@ -250,8 +251,8 @@ def _crear_cuenta_youtube(
         platform="youtube",
         platform_account_id=platform_account_id,
         platform_username=platform_username,
-        access_token=access_token,
-        refresh_token=refresh_token,
+        access_token=cifrar_token(access_token),
+        refresh_token=cifrar_token(refresh_token),
         token_expires_at=expires_at,
     )
     try:

@@ -45,6 +45,7 @@ from .social_common import (
     encode_state as _encode_state,
     validate_user_id,
 )
+from .token_crypto import cifrar_token
 
 
 
@@ -200,19 +201,26 @@ def _identificador_de_data(data: Any) -> str | None:
     return None
 
 
+def _nombre_de_user_info(resp) -> str | None:
+    """display_name/open_id extraído de la respuesta de user info; None si no hay."""
+    if resp.status_code != 200:
+        return None
+    data = _json_seguro(resp)
+    nombre = _identificador_de_user(_user_de_respuesta(data))
+    if nombre is None:
+        nombre = _identificador_de_data(data)
+    return nombre
+
+
 def _fetch_tiktok_user_info(access_token: str) -> str:
     try:
         url = f"{TIKTOK_USER_INFO_URL}?fields=open_id,union_id,avatar_url,display_name"
         headers = {"Authorization": f"Bearer {access_token}"}
         resp = requests.get(url, headers=headers, timeout=10)
         logger.info("[TIKTOK USER INFO RAW RESPONSE]: %s", resp.text)
-        if resp.status_code == 200:
-            data = _json_seguro(resp)
-            nombre = _identificador_de_user(_user_de_respuesta(data))
-            if nombre is None:
-                nombre = _identificador_de_data(data)
-            if nombre is not None:
-                return nombre
+        nombre = _nombre_de_user_info(resp)
+        if nombre is not None:
+            return nombre
     except Exception as e:
         logger.error("[TIKTOK USER INFO ERROR]: %s", str(e), exc_info=True)
     return "TikTok User"
@@ -299,8 +307,8 @@ def _actualizar_cuenta(
     display_name: str,
 ) -> SocialAccount:
     """Actualiza la cuenta existente y persiste cambios."""
-    existing.access_token = access_token
-    existing.refresh_token = refresh_token
+    existing.access_token = cifrar_token(access_token)
+    existing.refresh_token = cifrar_token(refresh_token)
     existing.token_expires_at = expires_at
     existing.platform_account_id = str(open_id)
     existing.platform_username = display_name
@@ -330,8 +338,8 @@ def _crear_cuenta_tiktok(
         platform="tiktok",
         platform_account_id=str(open_id),
         platform_username=display_name,
-        access_token=access_token,
-        refresh_token=refresh_token,
+        access_token=cifrar_token(access_token),
+        refresh_token=cifrar_token(refresh_token),
         token_expires_at=expires_at,
     )
     try:

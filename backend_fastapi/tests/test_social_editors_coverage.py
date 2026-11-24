@@ -26,6 +26,7 @@ from backend_fastapi.app.services import editor
 from backend_fastapi.app.services import instagram_service
 from backend_fastapi.app.services import tiktok_service
 from backend_fastapi.app.services import youtube_service
+from backend_fastapi.app.services.token_crypto import descifrar_token
 
 
 def _resp(status: int, payload: dict | None = None, text: str = "") -> Mock:
@@ -351,7 +352,7 @@ class TestSaveTokens:
         cuenta = tiktok_service.save_tiktok_tokens(
             fake_db, str(uuid.uuid4()), {"access_token": "a", "expires_in": 8000, "open_id": "o"}
         )
-        assert fake_db.added and cuenta.access_token == "a"
+        assert fake_db.added and descifrar_token(cuenta.access_token) == "a"
         assert cuenta.platform_username == "Canaalisimo"
         assert cuenta.token_expires_at > now_utc()
 
@@ -366,7 +367,7 @@ class TestSaveTokens:
             fake_db, str(uuid.uuid4()), {"access_token": "a", "refresh_token": "r", "expires_in": 3600}
         )
         assert cuenta.platform == "youtube"
-        assert cuenta.refresh_token == "r"
+        assert descifrar_token(cuenta.refresh_token) == "r"
 
     def test_save_instagram_tokens_crea_cuenta(self, monkeypatch) -> None:
         fake_db = FakeSession()

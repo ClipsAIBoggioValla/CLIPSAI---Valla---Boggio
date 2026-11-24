@@ -20,6 +20,7 @@ from _fixtures import FakeResult, FakeSession, make_clip, make_video, now_utc
 import conftest as _c  # helpers del harness (make_social_account, etc.)
 
 from backend_fastapi.app.services import publish_service as ps
+from backend_fastapi.app.services.token_crypto import descifrar_token
 from backend_fastapi.app.services.publish_service import (
     PLATFORM_URLS,
     _ensure_token_fresh,
@@ -153,7 +154,7 @@ class TestRefreshToken:
         respuesta = _resp(200, {"access_token": "nuevo-token", "refresh_token": "ref-nuevo", "expires_in": 7200})
         with patch.object(ps.requests, "post", return_value=respuesta):
             assert _refresh_account_token(cuenta, "tiktok", db) is True
-        assert cuenta.access_token == "nuevo-token"
+        assert descifrar_token(cuenta.access_token) == "nuevo-token"
 
     def test_tiktok_refresh_status_400(self, monkeypatch, db) -> None:
         cuenta = _SOCIAL(uuid_lib.uuid4())
@@ -179,7 +180,7 @@ class TestRefreshToken:
         respuesta = _resp(200, {"access_token": "yt-nuevo", "expires_in": 3600})
         with patch.object(ps.requests, "post", return_value=respuesta):
             assert _refresh_account_token(cuenta, "youtube", db) is True
-        assert cuenta.access_token == "yt-nuevo"
+        assert descifrar_token(cuenta.access_token) == "yt-nuevo"
 
     def test_youtube_refresh_401(self, monkeypatch, db) -> None:
         cuenta = _SOCIAL(uuid_lib.uuid4(), platform="youtube")

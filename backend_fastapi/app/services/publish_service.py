@@ -17,6 +17,7 @@ from ..config import get_settings
 from ..database import SessionLocal
 from ..models import Clip
 from ..models.social_account import SocialAccount
+from .token_crypto import cifrar_token, descifrar_token
 
 
 def _first_env(*names: str) -> str:
@@ -319,10 +320,10 @@ def _aplicar_refresh_tiktok(account: SocialAccount, resp: requests.Response, ref
     if not new_access_token:
         logger.error(f"[publish] Error renovando token TikTok status={resp.status_code} body={resp.text}")
         raise Exception(f"TikTok refresh failed - no access_token in body={resp.text}")
-    account.access_token = new_access_token
-    account.refresh_token = new_refresh_token  # si aplica
+    account.access_token = cifrar_token(new_access_token)
     if not new_refresh_token:
-        account.refresh_token = refresh_token
+        new_refresh_token = refresh_token
+    account.refresh_token = cifrar_token(new_refresh_token)
     _aplicar_expiry_tiktok(account, data, inner)
     account.updated_at = datetime.now(timezone.utc)
     db.add(account)
@@ -372,9 +373,9 @@ def _aplicar_refresh_youtube(account: SocialAccount, resp: requests.Response, db
     new_refresh_token = data.get("refresh_token")
     if not new_access_token:
         return False
-    account.access_token = new_access_token
+    account.access_token = cifrar_token(new_access_token)
     if new_refresh_token:
-        account.refresh_token = new_refresh_token  # si aplica
+        account.refresh_token = cifrar_token(new_refresh_token)  # si aplica
     _aplicar_expiry_simple(account, data)
     account.updated_at = datetime.now(timezone.utc)
     db.add(account)
@@ -444,8 +445,8 @@ def _aplicar_refresh_instagram(account: SocialAccount, resp: requests.Response, 
     new_refresh_token = data.get("refresh_token") or refresh_token
     if not new_access_token:
         return False
-    account.access_token = new_access_token
-    account.refresh_token = new_refresh_token  # si aplica
+    account.access_token = cifrar_token(new_access_token)
+    account.refresh_token = cifrar_token(new_refresh_token)  # si aplica (o fallback)
     _aplicar_expiry_instagram(account, data)
     account.updated_at = datetime.now(timezone.utc)
     db.add(account)
@@ -496,7 +497,7 @@ def _registrar_error_refresh(db, platform_norm: str, exc: Exception) -> None:
 def _refresh_account_token(account: SocialAccount, platform: str, db) -> bool:
     platform_norm = platform.lower().strip()
     try:
-        refresh_token = (getattr(account, "refresh_token", None) or "").strip()
+        refresh_token = descifrar_token((getattr(account, "refresh_token", None) or "").strip())
         if not refresh_token:
             logger.warning(f"[{platform_norm} REFRESH] no refresh_token para user {account.user_id}")
             return False
@@ -596,12 +597,19 @@ def _body_multipart_youtube(boundary: str, metadata: dict, video_file: str) -> b
     return part1.encode("utf-8") + part2_header.encode("utf-8") + video_bytes + closing.encode("utf-8")
 
 
+def _exigir_archivo_youtube(video_file: str) -> None:
+    """HTTPException 404 si el MP4 físico del clip no existe."""
+    if not video_file or not os.path.isfile(video_file):
+        raise HTTPException(status_code=404, detail=f"Archivo de clip no encontrado para YouTube: {video_file}. El clip debe existir como .mp4 físico en /app/storage/clips/")
+
+
 def _publicar_upload_youtube(account: SocialAccount, video_file: str, title: str, description: str) -> requests.Response:
     """POST multipart al endpoint de upload de YouTube Data API v3."""
     url = "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=multipart&part=snippet,status"
     boundary = f"----WebKitFormBoundary{uuid.uuid4().hex}"
+    token = descifrar_token(account.access_token)
     headers = {
-        "Authorization": f"Bearer {account.access_token}",
+        "Authorization": f"Bearer {token}",
         "Content-Type": f"multipart/related; boundary={boundary}",
     }
     metadata = {
@@ -617,8 +625,7 @@ def _publicar_upload_youtube(account: SocialAccount, video_file: str, title: str
     }
 
     # Modo 100% real — sin fallback de prueba. Requiere archivo físico en storage_path.
-    if not video_file or not os.path.isfile(video_file):
-        raise HTTPException(status_code=404, detail=f"Archivo de clip no encontrado para YouTube: {video_file}. El clip debe existir como .mp4 físico en /app/storage/clips/")
+    _exigir_archivo_youtube(video_file)
     try:
         body = _body_multipart_youtube(boundary, metadata, video_file)
         return requests.post(url, headers=headers, data=body, timeout=60)
@@ -628,10 +635,15 @@ def _publicar_upload_youtube(account: SocialAccount, video_file: str, title: str
         raise HTTPException(status_code=500, detail=f"Error leyendo archivo de video: {e}")
 
 
+def _video_id_de_data(data: dict) -> Any:
+    """video_id de la respuesta (id, videoId o id temporal generado)."""
+    return data.get("id") or data.get("videoId") or _generate_fake_id()
+
+
 def _permalink_youtube(data: dict) -> tuple[str, str]:
     """(post_id, permalink) desde la respuesta del upload."""
-    video_id = data.get("id") or data.get("videoId") or _generate_fake_id()
-    permalink = f"https://www.youtube.com/shorts/{video_id}" if video_id else PLATFORM_URLS["youtube"] + video_id
+    video_id = _video_id_de_data(data)
+    permalink = f"https://www.youtube.com/shorts/{video_id}"
     if data.get("id"):
         permalink = f"https://www.youtube.com/watch?v={video_id}"
     return str(video_id), permalink
@@ -766,7 +778,7 @@ def _ig_desde_debug_token(access_token: str) -> str:
 
 def _resolve_instagram_business_id(account):
     logger_ig = logging.getLogger("uvicorn")
-    access_token = account.access_token
+    access_token = descifrar_token(account.access_token)
 
     logger_ig.info("=== [IG RESOLUTION STARTED] ===")
     logger_ig.info(f"Token Prefix: {access_token[:12]}...")
@@ -980,7 +992,7 @@ def _publicar_container_ig(access_token: str, ig_user_id: str, creation_id: str)
 
 
 def _publish_instagram(account: SocialAccount, clip: Clip, caption: str | None) -> dict[str, Any]:
-    access_token = account.access_token
+    access_token = descifrar_token(account.access_token)
     ig_user_id = _resolve_instagram_business_id(account)
 
     public_mp4_url = _forzar_https(_get_public_video_url(clip))
@@ -1026,14 +1038,36 @@ def _leer_archivo_tiktok(file_path: str) -> int:
     return file_size
 
 
+def _detalle_error_upload_tiktok(resp: requests.Response) -> Any:
+    """Detalle JSON o texto (truncado) de una respuesta errónea del init de TikTok."""
+    try:
+        detail = resp.json()
+        logger.error(f"[TIKTOK API ERROR] {resp.status_code}: error_code={detail.get('error_code')} message={detail.get('message')} detail={detail}")
+        return detail
+    except Exception:
+        detail = resp.text[:1000]
+        logger.error(f"[TIKTOK API ERROR] {resp.status_code}: {detail}")
+        return detail
+
+
+def _validar_upload_tiktok(resp: requests.Response) -> None:
+    """HTTPException ante 401 (token expirado) u otro error >= 400 del init de TikTok."""
+    if resp.status_code == 401:
+        _handle_token_expired("tiktok", resp)
+    if resp.status_code >= 400:
+        detail = _detalle_error_upload_tiktok(resp)
+        raise HTTPException(status_code=400, detail=f"TikTok API error {resp.status_code}: {detail}")
+
+
 def _iniciar_upload_tiktok(account: SocialAccount, file_path: str, file_size: int, title: str) -> tuple[str | None, str, dict]:
     """Llama al init de FILE_UPLOAD de TikTok. Devuelve (upload_url, publish_id, data)."""
     # Auditoría: verifica API v2 de TikTok con FILE_UPLOAD
     logger.info("[AUDITORIA TIKTOK] Usando API v2 https://open.tiktokapis.com/v2/post/publish/video/init/ con FILE_UPLOAD")
 
     url = "https://open.tiktokapis.com/v2/post/publish/video/init/"
+    token = descifrar_token(account.access_token)
     headers = {
-        "Authorization": f"Bearer {account.access_token}",
+        "Authorization": f"Bearer {token}",
         "Content-Type": "application/json; charset=UTF-8",
     }
     payload = {
@@ -1056,16 +1090,7 @@ def _iniciar_upload_tiktok(account: SocialAccount, file_path: str, file_size: in
     logger.info(f"[TIKTOK PUBLISH] POST {url} body={payload}")
     resp = requests.post(url, headers=headers, json=payload, timeout=30)
     _logear_respuesta_tiktok(resp)
-    if resp.status_code == 401:
-        _handle_token_expired("tiktok", resp)
-    if resp.status_code >= 400:
-        try:
-            detail = resp.json()
-            logger.error(f"[TIKTOK API ERROR] {resp.status_code}: error_code={detail.get('error_code')} message={detail.get('message')} detail={detail}")
-        except Exception:
-            detail = resp.text[:1000]
-            logger.error(f"[TIKTOK API ERROR] {resp.status_code}: {detail}")
-        raise HTTPException(status_code=400, detail=f"TikTok API error {resp.status_code}: {detail}")
+    _validar_upload_tiktok(resp)
 
     try:
         data = resp.json()

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 import logging
@@ -321,16 +321,18 @@ from .schemas import Token as _TokenCompat, UsuarioCreate as _UsuarioCreateCompa
 _compat_auth = _CompatAPIRouter(tags=["auth-compat"])
 
 @_compat_auth.post("/login", response_model=_TokenCompat, include_in_schema=False)
-def _login_alias(payload: _UsuarioLoginCompat, db=_DependsCompat(_get_db_compat)):  # type: ignore
-    from .routers.auth import login as _auth_login
+def _login_alias(payload: _UsuarioLoginCompat, request: Request, db=_DependsCompat(_get_db_compat)):  # type: ignore
+    from .routers.auth import login as _auth_login, _verificar_rate_limit_auth
 
-    return _auth_login(payload, db)
+    _verificar_rate_limit_auth(request)
+    return _auth_login(payload, db, request)
 
 @_compat_auth.post("/registro", response_model=_UsuarioReadCompat, status_code=201, include_in_schema=False)
-def _registro_alias(payload: _UsuarioCreateCompat, db=_DependsCompat(_get_db_compat)):  # type: ignore
-    from .routers.auth import registro as _auth_registro
+def _registro_alias(payload: _UsuarioCreateCompat, request: Request, db=_DependsCompat(_get_db_compat)):  # type: ignore
+    from .routers.auth import registro as _auth_registro, _verificar_rate_limit_auth
 
-    return _auth_registro(payload, db)
+    _verificar_rate_limit_auth(request)
+    return _auth_registro(payload, db, request)
 
 app.include_router(_compat_auth)
 app.include_router(social_auth.router, prefix="/auth/social", tags=["Social Auth"])

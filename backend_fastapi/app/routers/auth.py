@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -14,11 +14,24 @@ from ..deps import CurrentUser, DbSession
 from ..models import Usuario
 from ..schemas import Token, UsuarioCreate, UsuarioLogin, UsuarioRead
 from ..security import create_access_token, hash_password, verify_password
+from backend.core.security.rate_limiter import RateLimitExceeded, RateLimiter
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+_auth_limiter = RateLimiter(max_requests=5, window_seconds=60)
 
 
 # --- Helpers ---------------------------------------------------------------
+
+def _verificar_rate_limit_auth(request: Request) -> None:
+    if getattr(request.state, "auth_rate_limit_checked", False):
+        return
+    client_key = f"auth:{request.client.host if request.client else 'unknown'}"
+    try:
+        _auth_limiter.check(client_key)
+    except RateLimitExceeded as exc:
+        raise HTTPException(status_code=429, detail="Límite de 5 solicitudes por minuto excedido") from exc
+    request.state.auth_rate_limit_checked = True
+
 
 def _autenticar(db, email: str, password: str) -> Usuario:
     """Valida credenciales y devuelve el Usuario, o levanta 401."""
@@ -43,8 +56,9 @@ def _autenticar(db, email: str, password: str) -> Usuario:
     status_code=status.HTTP_201_CREATED,
     summary="Registrar un nuevo usuario",
 )
-def registro(payload: UsuarioCreate, db: DbSession) -> Usuario:
+def registro(payload: UsuarioCreate, db: DbSession, request: Request) -> Usuario:
     """Crea un usuario nuevo si el email no esta tomado."""
+    _verificar_rate_limit_auth(request)
     # Chequeo previo — mas amigable que atrapar el IntegrityError.
     existe = db.execute(select(Usuario.id).where(Usuario.email == payload.email)).first()
     if existe is not None:
@@ -78,8 +92,9 @@ def registro(payload: UsuarioCreate, db: DbSession) -> Usuario:
     response_model=Token,
     summary="Login con JSON (email + password)",
 )
-def login(payload: UsuarioLogin, db: DbSession) -> Token:
+def login(payload: UsuarioLogin, db: DbSession, request: Request) -> Token:
     """Login para clientes que envian JSON."""
+    _verificar_rate_limit_auth(request)
     usuario = _autenticar(db, payload.email, payload.password)
     return Token(access_token=create_access_token(subject=usuario.id))
 
@@ -92,12 +107,14 @@ def login(payload: UsuarioLogin, db: DbSession) -> Token:
 def login_form(
     form: Annotated[OAuth2PasswordRequestForm, Depends()],
     db: DbSession,
+    request: Request,
 ) -> Token:
     """Login compatible con `OAuth2PasswordRequestForm` de FastAPI.
 
     Usa `username` (que en este dominio es el email) y `password` como
     `application/x-www-form-urlencoded`.
     """
+    _verificar_rate_limit_auth(request)
     usuario = _autenticar(db, form.username, form.password)
     return Token(access_token=create_access_token(subject=usuario.id))
 
