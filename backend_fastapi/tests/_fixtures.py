@@ -79,7 +79,7 @@ class FakeQuery:
 
 
 class FakeSession:
-    """Sesión falsa suficiente para los routers del backend.
+    """Sesión falsa suficiente para los routers de FastAPI.
 
     Configuración por test:
     - `session.seed(obj, ...)` alimenta `db.get(Model, id)` (clases con el __name__ del modelo).

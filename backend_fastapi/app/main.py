@@ -20,37 +20,6 @@ logger = logging.getLogger(__name__)
 
 from .models import Clip, Job, SocialAccount, Usuario, Video  # noqa: F401 — registra modelos para create_all
 
-try:
-    import sys
-    from pathlib import Path as _Path
-
-    # Resolución segura sin parents[2].parent que desborda en /app (IndexError)
-    _cur = _Path(__file__).resolve()
-    _root = None
-    for _p in _cur.parents:
-        try:
-            # Priorizar backend/backend_fastapi para evitar self-match
-            if (_p / "backend").is_dir() or (_p / "backend_fastapi").is_dir():
-                _root = _p
-                break
-            if (_p / ".env").exists():
-                _root = _p
-                break
-            if _p != _cur.parent and (_p / "engine.py").exists():
-                _root = _p
-                break
-        except Exception:
-            continue
-    if _root is None:
-        _root = _cur.parents[min(2, len(_cur.parents) - 1)]
-    if str(_root) not in sys.path:
-        sys.path.insert(0, str(_root))
-    from backend.api.routes.retrim import router as retrim_router  # type: ignore
-    from backend.api.routes.stream import router as stream_router  # type: ignore
-except Exception:
-    retrim_router = None  # type: ignore
-    stream_router = None  # type: ignore
-
 _settings = get_settings()
 
 
@@ -360,10 +329,6 @@ publish.router.routes[:] = [
 app.include_router(publish.router)
 app.include_router(users.router)
 app.include_router(users.router, prefix="/api")
-if 'retrim_router' in globals() and retrim_router is not None:
-    app.include_router(retrim_router)
-if 'stream_router' in globals() and stream_router is not None:
-    app.include_router(stream_router)
 
 
 @app.on_event("startup")

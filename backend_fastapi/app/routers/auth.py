@@ -14,7 +14,7 @@ from ..deps import CurrentUser, DbSession
 from ..models import Usuario
 from ..schemas import Token, UsuarioCreate, UsuarioLogin, UsuarioRead
 from ..security import create_access_token, hash_password, verify_password
-from backend.core.security.rate_limiter import RateLimitExceeded, RateLimiter
+from ..core.security.rate_limiter import RateLimitExceeded, RateLimiter
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 _auth_limiter = RateLimiter(max_requests=5, window_seconds=60)

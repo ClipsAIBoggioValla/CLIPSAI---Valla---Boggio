@@ -40,7 +40,7 @@ from backend_fastapi.app.deps import get_current_user, get_db  # noqa: E402
 from backend_fastapi.app.main import app as fastapi_app  # noqa: E402
 from backend_fastapi.app.routers import auth as auth_router, videos as videos_router  # noqa: E402
 from backend_fastapi.app.security import create_access_token  # noqa: E402
-from backend.core.security.rate_limiter import rate_limiter  # noqa: E402
+from backend_fastapi.app.core.security.rate_limiter import rate_limiter  # noqa: E402
 
 __all__ = [
     "FakeResult",
