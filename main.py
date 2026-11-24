@@ -21,7 +21,7 @@ if sys.platform == "win32":
 import logging
 
 import requests
-from typing import List, Dict, Optional
+from typing import Any, List, Dict, Optional
 
 logger = logging.getLogger(__name__)
 

@@ -9,7 +9,7 @@ import os
 import subprocess
 import uuid
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Response, status
 from fastapi.responses import FileResponse, RedirectResponse
