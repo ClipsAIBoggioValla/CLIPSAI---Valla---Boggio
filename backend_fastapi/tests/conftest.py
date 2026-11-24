@@ -23,6 +23,10 @@ for _path in (_TESTS_DIR,):
 
 import _fixtures  # noqa: E402  (módulo plano del mismo directorio)
 
+# Clave AES-GCM estable para los tests (vault._get_key usa una clave aleatoria
+# por llamada si VAULT_KEY no está definida, lo que rompería el roundtrip).
+os.environ.setdefault("VAULT_KEY", "0123456789abcdef0123456789abcdef")
+
 build_client = _fixtures.build_client
 FakeResult = _fixtures.FakeResult
 FakeSession = _fixtures.FakeSession
@@ -34,7 +38,9 @@ make_video = _fixtures.make_video
 
 from backend_fastapi.app.deps import get_current_user, get_db  # noqa: E402
 from backend_fastapi.app.main import app as fastapi_app  # noqa: E402
+from backend_fastapi.app.routers import auth as auth_router, videos as videos_router  # noqa: E402
 from backend_fastapi.app.security import create_access_token  # noqa: E402
+from backend.core.security.rate_limiter import rate_limiter  # noqa: E402
 
 __all__ = [
     "FakeResult",
@@ -46,6 +52,12 @@ __all__ = [
     "make_usuario",
     "make_video",
 ]
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limiters() -> None:
+    for limiter in (rate_limiter, auth_router._auth_limiter, videos_router.limiter):
+        limiter._hits.clear()
 
 
 @pytest.fixture()

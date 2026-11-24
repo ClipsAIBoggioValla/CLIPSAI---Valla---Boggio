@@ -8,19 +8,24 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, status
+from fastapi import APIRouter, HTTPException, Request, UploadFile, File, status
 from pydantic import BaseModel, model_validator
 from sqlalchemy import select
 
 from ..deps import CurrentUser, DbSession
 from ..models import Video
 from ..schemas import VideoResponse
+<<<<<<< HEAD
 from ..services.r2_service import get_r2_client
+=======
+from backend.core.security.rate_limiter import RateLimitExceeded, RateLimiter
+>>>>>>> origin/main
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/videos", tags=["videos"])
 upload_url_router = APIRouter(prefix="/api/videos", tags=["videos"])
+limiter = RateLimiter(max_requests=10, window_seconds=60)
 
 
 class UploadUrlRequest(BaseModel):
@@ -55,7 +60,13 @@ def get_s3_client():
 
 
 @upload_url_router.post("/upload-url", summary="Generar URL prefirmada para subir un video")
-async def generate_upload_url(payload: UploadUrlRequest) -> dict[str, str]:
+async def generate_upload_url(payload: UploadUrlRequest, request: Request) -> dict[str, str]:
+    client_key = request.client.host if request.client else "unknown"
+    try:
+        limiter.check(client_key)
+    except RateLimitExceeded as exc:
+        raise HTTPException(status_code=429, detail="Límite de 10 solicitudes por minuto excedido") from exc
+
     try:
         s3_client = get_s3_client()
         bucket_name = os.getenv("BUCKET_NAME", "clipsai-videos")
