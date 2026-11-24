@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypedDict
+from typing import Any, TypedDict
 
 
 class TranscriptionWord(TypedDict):
