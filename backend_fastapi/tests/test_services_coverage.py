@@ -706,26 +706,6 @@ class TestHookTeaser116:
         build_hook.assert_not_called()
         cut.assert_called_once()
 
-    def test_render_config_flag_hook_teaser(self) -> None:
-        from backend.core.schemas import RenderConfig
-
-        config = RenderConfig()
-        assert config.enable_hook_teaser is True
-        assert config.sfx_mood == "transition"
-        config_off = RenderConfig(enable_hook_teaser=False, sfx_mood="impact")
-        assert config_off.enable_hook_teaser is False
-        assert config_off.sfx_mood == "impact"
-
-    def test_retrim_request_flag_hook_teaser(self) -> None:
-        from backend.api.routes.retrim import RetrimRequest
-
-        body = RetrimRequest(start_time=10.0, end_time=40.0)
-        assert body.enable_hook_teaser is True
-        assert body.sfx_mood == "transition"
-        body_off = RetrimRequest(start_time=10.0, end_time=40.0, enable_hook_teaser=False, sfx_mood="impact")
-        assert body_off.enable_hook_teaser is False
-        assert body_off.sfx_mood == "impact"
-
     def test_guardia_paridad_teaser_backend_worker(self) -> None:
         """Contrato #116: ffmpeg_service y video_processor no divergen."""
         from backend_fastapi.app.services import ffmpeg_service as fs

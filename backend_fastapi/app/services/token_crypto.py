@@ -1,9 +1,9 @@
-"""Wrappers de cifrado/descifrado de tokens OAuth sobre backend.core.security.vault."""
+"""Wrappers de cifrado/descifrado de tokens OAuth sobre app.core.security.vault."""
 from __future__ import annotations
 
 from typing import Any
 
-from backend.core.security.vault import decrypt_token, encrypt_token
+from ..core.security.vault import decrypt_token, encrypt_token
 
 
 def cifrar_token(valor: Any) -> Any:
