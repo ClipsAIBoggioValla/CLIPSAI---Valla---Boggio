@@ -15,11 +15,8 @@ from sqlalchemy import select
 from ..deps import CurrentUser, DbSession
 from ..models import Video
 from ..schemas import VideoResponse
-<<<<<<< HEAD
 from ..services.r2_service import get_r2_client
-=======
 from backend.core.security.rate_limiter import RateLimitExceeded, RateLimiter
->>>>>>> origin/main
 
 logger = logging.getLogger(__name__)
 

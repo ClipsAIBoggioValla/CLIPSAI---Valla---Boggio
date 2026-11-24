@@ -14,7 +14,7 @@ from typing import Any
 
 from .config import get_settings
 from .database import Base, engine
-from .routers import auth, clips, export, jobs, metrics, publish, sample, social_auth, stats, stream as publish_stream, subtitles, users, videos
+from .routers import auth, clips, export, jobs, metrics, publish, sample, social_auth, stats, stream as publish_stream, subtitles, users, videos, webhooks
 
 logger = logging.getLogger(__name__)
 
@@ -340,6 +340,7 @@ app.include_router(videos.router)
 app.include_router(videos.upload_url_router)
 app.include_router(sample.router)
 app.include_router(jobs.router)
+app.include_router(webhooks.router)
 app.include_router(export.router)
 app.include_router(metrics.router)
 app.include_router(clips.router)

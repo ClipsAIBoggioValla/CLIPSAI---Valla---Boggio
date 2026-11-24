@@ -105,4 +105,23 @@ def test_jwt_production_guard() -> None:
         Settings(app_env="production", jwt_secret=default_secret)
 
     assert Settings(app_env="development", jwt_secret="custom-jwt-secret-for-tests").app_env == "development"
-    assert Settings(app_env="production", jwt_secret="custom-jwt-secret-for-tests").app_env == "production"
+    assert Settings(
+        app_env="production",
+        jwt_secret="custom-jwt-secret-for-tests",
+        runpod_webhook_secret="runpod-webhook-secret-for-tests",
+    ).app_env == "production"
+
+
+def test_runpod_webhook_secret_production_guard() -> None:
+    with pytest.raises(ValueError, match="RUNPOD_WEBHOOK_SECRET debe configurarse en production"):
+        Settings(
+            app_env="production",
+            jwt_secret="custom-jwt-secret-for-tests",
+            runpod_webhook_secret="  ",
+        )
+
+    assert Settings(
+        app_env="production",
+        jwt_secret="custom-jwt-secret-for-tests",
+        runpod_webhook_secret="runpod-webhook-secret-for-tests",
+    ).runpod_webhook_secret == "runpod-webhook-secret-for-tests"
