@@ -17,6 +17,7 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError, PendingRollbackError
 
 from ..database import SessionLocal
 from ..deps import CurrentUser, DbSession
@@ -1182,7 +1183,7 @@ def _titulo_r2(item: dict) -> str:
     return item.get("titulo") or item.get("title") or item.get("titulo_sugerido") or item.get("name") or "Clip"
 
 
-def _clip_desde_r2(item: dict, video: Any, job_id: uuid.UUID) -> Any:
+def _clip_desde_r2(item: dict, video_id: Any, job_id: uuid.UUID) -> Any:
     """Construye el Clip con la URL R2 que ya renderizó el worker."""
     from ..models import Clip as ClipR2
 
@@ -1191,7 +1192,7 @@ def _clip_desde_r2(item: dict, video: Any, job_id: uuid.UUID) -> Any:
     if end <= start:
         end = start + 30.0
     return ClipR2(
-        video_id=video.id,
+        video_id=video_id,
         job_id=job_id,
         title=str(_titulo_r2(item))[:255],
         start_time=float(start),
@@ -1242,9 +1243,28 @@ def _persistir_clips_r2(db: Any, video: Any, result: Any, clips_payload: list, j
     if not r2_clips:
         return False
 
+    def rollback_best_effort(session: Any) -> None:
+        try:
+            session.rollback()
+        except Exception:
+            pass
+
+    video_id = getattr(video, "id", video)
     logger.info("[jobs] worker devolvió %s/%s clips con url_r2 (job=%s) — omitiendo render local", len(r2_clips), len(clips_payload), job_id)
-    clips_r2_to_create = [_clip_desde_r2(item, video, job_id) for item in r2_clips]
-    return _cerrar_job_r2(db, result, clips_payload, clips_r2_to_create, job_id)
+    clips_r2_to_create = [_clip_desde_r2(item, video_id, job_id) for item in r2_clips]
+    try:
+        return _cerrar_job_r2(db, result, clips_payload, clips_r2_to_create, job_id)
+    except (OperationalError, PendingRollbackError):
+        rollback_best_effort(db)
+        fresh_db = SessionLocal()
+        try:
+            retry_clips = [_clip_desde_r2(item, video_id, job_id) for item in r2_clips]
+            return _cerrar_job_r2(fresh_db, result, clips_payload, retry_clips, job_id)
+        except (OperationalError, PendingRollbackError):
+            rollback_best_effort(fresh_db)
+            raise
+        finally:
+            fresh_db.close()
 
 
 def _segmentos_del_transcript_bd(video: Any) -> list[dict]:
@@ -1850,6 +1870,7 @@ def _run_job(job_id: uuid.UUID) -> None:
         if job is None:
             return
         video, video_path_str, transcription_path_str = _validar_fuentes(db, job)
+        video_id = video.id
 
         # Diagnóstico Claro de la Transcripción — logs explícitos y persistencia inmediata de progreso
         _actualizar_progreso_diagnostico(db, job, job_id, _tiene_transcripcion(video, transcription_path_str))
@@ -1858,13 +1879,18 @@ def _run_job(job_id: uuid.UUID) -> None:
         result = _invocar_engine(db, job, job_id, video_path_str, transcription_path_str)
 
         clips_payload, cached_segments = _extraer_resultado(result, video, job_id)
-        if _persistir_clips_r2(db, video, result, clips_payload, job_id):
+        if _persistir_clips_r2(db, video_id, result, clips_payload, job_id):
             return
 
         # Issue #29: preparar segmentos y hooks para ASS + teaser — flujo obligatorio Claude sin fallback heurístico
         segments = _resolver_segmentos(db, job, video, cached_segments, job_id)
         _renderizar_clips(db, video, job, result, clips_payload, segments, job_id)
     except Exception as e:
+        if isinstance(e, (OperationalError, PendingRollbackError)):
+            try:
+                db.rollback()
+            except Exception:
+                pass
         _manejar_fallo(db, job_id, e)
     finally:
         db.close()

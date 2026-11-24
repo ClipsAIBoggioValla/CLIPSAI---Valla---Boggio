@@ -86,12 +86,20 @@ db_url = _settings.database_url
 if db_url:
     try:
         _resolved_url = _fallback_db_url(db_url)
-        # `pool_pre_ping=True` evita conexiones muertas tras reinicios de Postgres.
-        # `future=True` para API de SQLAlchemy 2.0.
+        engine_options = {"pool_pre_ping": True, "future": True}
+        if _resolved_url.startswith("postgresql+"):
+            engine_options.update(
+                pool_recycle=240,
+                connect_args={
+                    "keepalives": 1,
+                    "keepalives_idle": 30,
+                    "keepalives_interval": 10,
+                    "keepalives_count": 5,
+                },
+            )
         engine = create_engine(
             _resolved_url,
-            pool_pre_ping=True,
-            future=True,
+            **engine_options,
         )
 
         SessionLocal = sessionmaker(
