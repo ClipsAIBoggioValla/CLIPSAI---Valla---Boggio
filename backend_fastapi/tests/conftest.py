@@ -38,7 +38,9 @@ make_video = _fixtures.make_video
 
 from backend_fastapi.app.deps import get_current_user, get_db  # noqa: E402
 from backend_fastapi.app.main import app as fastapi_app  # noqa: E402
+from backend_fastapi.app.routers import auth as auth_router, videos as videos_router  # noqa: E402
 from backend_fastapi.app.security import create_access_token  # noqa: E402
+from backend.core.security.rate_limiter import rate_limiter  # noqa: E402
 
 __all__ = [
     "FakeResult",
@@ -50,6 +52,12 @@ __all__ = [
     "make_usuario",
     "make_video",
 ]
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limiters() -> None:
+    for limiter in (rate_limiter, auth_router._auth_limiter, videos_router.limiter):
+        limiter._hits.clear()
 
 
 @pytest.fixture()

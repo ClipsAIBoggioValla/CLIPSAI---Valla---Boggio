@@ -67,6 +67,14 @@ def _normalizar_esquema_db(url: str) -> str:
     return url
 
 
+def _validar_jwt_produccion(settings: "Settings") -> None:
+    if (
+        settings.app_env.strip().lower() == "production"
+        and settings.jwt_secret == "dev_secret_key_clipsai_2026_super_secure_local"
+    ):
+        raise ValueError("JWT_SECRET debe configurarse con un valor seguro en production")
+
+
 def _resolve_db_host(url: str) -> str:
     if _is_docker() and _apunta_a_local(url):
         return url.replace("@127.0.0.1:", "@db:").replace("@localhost:", "@db:").replace("@127.0.0.1/", "@db/")
@@ -108,6 +116,7 @@ class Settings(BaseSettings):
     )
 
     def model_post_init(self, __context):  # type: ignore[override]
+        _validar_jwt_produccion(self)
         object.__setattr__(
             self,
             "database_url",
