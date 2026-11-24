@@ -67,6 +67,7 @@ def _normalizar_esquema_db(url: str) -> str:
     return url
 
 
+<<<<<<< HEAD
 def _validar_jwt_produccion(settings: "Settings") -> None:
     if (
         settings.app_env.strip().lower() == "production"
@@ -75,6 +76,8 @@ def _validar_jwt_produccion(settings: "Settings") -> None:
         raise ValueError("JWT_SECRET debe configurarse con un valor seguro en production")
 
 
+=======
+>>>>>>> origin/main
 def _resolve_db_host(url: str) -> str:
     if _is_docker() and _apunta_a_local(url):
         return url.replace("@127.0.0.1:", "@db:").replace("@localhost:", "@db:").replace("@127.0.0.1/", "@db/")
@@ -116,7 +119,10 @@ class Settings(BaseSettings):
     )
 
     def model_post_init(self, __context):  # type: ignore[override]
+<<<<<<< HEAD
         _validar_jwt_produccion(self)
+=======
+>>>>>>> origin/main
         object.__setattr__(
             self,
             "database_url",
