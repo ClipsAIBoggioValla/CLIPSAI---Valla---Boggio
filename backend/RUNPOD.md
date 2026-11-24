@@ -51,3 +51,40 @@ El cliente usa `POST /runsync`; si RunPod devuelve un job en progreso, consulta
 `RUNPOD_REQUEST_TIMEOUT_SECONDS`, `RUNPOD_TIMEOUT_SECONDS` y
 `RUNPOD_POLL_INTERVAL_SECONDS`. `RUNPOD_API_BASE_URL` permite sustituir la base
 de API en entornos de prueba.
+
+## Lifecycle 24h en el bucket R2 (Issue #114)
+
+Para evitar acumulación indefinida de videos subidos directamente al bucket,
+aplica una regla de lifecycle que expira objetos bajo el prefijo `uploads/`
+tras 1 día:
+
+### Variables de entorno necesarias
+
+| Variable | Descripción | Ejemplo |
+|----------|-------------|---------|
+| `BUCKET_NAME` | Nombre del bucket R2 | `clipsai-videos` |
+| `AWS_ACCESS_KEY_ID` | Credencial de acceso R2 | — |
+| `AWS_SECRET_ACCESS_KEY` | Secreto de acceso R2 | — |
+| `AWS_ENDPOINT_URL` | Endpoint S3 de Cloudflare R2 | `https://<account>.r2.cloudflarestorage.com` |
+| `AWS_REGION` | Región (R2 acepta `auto`) | `auto` |
+| `R2_PUBLIC_URL` | Dominio público del bucket | `https://videos.clipsai.xyz` |
+
+### Aplicar la regla de lifecycle
+
+Desde la raíz del repositorio, con el entorno de `backend_fastapi` activado:
+
+```bash
+# Opción 1: entrypoint CLI del servicio R2
+python -m backend_fastapi.app.services.r2_service --apply-lifecycle --bucket clipsai-videos --prefix uploads/
+
+# Opción 2: AWS CLI (Cloudflare R2 es compatible con S3)
+aws s3api put-bucket-lifecycle-configuration \
+  --bucket clipsai-videos \
+  --configuration '{"Rules":[{"ID":"r2-uploads-24h","Status":"Enabled","Filter":{"Prefix":"uploads/"},"Expiration":{"Days":1}}]}'
+```
+
+La regla es idempotente: ejecutarla varias veces sobrescribe la misma regla
+sin crear duplicados. Los inputs temporales de RunPod (`runpod-inputs/{uuid}`)
+se borran por job en `runpod_service.py` (`_borrar_objeto_s3` en el `finally`),
+por lo que la regla de bucket cubre específicamente `uploads/` (subidas
+directas desde el navegador que no se consumen).

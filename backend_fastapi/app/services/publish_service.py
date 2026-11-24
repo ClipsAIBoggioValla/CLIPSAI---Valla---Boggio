@@ -544,8 +544,12 @@ def _refrescar_token_proximo_a_vencer(account: SocialAccount, platform: str, db,
             logger.info(f"[AUTO-REFRESH PRE-CALL] token próximo a expirar para {platform}, refrescando")
             _refresh_account_token(account, platform, db)
             _refrescar_sesion_silencioso(db, account)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning(
+            "[AUTO-REFRESH PRE-CALL] fallo refrescando token %s: %s",
+            platform, exc,
+        )
+        _desconectar_cuenta_oauth(db, account, platform)
 
 
 def _ensure_token_fresh(account: SocialAccount, platform: str, db) -> None:
@@ -1352,31 +1356,44 @@ def _do_publish(account: SocialAccount, clip: Clip, platform_norm: str, caption:
     raise HTTPException(status_code=400, detail=f"Plataforma no soportada: {platform}")
 
 
-def _desconectar_cuenta_tiktok(db, account: SocialAccount) -> None:
-    """Elimina o marca la cuenta como desconectada (is_connected = False). Con fallback SQL crudo."""
+def _desconectar_cuenta_oauth(db, account: SocialAccount, platform_norm: str) -> None:
+    """Elimina la cuenta OAuth de BD (desconexión) para cualquier plataforma.
+
+    Usa ORM con fallback SQL crudo sobre social_accounts y user_social_accounts.
+    Idempotente: nunca lanza.
+    """
+    plat = platform_norm.lower().strip()
     try:
         db.delete(account)
         db.commit()
+        logger.info("[OAUTH DISCONNECT] cuenta %s eliminada para plataforma %s", account.user_id, plat)
     except Exception:
         try:
             from sqlalchemy import text
 
-            db.execute(text("DELETE FROM social_accounts WHERE user_id = :uid AND lower(platform) = :plat"), {"uid": str(account.user_id), "plat": "tiktok"})
-            db.execute(text("DELETE FROM user_social_accounts WHERE user_id = :uid AND lower(platform) = :plat"), {"uid": str(account.user_id), "plat": "tiktok"})
+            db.execute(text("DELETE FROM social_accounts WHERE user_id = :uid AND lower(platform) = :plat"), {"uid": str(account.user_id), "plat": plat})
+            db.execute(text("DELETE FROM user_social_accounts WHERE user_id = :uid AND lower(platform) = :plat"), {"uid": str(account.user_id), "plat": plat})
             db.commit()
-        except Exception:
-            pass
+            logger.info("[OAUTH DISCONNECT] cuenta %s eliminada via SQL para plataforma %s", account.user_id, plat)
+        except Exception as exc:
+            logger.warning("[OAUTH DISCONNECT] fallo eliminando cuenta %s plataforma %s: %s", account.user_id, plat, exc)
 
 
 _TIKTOK_DESCONECTAR_MSG = "Token de TikTok expirado. Por favor, desconecta y vuelve a conectar tu cuenta desde Integraciones."
 
 
 def _manejar_error_refresh(db, account: SocialAccount, platform_norm: str, refresh_exc: Exception) -> None:
-    """Log del error de refresh: desconecta TikTok o propaga el error original."""
-    logger.error(f"[publish] Error renovando token TikTok status=error body={refresh_exc}")
+    """Log del error de refresh: desconecta la cuenta (TikTok, YouTube, Instagram) o propaga."""
+    logger.error(f"[publish] Error renovando token {platform_norm} status=error body={refresh_exc}")
     if platform_norm == "tiktok":
-        _desconectar_cuenta_tiktok(db, account)
+        _desconectar_cuenta_oauth(db, account, platform_norm)
         raise HTTPException(status_code=400, detail=f"TikTok refresh failed body={refresh_exc}")
+    if platform_norm in ("youtube", "instagram"):
+        _desconectar_cuenta_oauth(db, account, platform_norm)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Token de {platform_norm} expirado. Reconecta la cuenta desde Integraciones.",
+        )
     raise Exception(str(refresh_exc))
 
 
@@ -1393,13 +1410,17 @@ def _reintentar_publicacion(db, account: SocialAccount, clip: Clip, platform_nor
 
 
 def _fallo_tras_refresh(db, account: SocialAccount, platform_norm: str, pub_exc: HTTPException) -> dict[str, Any]:
-    """Aborta tras un refresh fallido: desconecta TikTok o relanza la excepción original."""
+    """Aborta tras un refresh fallido: desconecta la cuenta o relanza la excepción."""
     logger.warning(f"[publish] refresh falló para {platform_norm}, abortando")
     if platform_norm == "tiktok":
-        # Elimina o marca la cuenta como desconectada (is_connected = False)
-        _desconectar_cuenta_tiktok(db, account)
-        # Asegura clip.status = "FAILED" con mensaje específico
+        _desconectar_cuenta_oauth(db, account, platform_norm)
         raise HTTPException(status_code=400, detail=_TIKTOK_DESCONECTAR_MSG)
+    if platform_norm in ("youtube", "instagram"):
+        _desconectar_cuenta_oauth(db, account, platform_norm)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Token de {platform_norm} expirado. Reconecta la cuenta desde Integraciones.",
+        )
     raise pub_exc
 
 
@@ -1429,10 +1450,16 @@ def _reaccionar_token_expirado(db, account: SocialAccount, clip: Clip, platform_
     has_refresh = bool((getattr(account, "refresh_token", None) or "").strip())
     if has_refresh:
         return _reintentar_tras_refresh(db, account, clip, platform_norm, caption, platform, pub_exc)
-    # Sin refresh_token y es TikTok: desconectar y mensaje específico
+    # Sin refresh_token: desconectar la cuenta y mensaje específico
     if platform_norm == "tiktok":
-        _desconectar_cuenta_tiktok(db, account)
+        _desconectar_cuenta_oauth(db, account, platform_norm)
         raise HTTPException(status_code=400, detail=_TIKTOK_DESCONECTAR_MSG)
+    if platform_norm in ("youtube", "instagram"):
+        _desconectar_cuenta_oauth(db, account, platform_norm)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Token de {platform_norm} expirado. Reconecta la cuenta desde Integraciones.",
+        )
     raise pub_exc
 
 
