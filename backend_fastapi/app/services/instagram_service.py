@@ -36,6 +36,7 @@ from .social_common import (
     require_access_token,
     validate_user_id,
 )
+from .token_crypto import cifrar_token
 
 
 
@@ -364,8 +365,8 @@ def _cuenta_existente_ig(db: Session, uid) -> SocialAccount | None:
 
 def _actualizar_cuenta_ig(db: Session, existing: SocialAccount, access_token, refresh_token, expires_at, platform_account_id, final_username) -> None:
     """Actualiza la cuenta IG existente con los nuevos tokens."""
-    existing.access_token = access_token
-    existing.refresh_token = refresh_token
+    existing.access_token = cifrar_token(access_token)
+    existing.refresh_token = cifrar_token(refresh_token)
     existing.token_expires_at = expires_at
     existing.platform_username = final_username
     existing.platform_account_id = platform_account_id
@@ -385,8 +386,8 @@ def _cuenta_nueva_ig(db: Session, uid, access_token, refresh_token, expires_at, 
         platform="instagram",
         platform_account_id=platform_account_id,
         platform_username=final_username,
-        access_token=access_token,
-        refresh_token=refresh_token,
+        access_token=cifrar_token(access_token),
+        refresh_token=cifrar_token(refresh_token),
         token_expires_at=expires_at,
     )
     try:

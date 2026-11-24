@@ -23,6 +23,10 @@ for _path in (_TESTS_DIR,):
 
 import _fixtures  # noqa: E402  (módulo plano del mismo directorio)
 
+# Clave AES-GCM estable para los tests (vault._get_key usa una clave aleatoria
+# por llamada si VAULT_KEY no está definida, lo que rompería el roundtrip).
+os.environ.setdefault("VAULT_KEY", "0123456789abcdef0123456789abcdef")
+
 build_client = _fixtures.build_client
 FakeResult = _fixtures.FakeResult
 FakeSession = _fixtures.FakeSession

@@ -26,6 +26,7 @@ import _fixtures
 from _fixtures import FakeResult, FakeSession, make_clip, make_job, make_video, now_utc
 
 from backend_fastapi.app.services import publish_service as ps
+from backend_fastapi.app.services.token_crypto import descifrar_token
 from backend_fastapi.app.services.publish_service import (
     PLATFORM_URLS,
     _ensure_token_fresh,
@@ -213,8 +214,8 @@ class TestRefreshAccountToken:
         resp = _resp(200, {"access_token": "nuevo", "refresh_token": "", "expires_in": "3600"})
         with patch.object(ps.requests, "post", Mock(return_value=resp)):
             assert _refresh_account_token(cuenta, "tiktok", db) is True
-        assert cuenta.access_token == "nuevo"
-        assert cuenta.refresh_token == "ref-token"  # vacío → se conserva el viejo
+        assert descifrar_token(cuenta.access_token) == "nuevo"
+        assert descifrar_token(cuenta.refresh_token) == "ref-token"  # vacío → se conserva el viejo
         assert cuenta.token_expires_at is not None
 
     def test_tiktok_expires_in_invalido(self, monkeypatch, db) -> None:
@@ -294,8 +295,8 @@ class TestRefreshAccountToken:
         resp = _resp(200, {"access_token": "yt-nuevo", "refresh_token": "yt-ref", "expires_in": "abc"})
         with patch.object(ps.requests, "post", Mock(return_value=resp)):
             assert _refresh_account_token(cuenta, "youtube", db) is True
-        assert cuenta.access_token == "yt-nuevo"
-        assert cuenta.refresh_token == "yt-ref"
+        assert descifrar_token(cuenta.access_token) == "yt-nuevo"
+        assert descifrar_token(cuenta.refresh_token) == "yt-ref"
 
     def test_youtube_json_invalido(self, monkeypatch, db) -> None:
         _sin_env_ngrok(monkeypatch)
@@ -344,8 +345,8 @@ class TestRefreshAccountToken:
         resp = _resp(200, {"access_token": "ig-nuevo", "expires_in": "no-num"})
         with patch.object(ps.requests, "get", Mock(return_value=resp)):
             assert _refresh_account_token(cuenta, "instagram", db) is True
-        assert cuenta.access_token == "ig-nuevo"
-        assert cuenta.refresh_token == "ref"
+        assert descifrar_token(cuenta.access_token) == "ig-nuevo"
+        assert descifrar_token(cuenta.refresh_token) == "ref"
 
     def test_instagram_refresh_sin_expires_usa_60_dias(self, monkeypatch, db) -> None:
         _sin_env_ngrok(monkeypatch)
