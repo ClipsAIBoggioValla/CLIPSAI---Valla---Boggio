@@ -13,6 +13,8 @@ from urllib.parse import quote
 
 import requests
 
+from ..services.r2_service import get_r2_client as _r2_get_client
+
 logger = logging.getLogger(__name__)
 
 
@@ -92,27 +94,15 @@ def _endpoint_url_s3() -> str | None:
 
 
 def _cliente_s3() -> Any:
-    """Cliente S3/R2 configurado con credenciales del entorno."""
-    try:
-        import boto3
-        from botocore.config import Config
-    except ImportError as exc:
-        raise RunPodError("boto3 no está instalado; se necesita para enviar el video local a R2") from exc
+    """Cliente S3/R2 configurado con credenciales del entorno (delegado a r2_service).
 
-    access_key = os.getenv("AWS_ACCESS_KEY_ID", "").strip()
-    secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "").strip()
-    if not access_key or not secret_key:
-        raise RunPodError(
-            "Faltan AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY para subir el video local a R2 antes de RunPod"
-        )
-    return boto3.client(
-        "s3",
-        aws_access_key_id=access_key,
-        aws_secret_access_key=secret_key,
-        endpoint_url=_endpoint_url_s3(),
-        region_name=os.getenv("AWS_REGION", "auto"),
-        config=Config(signature_version="s3v4"),
-    )
+    Cualquier error de configuración (credenciales faltantes o boto3 ausente)
+    se envuelve en RunPodError para que el caller lo maneje de forma unificada.
+    """
+    try:
+        return _r2_get_client()
+    except Exception as exc:
+        raise RunPodError(str(exc)) from exc
 
 
 def _borrar_objeto_s3(s3: Any, bucket: str, key: str) -> None:

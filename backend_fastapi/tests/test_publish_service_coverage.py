@@ -14,6 +14,7 @@ from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
+from fastapi import HTTPException
 
 import _fixtures
 from _fixtures import FakeResult, FakeSession, make_clip, make_video, now_utc
@@ -24,16 +25,21 @@ from backend_fastapi.app.services.token_crypto import descifrar_token
 from backend_fastapi.app.services.publish_service import (
     PLATFORM_URLS,
     _ensure_token_fresh,
+    _fallo_tras_refresh,
     _get_public_video_url,
     _get_social_account,
     _handle_token_expired,
     _is_token_expired_error,
-    publish_clip_task,
+    _manejar_error_refresh,
     _refresh_account_token,
+    _reaccionar_token_expirado,
+    _refrescar_token_proximo_a_vencer,
+    publish_clip_task,
 )
 
 _SOCIAL = _c.make_social_account
 _JOB = _c.make_job
+make_social_account = _c.make_social_account
 
 
 def _resp(status: int = 200, payload: dict | None = None, text: str = "") -> Mock:
@@ -476,6 +482,131 @@ class TestPublishClipTask:
         ):
             publish_clip_task(clip.id, "tiktok", "cap", user_id=None)
         assert str(capturadas["account"].user_id) == str(user.id)
+
+
+# ------------------------------------------------------------------ disconnect OAuth YouTube/Instagram (Issue #114)
+
+
+class TestDisconnectOAuthYouTubeInstagram:
+    def test_fallo_tras_refresh_desconecta_youtube(self) -> None:
+        cuenta = make_social_account(uuid_lib.uuid4(), platform="youtube")
+        cuenta.refresh_token = ""
+        db = FakeSession()
+        pub_exc = HTTPException(status_code=400, detail="boom")
+
+        desconectadas: list[str] = []
+        with patch.object(ps, "_desconectar_cuenta_oauth",
+                          lambda db_, acc, plat: desconectadas.append(plat)):
+            with pytest.raises(HTTPException) as excinfo:
+                _fallo_tras_refresh(db, cuenta, "youtube", pub_exc)
+        assert "youtube" in desconectadas
+        assert excinfo.value.status_code == 400
+        assert "youtube" in excinfo.value.detail.lower()
+
+    def test_fallo_tras_refresh_desconecta_instagram(self) -> None:
+        cuenta = make_social_account(uuid_lib.uuid4(), platform="instagram")
+        cuenta.refresh_token = ""
+        db = FakeSession()
+        pub_exc = HTTPException(status_code=400, detail="boom")
+
+        desconectadas: list[str] = []
+        with patch.object(ps, "_desconectar_cuenta_oauth",
+                          lambda db_, acc, plat: desconectadas.append(plat)):
+            with pytest.raises(HTTPException) as excinfo:
+                _fallo_tras_refresh(db, cuenta, "instagram", pub_exc)
+        assert "instagram" in desconectadas
+
+    def test_fallo_tras_refresh_tiktok_todavia_desconecta(self) -> None:
+        cuenta = make_social_account(uuid_lib.uuid4(), platform="tiktok")
+        cuenta.refresh_token = ""
+        db = FakeSession()
+        pub_exc = HTTPException(status_code=400, detail="boom")
+
+        desconectadas: list[str] = []
+        with patch.object(ps, "_desconectar_cuenta_oauth",
+                          lambda db_, acc, plat: desconectadas.append(plat)):
+            with pytest.raises(HTTPException):
+                _fallo_tras_refresh(db, cuenta, "tiktok", pub_exc)
+        assert "tiktok" in desconectadas
+
+    def test_manejar_error_refresh_desconecta_youtube(self) -> None:
+        cuenta = make_social_account(uuid_lib.uuid4(), platform="youtube")
+        db = FakeSession()
+        exc = Exception("refresh failed")
+
+        desconectadas: list[str] = []
+        with patch.object(ps, "_desconectar_cuenta_oauth",
+                          lambda db_, acc, plat: desconectadas.append(plat)):
+            with pytest.raises(HTTPException) as excinfo:
+                _manejar_error_refresh(db, cuenta, "youtube", exc)
+        assert "youtube" in desconectadas
+        assert excinfo.value.status_code == 400
+
+    def test_manejar_error_refresh_desconecta_instagram(self) -> None:
+        cuenta = make_social_account(uuid_lib.uuid4(), platform="instagram")
+        db = FakeSession()
+        exc = Exception("refresh failed")
+
+        desconectadas: list[str] = []
+        with patch.object(ps, "_desconectar_cuenta_oauth",
+                          lambda db_, acc, plat: desconectadas.append(plat)):
+            with pytest.raises(HTTPException) as excinfo:
+                _manejar_error_refresh(db, cuenta, "instagram", exc)
+        assert "instagram" in desconectadas
+
+    def test_reaccionar_token_expirado_sin_refresh_desconecta_youtube(self) -> None:
+        cuenta = make_social_account(uuid_lib.uuid4(), platform="youtube")
+        cuenta.refresh_token = ""
+        clip = make_clip(uuid_lib.uuid4())
+        db = FakeSession()
+        pub_exc = HTTPException(status_code=400, detail="expired")
+
+        desconectadas: list[str] = []
+        with patch.object(ps, "_desconectar_cuenta_oauth",
+                          lambda db_, acc, plat: desconectadas.append(plat)):
+            with pytest.raises(HTTPException) as excinfo:
+                _reaccionar_token_expirado(db, cuenta, clip, "youtube", None, "youtube", pub_exc)
+        assert "youtube" in desconectadas
+
+    def test_reaccionar_token_expirado_sin_refresh_desconecta_instagram(self) -> None:
+        cuenta = make_social_account(uuid_lib.uuid4(), platform="instagram")
+        cuenta.refresh_token = ""
+        clip = make_clip(uuid_lib.uuid4())
+        db = FakeSession()
+        pub_exc = HTTPException(status_code=400, detail="expired")
+
+        desconectadas: list[str] = []
+        with patch.object(ps, "_desconectar_cuenta_oauth",
+                          lambda db_, acc, plat: desconectadas.append(plat)):
+            with pytest.raises(HTTPException) as excinfo:
+                _reaccionar_token_expirado(db, cuenta, clip, "instagram", None, "instagram", pub_exc)
+        assert "instagram" in desconectadas
+
+    def test_refresh_preventivo_fallo_desconecta_youtube(self) -> None:
+        cuenta = make_social_account(uuid_lib.uuid4(), platform="youtube")
+        cuenta.token_expires_at = now_utc()  # ya vencido -> intenta refresh
+        db = FakeSession()
+
+        desconectadas: list[str] = []
+        refresh_que_falla = Mock(side_effect=RuntimeError("no se pudo refrescar"))
+        with patch.object(ps, "_refresh_account_token", refresh_que_falla),              patch.object(ps, "_desconectar_cuenta_oauth",
+                          lambda db_, acc, plat: desconectadas.append(plat)),              patch.object(ps, "_refrescar_sesion_silencioso", Mock()):
+            _refrescar_token_proximo_a_vencer(cuenta, "youtube", db, cuenta.token_expires_at)
+        assert "youtube" in desconectadas
+
+    def test_refresh_preventivo_fallo_desconecta_instagram(self) -> None:
+        cuenta = make_social_account(uuid_lib.uuid4(), platform="instagram")
+        cuenta.token_expires_at = now_utc()  # ya vencido -> intenta refresh
+        db = FakeSession()
+
+        desconectadas: list[str] = []
+        refresh_que_falla = Mock(side_effect=RuntimeError("no se pudo refrescar"))
+        with patch.object(ps, "_refresh_account_token", refresh_que_falla),              patch.object(ps, "_desconectar_cuenta_oauth",
+                          lambda db_, acc, plat: desconectadas.append(plat)),              patch.object(ps, "_refrescar_sesion_silencioso", Mock()):
+            _refrescar_token_proximo_a_vencer(cuenta, "instagram", db, cuenta.token_expires_at)
+        assert "instagram" in desconectadas
+
+
 
 
 def _pop(pila: list[Mock]) -> Mock:

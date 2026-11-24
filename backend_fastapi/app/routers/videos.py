@@ -15,7 +15,11 @@ from sqlalchemy import select
 from ..deps import CurrentUser, DbSession
 from ..models import Video
 from ..schemas import VideoResponse
+<<<<<<< HEAD
+from ..services.r2_service import get_r2_client
+=======
 from backend.core.security.rate_limiter import RateLimitExceeded, RateLimiter
+>>>>>>> origin/main
 
 logger = logging.getLogger(__name__)
 
@@ -51,19 +55,8 @@ class ProcessVideoRequest(BaseModel):
 
 
 def get_s3_client():
-    # Import lazily so the FastAPI app can still load in environments that have
-    # not installed the optional S3 dependency yet.
-    import boto3
-    from botocore.config import Config
-
-    return boto3.client(
-        "s3",
-        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-        endpoint_url=os.getenv("AWS_ENDPOINT_URL"),
-        region_name=os.getenv("AWS_REGION", "auto"),
-        config=Config(signature_version="s3v4"),
-    )
+    """Delegado al servicio centralizado de R2 (r2_service.get_r2_client)."""
+    return get_r2_client()
 
 
 @upload_url_router.post("/upload-url", summary="Generar URL prefirmada para subir un video")

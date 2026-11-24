@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 from ..deps import CurrentUser, DbSession
 from ..models import Clip, Video
 from ..schemas import ClipListItem, ClipListResponse, ClipResponse, ClipUpdate
+from ..services.r2_service import BUCKET_NAME_ENV, delete_r2_object, get_r2_client, r2_object_key_from_url
 
 router = APIRouter(prefix="/clips", tags=["clips"])
 
@@ -701,19 +702,45 @@ def delete_clip(
     clip = _get_clip_or_404(db, clip_id)
     _assert_ownership(db, clip, current_user)
 
-    for attr in ("storage_path", "file_path"):
-        p = getattr(clip, attr, None)
-        if p:
-            try:
-                path = Path(str(p))
-                if path.is_file():
-                    path.unlink()
-            except Exception:
-                pass
+    _purge_clip_storage(clip)
 
     db.delete(clip)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _purge_clip_storage(clip: Clip) -> None:
+    """Elimina el objeto de R2 (best-effort) o archivo local del clip.
+
+    Si storage_path apunta a R2 (http(s)), borra el objeto con delete_r2_object
+    sin bloquear la transacción de DB aunque R2 falle. Si es ruta local,
+    conserva el unlink actual.
+    """
+    storage_path = getattr(clip, "storage_path", None)
+    if not storage_path:
+        return
+    storage_path = str(storage_path).strip()
+    if storage_path.lower().startswith(("http://", "https://")):
+        key = r2_object_key_from_url(storage_path)
+        if not key:
+            logger.warning(
+                "[CLIP DELETE] no se pudo extraer key R2 de %s", storage_path[:120]
+            )
+            return
+        try:
+            s3 = get_r2_client()
+            bucket = BUCKET_NAME_ENV
+            delete_r2_object(s3, bucket, key)
+        except Exception as exc:  # nunca bloquea el borrado en DB
+            logger.warning("[CLIP DELETE] fallo cliente R2: %s", exc)
+        return
+    # Ruta local: unlink actual
+    try:
+        path = Path(storage_path)
+        if path.is_file():
+            path.unlink()
+    except Exception:
+        pass
 
 
 def _ruta_desde_atributos(obj, attrs: tuple[str, ...]) -> str | None:
