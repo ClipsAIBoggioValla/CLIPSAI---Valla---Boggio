@@ -53,6 +53,15 @@ def test_podcast_split_neutro_si_falla_deteccion_o_rms() -> None:
     assert "crop=iw/2" in filtro
 
 
+def test_gameplay_split_apila_camara_y_juego_con_subtitulos(tmp_path: Path) -> None:
+    ass_file = tmp_path / "subs.ass"
+    ass_file.write_text("[Events]", encoding="utf-8")
+    filtro = vp._filtro_gameplay_split(str(ass_file))
+    assert "[cam]crop=iw/2:ih:0:0" in filtro
+    assert "scale=1080:640" in filtro and "scale=1080:1280" in filtro
+    assert "vstack=inputs=2" in filtro and "ass=" in filtro and filtro.endswith("[v]")
+
+
 def test_overhead_se_mide_en_relacion_al_render() -> None:
     assert vp._log_tracking_overhead(5.0, 100.0) == 5.0
 

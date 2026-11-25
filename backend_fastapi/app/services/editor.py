@@ -86,6 +86,19 @@ def _filtro_reframe(
     return ",".join(filtros)
 
 
+def _filtro_split_editor(layout: str) -> str:
+    """Filter_complex para fuentes lado a lado: podcast 50/50, gameplay 1/3+2/3."""
+    alto_camara, alto_juego = (960, 960) if layout == "podcast_split" else (640, 1280)
+    return (
+        "[0:v]split=2[cam][game];"
+        f"[cam]crop=iw/2:ih:0:0,scale=1080:{alto_camara}:force_original_aspect_ratio=increase,"
+        f"crop=1080:{alto_camara},setsar=1[vcam];"
+        f"[game]crop=iw/2:ih:iw/2:0,scale=1080:{alto_juego}:force_original_aspect_ratio=increase,"
+        f"crop=1080:{alto_juego},setsar=1[vgame];"
+        "[vcam][vgame]vstack=inputs=2,setsar=1[v]"
+    )
+
+
 def _detectar_trayectoria_editor(source: Path) -> list[tuple[float, float]]:
     """Detecta rostros en keyframes de baja resolución; vacío mantiene crop centrado."""
     try:
@@ -164,17 +177,23 @@ def _registrar_overhead_editor(deteccion: float, render: float) -> float:
 def _comando_reframe(
     source: Path, output: Path, picos: list[float] | None = None,
     trayectoria: list[tuple[float, float]] | None = None,
+    layout: str = "single_9_16",
 ) -> list[str]:
     """Comando ffmpeg de crop-primero para 9:16 (+ zoompan si hay picos)."""
-    crop_filter = _filtro_reframe(picos, trayectoria)
-    logger.info("[editor] reframe_video applying filter: %s", crop_filter)
-    return [
+    split = layout in ("podcast_split", "gameplay_split")
+    filtro = _filtro_split_editor(layout) if split else _filtro_reframe(picos, trayectoria)
+    logger.info("[editor] reframe_video applying filter: %s", filtro)
+    command = [
         "ffmpeg",
         "-y",
         "-i",
         str(source),
-        "-vf",
-        crop_filter,
+        "-filter_complex" if split else "-vf",
+        filtro,
+    ]
+    if split:
+        command.extend(["-map", "[v]", "-map", "0:a?"])
+    command.extend([
         "-c:v",
         "libx264",
         "-preset",
@@ -188,17 +207,19 @@ def _comando_reframe(
         "-movflags",
         "+faststart",
         str(output),
-    ]
+    ])
+    return command
 
 
 def _ejecutar_ffmpeg_reframe(
     source: Path, output: Path, timeout_seconds: int, picos: list[float] | None = None,
     trayectoria: list[tuple[float, float]] | None = None,
+    layout: str = "single_9_16",
 ):
     """Corre ffmpeg para el reencuadre; RuntimeError ante arranque/timeout."""
     try:
         return subprocess.run(
-            _comando_reframe(source, output, picos, trayectoria), capture_output=True, text=True, timeout=timeout_seconds
+            _comando_reframe(source, output, picos, trayectoria, layout), capture_output=True, text=True, timeout=timeout_seconds
         )
     except FileNotFoundError as exc:
         raise RuntimeError("No se pudo reencuadrar a 9:16: FFmpeg no está instalado o no está en PATH") from exc
@@ -275,6 +296,7 @@ def reframe_video(
     aspect_ratio: Literal["9:16"] = "9:16",
     timeout_seconds: int = 300,
     picos: list[float] | None = None,
+    layout: Literal["single_9_16", "podcast_split", "gameplay_split"] = "single_9_16",
 ) -> str:
     """Recorta al centro y escala el video a 1080x1920; nunca devuelve el original.
 
@@ -285,17 +307,19 @@ def reframe_video(
     source = Path(input_video)
     output = Path(output_video)
     _validar_reframe_entrada(source, aspect_ratio)
+    if layout not in ("single_9_16", "podcast_split", "gameplay_split"):
+        raise RuntimeError(f"Layout no soportado: {layout!r}")
     output.parent.mkdir(parents=True, exist_ok=True)
 
     # Verificar dimensiones del video de entrada
-    if _copiar_si_ya_vertical(source, output):
+    if layout == "single_9_16" and _copiar_si_ya_vertical(source, output):
         return str(output)
 
     inicio_deteccion = time.perf_counter()
-    trayectoria = _detectar_trayectoria_editor(source)
+    trayectoria = _detectar_trayectoria_editor(source) if layout == "single_9_16" else []
     deteccion_seconds = time.perf_counter() - inicio_deteccion
     inicio_render = time.perf_counter()
-    result = _ejecutar_ffmpeg_reframe(source, output, timeout_seconds, picos, trayectoria)
+    result = _ejecutar_ffmpeg_reframe(source, output, timeout_seconds, picos, trayectoria, layout)
     _registrar_overhead_editor(deteccion_seconds, time.perf_counter() - inicio_render)
     if result.returncode != 0:
         _fallar_reframe(result, output)

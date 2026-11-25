@@ -526,7 +526,22 @@ def _filtro_podcast_split(
         f"[b]crop=iw/2:iw*4/9:iw/2:'{y_der}',scale=1080:960,"
         f"eq=brightness='{brillo_der}',setsar=1[vb];[va][vb]vstack=inputs=2,setsar=1"
     )
-    return filtros + (f",{_filtro_ass(ass_file)}" if ass_file and _filtro_ass(ass_file) else "") + "[v]"
+    ass_filter = _filtro_ass(ass_file) if ass_file else None
+    return filtros + (f",{ass_filter}" if ass_filter else "") + "[v]"
+
+
+def _filtro_gameplay_split(ass_file: str | None = None) -> str:
+    """Apila cámara (tercio superior) y juego (dos tercios inferiores)."""
+    filtros = (
+        "[0:v]split=2[cam][game];"
+        "[cam]crop=iw/2:ih:0:0,scale=1080:640:force_original_aspect_ratio=increase,"
+        "crop=1080:640,setsar=1[vcam];"
+        "[game]crop=iw/2:ih:iw/2:0,scale=1080:1280:force_original_aspect_ratio=increase,"
+        "crop=1080:1280,setsar=1[vgame];"
+        "[vcam][vgame]vstack=inputs=2,setsar=1"
+    )
+    ass_filter = _filtro_ass(ass_file) if ass_file else None
+    return filtros + (f",{ass_filter}" if ass_filter else "") + "[v]"
 
 
 def _y_crop_panel(trayectoria: list[tuple[float, float]] | None) -> str:
@@ -670,9 +685,11 @@ def reframe_and_burn_subtitles(
     if layout == "single_9_16" and trayectoria is None:
         trayectoria = _detectar_trayectoria_rostros(input_video)
         deteccion_seconds += time.perf_counter() - inicio_deteccion
-    filter_complex = layout == "podcast_split"
-    if filter_complex:
+    filter_complex = layout in ("podcast_split", "gameplay_split")
+    if layout == "podcast_split":
         vf = _filtro_podcast_split(trayectoria_izq, trayectoria_der, rms_ventanas, ass_file)
+    elif layout == "gameplay_split":
+        vf = _filtro_gameplay_split(ass_file)
     else:
         filters = _construir_filtergraph(ass_file, picos_zoom=picos_zoom, trayectoria=trayectoria)
         vf = ",".join(filters)
