@@ -31,6 +31,7 @@ TIPOS_EVENTO_SCORE = {
 # Zoom dinámico por RMS (issue #117): top-K picos de énfasis vocal.
 PICO_ZOOM_TOP_K = 10
 PICO_ZOOM_SEPARACION = 1.5
+RMS_VENTANA_SEGUNDOS = 0.5
 
 
 def cargar_audio(ruta: str) -> Tuple[np.ndarray, int]:
@@ -48,6 +49,71 @@ def calcular_rms(y: np.ndarray, sr: int, frame_length: int = 2048, hop_length: i
     rms = librosa.feature.rms(y=y, frame_length=frame_length, hop_length=hop_length)[0]
     tiempos = librosa.frames_to_time(np.arange(len(rms)), sr=sr, hop_length=hop_length)
     return rms, tiempos
+
+
+def rms_por_ventana(y: np.ndarray, sr: int, ventana: float = RMS_VENTANA_SEGUNDOS) -> List[Dict]:
+    """RMS por canal y ventana para asignar hablante activo en podcast_split."""
+    canales = np.asarray(y)
+    if canales.ndim == 1:
+        canales = canales[np.newaxis, :]
+    muestras = max(1, int(sr * ventana))
+    return [
+        {"start": inicio / sr, "end": min(inicio + muestras, canales.shape[1]) / sr,
+         "rms": [float(np.sqrt(np.mean(canal[inicio:inicio + muestras] ** 2))) for canal in canales]}
+        for inicio in range(0, canales.shape[1], muestras)
+    ]
+
+
+def _ruta_rms_ventanas(salida_path: str) -> str:
+    """Ruta del sidecar `*_rms.json` derivada del JSON de audio."""
+    base, _ = os.path.splitext(str(salida_path))
+    return f"{base}_rms.json"
+
+
+def guardar_rms_ventanas(ventanas: List[Dict], ruta: str = "audio_rms.json") -> None:
+    """Escribe RMS estéreo por ventana para consumo opcional del renderer."""
+    with open(ruta, "w", encoding="utf-8") as f:
+        json.dump(ventanas, f)
+
+
+def cargar_rms_ventanas(salida_path: str = "audio.json") -> List[Dict]:
+    """Lee RMS por ventana; devuelve lista vacía si falta o está corrupto."""
+    try:
+        with open(_ruta_rms_ventanas(salida_path), "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def cruzar_rostros_rms(rostros_por_panel: Dict[str, List[Dict]], ventanas: List[Dict]) -> List[Dict]:
+    """Marca panel activo solo si hay dos canales y dos rostros detectados."""
+    paneles = ("left", "right")
+    if not all(rostros_por_panel.get(panel) for panel in paneles):
+        return []
+    return _ventanas_hablante(ventanas, paneles)
+
+
+def _ventanas_hablante(ventanas: List[Dict], paneles: tuple) -> List[Dict]:
+    """Filtra ventanas con RMS estéreo válido y diferencia de energía clara."""
+    activas = []
+    for ventana in ventanas:
+        rms = ventana.get("rms", [])
+        if len(rms) < 2 or max(rms[:2]) <= 0 or abs(rms[0] - rms[1]) < max(rms[:2]) * 0.12:
+            continue
+        activas.append({"start": ventana["start"], "end": ventana["end"],
+                        "panel": paneles[int(rms[1] > rms[0])]})
+    return _agrupar_hablante(activas)
+
+
+def _agrupar_hablante(ventanas: List[Dict]) -> List[Dict]:
+    """Fusiona ventanas adyacentes y exige 300 ms de persistencia al hablante."""
+    grupos = []
+    for ventana in ventanas:
+        if grupos and grupos[-1]["panel"] == ventana["panel"] and ventana["start"] <= grupos[-1]["end"] + 0.1:
+            grupos[-1]["end"] = ventana["end"]
+        else:
+            grupos.append(dict(ventana))
+    return [grupo for grupo in grupos if grupo["end"] - grupo["start"] >= 0.3]
 
 
 def _umbral_audio(rms: np.ndarray) -> Dict:
@@ -386,6 +452,15 @@ def _guardar_momentos_virales(eventos_dict: List[Dict]) -> None:
         pass
 
 
+def _guardar_rms_audio(audio_path: str, salida_path: str) -> None:
+    """Persiste RMS estéreo en best-effort; el análisis de eventos no depende de él."""
+    try:
+        y, sr = librosa.load(audio_path, sr=None, mono=False)
+        guardar_rms_ventanas(rms_por_ventana(y, sr), _ruta_rms_ventanas(salida_path))
+    except Exception:
+        guardar_rms_ventanas([], _ruta_rms_ventanas(salida_path))
+
+
 def analizar_audio(audio_path: str = "audio.mp3", salida_path: str = "audio.json") -> List[Dict]:
     """
     Función principal: analiza un archivo de audio y genera audio.json.
@@ -420,6 +495,7 @@ def analizar_audio(audio_path: str = "audio.mp3", salida_path: str = "audio.json
         # Sidecar de picos RMS para zoompan (issue #117): se escribe SIEMPRE,
         # incluso sin eventos, para que el render tenga zoom si hay énfasis vocal.
         guardar_picos_zoom(_picos_para_zoom(rms, tiempos), _ruta_picos(salida_path))
+        _guardar_rms_audio(audio_path, salida_path)
 
         if not eventos:
             return []
