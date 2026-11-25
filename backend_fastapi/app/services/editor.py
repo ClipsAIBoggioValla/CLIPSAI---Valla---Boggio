@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
+import time
 from pathlib import Path
 from typing import Literal
 
@@ -13,6 +14,8 @@ logger = logging.getLogger(__name__)
 OUTPUT_WIDTH = 1080
 OUTPUT_HEIGHT = 1920
 OUTPUT_ASPECT_RATIO = "9:16"
+FACE_SMOOTH_ALPHA = 0.35
+FACE_DEAD_ZONE = 0.015
 
 
 def _validar_reframe_entrada(source: Path, aspect_ratio: str) -> None:
@@ -61,7 +64,10 @@ def _copiar_si_ya_vertical(source: Path, output: Path) -> bool:
     return False
 
 
-def _filtro_reframe(picos: list[float] | None = None) -> str:
+def _filtro_reframe(
+    picos: list[float] | None = None,
+    trayectoria: list[tuple[float, float]] | None = None,
+) -> str:
     """Crop-primero + scale + zoompan por picos + setsar (issue #117)."""
     from .ffmpeg_service import _filtro_zoompan
 
@@ -70,7 +76,7 @@ def _filtro_reframe(picos: list[float] | None = None) -> str:
     #   1. crop calcula 405x720 (centrado, manteniendo aspect ratio 9:16)
     #   2. scale escala a 1080x1920
     filtros = [
-        f"crop='if(gt(iw/ih,9/16),ih*9/16,iw)':'if(gt(iw/ih,9/16),ih,iw*16/9)'",
+        _filtro_crop_tracking_editor(trayectoria) or f"crop='if(gt(iw/ih,9/16),ih*9/16,iw)':'if(gt(iw/ih,9/16),ih,iw*16/9)'",
         f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}",
     ]
     zoom = _filtro_zoompan(picos or [])
@@ -80,9 +86,87 @@ def _filtro_reframe(picos: list[float] | None = None) -> str:
     return ",".join(filtros)
 
 
-def _comando_reframe(source: Path, output: Path, picos: list[float] | None = None) -> list[str]:
+def _detectar_trayectoria_editor(source: Path) -> list[tuple[float, float]]:
+    """Detecta rostros en keyframes de baja resolución; vacío mantiene crop centrado."""
+    try:
+        import cv2
+        import mediapipe as mp
+        captura = cv2.VideoCapture(str(source))
+        if not captura.isOpened():
+            return []
+        detector = mp.solutions.face_detection.FaceDetection(model_selection=0, min_detection_confidence=0.5)
+        puntos = _keyframes_editor(captura, detector, cv2)
+        captura.release()
+        return _suavizar_trayectoria_editor(puntos)
+    except Exception as exc:
+        logger.info("[editor] face tracking no disponible; crop centrado: %s", exc)
+        return []
+
+
+def _keyframes_editor(captura, detector, cv2) -> list[tuple[float, float]]:
+    """Analiza hasta 30 keyframes repartidos por todo el video."""
+    fps = captura.get(cv2.CAP_PROP_FPS) or 30.0
+    frames = int(captura.get(cv2.CAP_PROP_FRAME_COUNT))
+    cuenta = min(int(frames / fps / 0.5) + 1, 30)
+    indices = [round(i * (frames - 1) / max(cuenta - 1, 1)) for i in range(cuenta)]
+    return [p for i in indices if (p := _rostro_editor(captura, detector, cv2, i, fps))]
+
+
+def _rostro_editor(captura, detector, cv2, indice: int, fps: float):
+    """Devuelve (timestamp, centro X) del rostro mayor en el frame."""
+    captura.set(cv2.CAP_PROP_POS_FRAMES, indice)
+    ok, frame = captura.read()
+    if not ok:
+        return None
+    frame = cv2.resize(frame, (320, max(1, int(frame.shape[0] * 320 / frame.shape[1]))))
+    resultado = detector.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+    detecciones = resultado.detections or []
+    if not detecciones:
+        return None
+    caja = max(detecciones, key=lambda d: d.location_data.relative_bounding_box.width)
+    bbox = caja.location_data.relative_bounding_box
+    return indice / fps, bbox.xmin + bbox.width / 2
+
+
+def _suavizar_trayectoria_editor(puntos: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Suavizado EMA y dead-zone, equivalente al del worker."""
+    salida = []
+    for tiempo, x in sorted(puntos):
+        if not salida:
+            salida.append((tiempo, x))
+            continue
+        anterior = salida[-1][1]
+        nuevo = anterior + FACE_SMOOTH_ALPHA * (x - anterior) if abs(x - anterior) > FACE_DEAD_ZONE else anterior
+        salida.append((tiempo, nuevo))
+    return salida
+
+
+def _filtro_crop_tracking_editor(puntos: list[tuple[float, float]] | None) -> str:
+    """Crop 9:16 con interpolación temporal o cadena vacía para fallback centrado."""
+    if not puntos:
+        return ""
+    expresion = f"min(max({puntos[-1][1]:.5f},0),1)"
+    for (t0, x0), (t1, x1) in reversed(list(zip(puntos, puntos[1:]))):
+        pendiente = (x1 - x0) / max(t1 - t0, 0.001)
+        tramo = f"min(max({x0:.5f}+(t-{t0:.3f})*{pendiente:.5f},0),1)"
+        expresion = f"if(lt(t,{t1:.3f}),{tramo},{expresion})"
+    x = f"if(gt(iw/ih,9/16),min(max(({expresion})*iw-ih*9/32,0),iw-ih*9/16),0)"
+    return f"crop='if(gt(iw/ih,9/16),ih*9/16,iw)':'if(gt(iw/ih,9/16),ih,iw*16/9)':'{x}':0:eval=frame"
+
+
+def _registrar_overhead_editor(deteccion: float, render: float) -> float:
+    """Registra detección/render observado, en porcentaje."""
+    porcentaje = 100 * deteccion / max(render, 0.001)
+    logger.info("[editor] deteccion=%.3fs render=%.3fs overhead=%.2f%%", deteccion, render, porcentaje)
+    return porcentaje
+
+
+def _comando_reframe(
+    source: Path, output: Path, picos: list[float] | None = None,
+    trayectoria: list[tuple[float, float]] | None = None,
+) -> list[str]:
     """Comando ffmpeg de crop-primero para 9:16 (+ zoompan si hay picos)."""
-    crop_filter = _filtro_reframe(picos)
+    crop_filter = _filtro_reframe(picos, trayectoria)
     logger.info("[editor] reframe_video applying filter: %s", crop_filter)
     return [
         "ffmpeg",
@@ -107,11 +191,14 @@ def _comando_reframe(source: Path, output: Path, picos: list[float] | None = Non
     ]
 
 
-def _ejecutar_ffmpeg_reframe(source: Path, output: Path, timeout_seconds: int, picos: list[float] | None = None):
+def _ejecutar_ffmpeg_reframe(
+    source: Path, output: Path, timeout_seconds: int, picos: list[float] | None = None,
+    trayectoria: list[tuple[float, float]] | None = None,
+):
     """Corre ffmpeg para el reencuadre; RuntimeError ante arranque/timeout."""
     try:
         return subprocess.run(
-            _comando_reframe(source, output, picos), capture_output=True, text=True, timeout=timeout_seconds
+            _comando_reframe(source, output, picos, trayectoria), capture_output=True, text=True, timeout=timeout_seconds
         )
     except FileNotFoundError as exc:
         raise RuntimeError("No se pudo reencuadrar a 9:16: FFmpeg no está instalado o no está en PATH") from exc
@@ -204,7 +291,12 @@ def reframe_video(
     if _copiar_si_ya_vertical(source, output):
         return str(output)
 
-    result = _ejecutar_ffmpeg_reframe(source, output, timeout_seconds, picos)
+    inicio_deteccion = time.perf_counter()
+    trayectoria = _detectar_trayectoria_editor(source)
+    deteccion_seconds = time.perf_counter() - inicio_deteccion
+    inicio_render = time.perf_counter()
+    result = _ejecutar_ffmpeg_reframe(source, output, timeout_seconds, picos, trayectoria)
+    _registrar_overhead_editor(deteccion_seconds, time.perf_counter() - inicio_render)
     if result.returncode != 0:
         _fallar_reframe(result, output)
     _validar_salida_reframe(output)
