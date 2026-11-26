@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import List, Dict, Any
 
@@ -47,6 +48,10 @@ SFX_PRESETS_LAVFI = {
 }
 SFX_DIR = "/app/sfx"
 MOOD_DEFAULT = "transition"
+FACE_SAMPLE_SECONDS = 0.5
+FACE_MAX_SAMPLES = 30
+FACE_SMOOTH_ALPHA = 0.35
+FACE_DEAD_ZONE = 0.015
 
 # Sondeo de NVENC memoizado: se corre `ffmpeg -encoders` UNA vez por proceso
 # solo si RUNPOD_GPU está activo (issue: render GPU). Sin GPU env -> libx264
@@ -359,12 +364,15 @@ def _filtro_ass(ass_file: str) -> str | None:
     return None
 
 
-def _construir_filtergraph(ass_file: str | None, picos_zoom: List[float] | None = None) -> list:
+def _construir_filtergraph(
+    ass_file: str | None, picos_zoom: List[float] | None = None,
+    trayectoria: list[tuple[float, float]] | None = None,
+) -> list:
     """Filtergraph de crop + scale + zoompan (picos RMS) + setsar + ass opcional."""
     filters = []
 
     # 1. Crop-primero (evita frames gigantes de 3413px)
-    filters.append("crop='if(gt(iw/ih,9/16),ih*9/16,iw)':'if(gt(iw/ih,9/16),ih,iw*16/9)'")
+    filters.append(_filtro_crop_tracking(trayectoria) or "crop='if(gt(iw/ih,9/16),ih*9/16,iw)':'if(gt(iw/ih,9/16),ih,iw*16/9)'")
 
     # 2. Scale a 1080x1920
     filters.append("scale=1080:1920")
@@ -384,6 +392,247 @@ def _construir_filtergraph(ass_file: str | None, picos_zoom: List[float] | None 
             filters.append(filtro)
 
     return filters
+
+
+def _detectar_trayectoria_rostros(video_path: str, panel: str | None = None) -> list[tuple[float, float]]:
+    """Detecta centros faciales en keyframes bajos; [] activa el crop centrado."""
+    captura = None
+    try:
+        import cv2
+        captura = cv2.VideoCapture(video_path)
+        if not captura.isOpened():
+            return []
+        detector = _cascade_rostros(cv2)
+        if detector is None:
+            return []
+        puntos = _leer_keyframes_rostro(captura, detector, cv2, panel)
+        return _suavizar_trayectoria(puntos)
+    except Exception as exc:
+        logger.info("[face_tracking] detección no disponible; crop centrado: %s", exc)
+        return []
+    finally:
+        if captura is not None:
+            captura.release()
+
+
+def _cascade_rostros(cv2):
+    """Carga el Haar cascade incluido con OpenCV; None activa el encuadre centrado."""
+    cascade_path = os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml")
+    try:
+        cascade = cv2.CascadeClassifier(cascade_path)
+        if not cascade.empty():
+            return cascade
+    except Exception:
+        pass
+    return _cascade_rostros_temporal(cv2, cascade_path)
+
+
+def _cascade_rostros_temporal(cv2, cascade_path: str):
+    """Reintenta la carga desde un XML temporal en una ruta ASCII (Windows)."""
+    try:
+        directorio = tempfile.gettempdir()
+        if not directorio.isascii():
+            directorio = os.path.join(os.environ.get("SystemRoot", "C:\\Windows"), "Temp")
+        if not directorio.isascii():
+            return None
+        with tempfile.TemporaryDirectory(prefix="clipsai_haar_", dir=directorio) as temporal:
+            xml_temporal = Path(temporal) / "haarcascade_frontalface_default.xml"
+            xml_temporal.write_bytes(Path(cascade_path).read_bytes())
+            cascade = cv2.CascadeClassifier(str(xml_temporal))
+            return None if cascade.empty() else cascade
+    except Exception:
+        return None
+
+
+def _trayectorias_layout(video_path: str, layout: str) -> tuple[list, list, list]:
+    """Ejecuta detección del single o de cada panel y devuelve trayectorias."""
+    if layout == "single_9_16":
+        return _detectar_trayectoria_rostros(video_path), [], []
+    if layout in ("podcast_split", "gameplay_split"):
+        return (
+            _detectar_trayectoria_rostros(video_path),
+            _detectar_trayectoria_rostros(video_path, "left"),
+            _detectar_trayectoria_rostros(video_path, "right"),
+        )
+    return [], [], []
+
+
+def _leer_keyframes_rostro(captura, detector, cv2, panel: str | None) -> list[tuple[float, float]]:
+    """Lee hasta 30 keyframes repartidos en el clip (objetivo 2 fps)."""
+    fps = captura.get(cv2.CAP_PROP_FPS) or 30.0
+    frames = int(captura.get(cv2.CAP_PROP_FRAME_COUNT))
+    duracion = frames / fps
+    cuenta = min(int(duracion / FACE_SAMPLE_SECONDS) + 1, FACE_MAX_SAMPLES)
+    indices = [round(i * (frames - 1) / max(cuenta - 1, 1)) for i in range(cuenta)]
+    return [p for i in indices if (p := _detectar_frame(captura, detector, cv2, i, fps, panel))]
+
+
+def _detectar_frame(captura, detector, cv2, frame_idx: int, fps: float, panel: str | None):
+    """Devuelve el centro facial normalizado del frame, si lo hay."""
+    captura.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+    ok, frame = captura.read()
+    if not ok:
+        return None
+    mitad = frame.shape[1] // 2
+    frame = frame[:, :mitad] if panel == "left" else frame[:, mitad:] if panel == "right" else frame
+    frame = cv2.resize(frame, (320, max(1, int(frame.shape[0] * 320 / frame.shape[1]))))
+    gris = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    detecciones = detector.detectMultiScale(gris, scaleFactor=1.1, minNeighbors=5, minSize=(20, 20))
+    if len(detecciones) == 0:
+        return None
+    x, y, ancho, alto = max(detecciones, key=lambda caja: caja[2] * caja[3])
+    eje = (y + alto / 2) / frame.shape[0] if panel else (x + ancho / 2) / frame.shape[1]
+    return (frame_idx / fps, eje)
+
+
+def _suavizar_trayectoria(puntos: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """EMA con dead-zone para bajar el jitter entre keyframes detectados."""
+    salida = []
+    for tiempo, x in sorted(puntos):
+        if not salida:
+            salida.append((tiempo, x))
+            continue
+        anterior = salida[-1][1]
+        suavizado = anterior + FACE_SMOOTH_ALPHA * (x - anterior) if abs(x - anterior) > FACE_DEAD_ZONE else anterior
+        salida.append((tiempo, suavizado))
+    return salida
+
+
+def _expresion_trayectoria(puntos: list[tuple[float, float]], variable: str = "t") -> str:
+    """Genera expresión FFmpeg lineal por tramos, con valores acotados [0,1]."""
+    expr = f"min(max({puntos[-1][1]:.5f},0),1)"
+    for (t0, x0), (t1, x1) in reversed(list(zip(puntos, puntos[1:]))):
+        pendiente = (x1 - x0) / max(t1 - t0, 0.001)
+        tramo = f"min(max({x0:.5f}+({variable}-{t0:.3f})*{pendiente:.5f},0),1)"
+        expr = f"if(lt({variable},{t1:.3f}),{tramo},{expr})"
+    return expr
+
+
+def _filtro_crop_tracking(trayectoria: list[tuple[float, float]] | None) -> str:
+    """Crop 9:16 con centro X interpolado; cadena vacía si no hay detección."""
+    if not trayectoria:
+        return ""
+    centro = _expresion_trayectoria(trayectoria)
+    x = f"if(gt(iw/ih,9/16),min(max(({centro})*iw-ih*9/32,0),iw-ih*9/16),0)"
+    return f"crop='if(gt(iw/ih,9/16),ih*9/16,iw)':'if(gt(iw/ih,9/16),ih,iw*16/9)':'{x}':0:eval=frame"
+
+
+def _log_tracking_overhead(deteccion: float, render: float) -> float:
+    """Registra el porcentaje real de detección respecto al encode del clip."""
+    porcentaje = 100 * deteccion / max(render, 0.001)
+    logger.info("[face_tracking] deteccion=%.3fs render=%.3fs overhead=%.2f%%", deteccion, render, porcentaje)
+    return porcentaje
+
+
+def _expresion_activo(ventanas: list[dict], panel: str) -> str:
+    """Expresión temporal booleana para el panel activo del split."""
+    intervalos = [(float(v["start"]), float(v["end"])) for v in ventanas if v.get("panel") == panel]
+    expr = "0"
+    for inicio, fin in reversed(intervalos):
+        expr = f"if(between(t,{inicio:.3f},{fin:.3f}),1,{expr})"
+    return expr
+
+
+def _eventos_hablante(rostro_izq: list, rostro_der: list, rms_ventanas: list[dict] | None) -> list[dict]:
+    """Cruza RMS estéreo con rostros de ambos paneles; cualquier fallo da neutro."""
+    try:
+        from audio_analyzer import cruzar_rostros_rms
+        return cruzar_rostros_rms({"left": rostro_izq, "right": rostro_der}, rms_ventanas or [])
+    except Exception:
+        return []
+
+
+def _filtro_podcast_split(
+    rostro_izq: list[tuple[float, float]] | None,
+    rostro_der: list[tuple[float, float]] | None,
+    rms_ventanas: list[dict] | None = None,
+    ass_file: str | None = None,
+    trayectoria: list[tuple[float, float]] | None = None,
+) -> str:
+    """Filter_complex de dos paneles o retrato de un sujeto si falta una cara."""
+    if not _trayectorias_dobles_validas(rostro_izq, rostro_der):
+        logger.info("[face_tracking] podcast_split sin dos rostros; usando encuadre individual")
+        if rostro_izq and not rostro_der:
+            return _filtro_podcast_single(rostro_izq, "left", ass_file)
+        if rostro_der and not rostro_izq:
+            return _filtro_podcast_single(rostro_der, "right", ass_file)
+        return _filtro_single_layout(ass_file, trayectoria)
+    eventos = _eventos_hablante(rostro_izq or [], rostro_der or [], rms_ventanas)
+    y_izq = _y_crop_panel(rostro_izq)
+    y_der = _y_crop_panel(rostro_der)
+    brillo_izq = f"0.12*({_expresion_activo(eventos, 'left')})"
+    brillo_der = f"0.12*({_expresion_activo(eventos, 'right')})"
+    filtros = (
+        f"[0:v]split=2[a][b];[a]crop=iw/2:iw*4/9:0:'{y_izq}',scale=1080:960,"
+        f"eq=brightness='{brillo_izq}',setsar=1[va];"
+        f"[b]crop=iw/2:iw*4/9:iw/2:'{y_der}',scale=1080:960,"
+        f"eq=brightness='{brillo_der}',setsar=1[vb];[va][vb]vstack=inputs=2,setsar=1"
+    )
+    ass_filter = _filtro_ass(ass_file) if ass_file else None
+    return filtros + (f",{ass_filter}" if ass_filter else "") + "[v]"
+
+
+def _filtro_podcast_single(
+    trayectoria: list[tuple[float, float]] | None, lado: str, ass_file: str | None,
+) -> str:
+    """Encuadra una sola persona en 9:16 dentro de su mitad de origen."""
+    centro_y = _expresion_trayectoria(trayectoria) if trayectoria else "0.5"
+    centro_x = "iw/4" if lado == "left" else "3*iw/4"
+    ancho = "if(gt(iw/ih,9/16),ih*9/16,iw)"
+    alto = "if(gt(iw/ih,9/16),ih,iw*16/9)"
+    x = f"if(gt(iw/ih,9/16),min(max(({centro_x})-ih*9/32,0),iw-ih*9/16),0)"
+    y = f"min(max(({centro_y})*ih-({alto})/2,0),max(0,ih-({alto})))"
+    filtro = f"[0:v]crop='{ancho}':'{alto}':'{x}':'{y}',scale=1080:1920,setsar=1"
+    ass_filter = _filtro_ass(ass_file) if ass_file else None
+    return filtro + (f",{ass_filter}" if ass_filter else "") + "[v]"
+
+
+def _filtro_single_layout(
+    ass_file: str | None, trayectoria: list[tuple[float, float]] | None = None,
+) -> str:
+    """Filter_complex 9:16 centrado o con tracking para un único sujeto."""
+    filtros = _construir_filtergraph(ass_file, trayectoria=trayectoria)
+    return "[0:v]" + ",".join(filtros) + "[v]"
+
+
+def _trayectorias_dobles_validas(
+    izquierda: list[tuple[float, float]] | None,
+    derecha: list[tuple[float, float]] | None,
+) -> bool:
+    """Exige detecciones en ambos paneles en al menos un mismo instante."""
+    if not izquierda or not derecha:
+        return False
+    instantes_derecha = {tiempo for tiempo, _ in derecha}
+    return any(tiempo in instantes_derecha for tiempo, _ in izquierda)
+
+
+def _filtro_gameplay_split(
+    ass_file: str | None = None,
+    rostro_izq: list[tuple[float, float]] | None = None,
+    rostro_der: list[tuple[float, float]] | None = None,
+    trayectoria: list[tuple[float, float]] | None = None,
+) -> str:
+    """Apila cámara (tercio superior) y juego (dos tercios inferiores)."""
+    if not _trayectorias_dobles_validas(rostro_izq, rostro_der):
+        logger.info("[face_tracking] gameplay_split sin dos paneles válidos; usando encuadre individual")
+        return _filtro_single_layout(ass_file, trayectoria)
+    filtros = (
+        "[0:v]split=2[cam][game];"
+        "[cam]crop=iw/2:ih:0:0,scale=1080:640:force_original_aspect_ratio=increase,"
+        "crop=1080:640,setsar=1[vcam];"
+        "[game]crop=iw/2:ih:iw/2:0,scale=1080:1280:force_original_aspect_ratio=increase,"
+        "crop=1080:1280,setsar=1[vgame];"
+        "[vcam][vgame]vstack=inputs=2,setsar=1"
+    )
+    ass_filter = _filtro_ass(ass_file) if ass_file else None
+    return filtros + (f",{ass_filter}" if ass_filter else "") + "[v]"
+
+
+def _y_crop_panel(trayectoria: list[tuple[float, float]] | None) -> str:
+    """Centro vertical interpolado para el crop de cada panel, o centro fijo."""
+    centro = _expresion_trayectoria(trayectoria) if trayectoria else "0.5"
+    centro_seguro = f"min(max(({centro}),0.08),0.92)"
+    return f"min(max(({centro_seguro})*ih-iw*2/9,0),max(0,ih-iw*4/9))"
 
 
 def _ventana_pico(t_pico: float, rampa: float = ZOOM_RAMPA) -> str:
@@ -463,20 +712,28 @@ def _ejecutar_ffmpeg_reframe(command: list, timeout_seconds: int, output_video: 
         return False
 
 
-def _comando_reframe(input_video: str, output_video: str, vf: str, codec_args: list) -> list:
-    """Comando ffmpeg completo del reframe 9:16 con los codec args dados."""
-    return [
+def _comando_reframe(
+    input_video: str, output_video: str, vf: str, codec_args: list,
+    filter_complex: bool = False,
+) -> list:
+    """Comando ffmpeg del reframe 9:16 con filtergraph simple o split complejo."""
+    comando = [
         FFMPEG_BIN,
         "-y",
         "-i", input_video,
-        "-vf", vf,
+        "-filter_complex" if filter_complex else "-vf", vf,
+    ]
+    if filter_complex:
+        comando.extend(["-map", "[v]", "-map", "0:a?"])
+    comando.extend([
         *codec_args,
         "-threads", "1",
         "-c:a", "aac",
         "-b:a", "128k",
         "-movflags", "+faststart",
         output_video
-    ]
+    ])
+    return comando
 
 
 def reframe_and_burn_subtitles(
@@ -487,6 +744,12 @@ def reframe_and_burn_subtitles(
     clip_start: float = 0.0,
     timeout_seconds: int = 300,
     picos_zoom: List[float] | None = None,
+    trayectoria: list[tuple[float, float]] | None = None,
+    trayectoria_izq: list[tuple[float, float]] | None = None,
+    trayectoria_der: list[tuple[float, float]] | None = None,
+    rms_ventanas: list[dict] | None = None,
+    deteccion_seconds: float = 0.0,
+    layout: str = "single_9_16",
 ) -> bool:
     """Reframe vertical 9:16 + quema subtítulos ASS + hook opcional.
     
@@ -503,29 +766,45 @@ def reframe_and_burn_subtitles(
         True si éxito, False si falla
     """
     # Construir filtergraph
-    filters = _construir_filtergraph(ass_file, picos_zoom=picos_zoom)
+    inicio_deteccion = time.perf_counter()
+    if layout == "single_9_16" and trayectoria is None:
+        trayectoria = _detectar_trayectoria_rostros(input_video)
+        deteccion_seconds += time.perf_counter() - inicio_deteccion
+    elif layout in ("podcast_split", "gameplay_split") and all(
+        dato is None for dato in (trayectoria, trayectoria_izq, trayectoria_der)
+    ):
+        trayectoria, trayectoria_izq, trayectoria_der = _trayectorias_layout(input_video, layout)
+        deteccion_seconds += time.perf_counter() - inicio_deteccion
+    filter_complex = layout in ("podcast_split", "gameplay_split")
+    if layout == "podcast_split":
+        vf = _filtro_podcast_split(trayectoria_izq, trayectoria_der, rms_ventanas, ass_file, trayectoria)
+    elif layout == "gameplay_split":
+        vf = _filtro_gameplay_split(ass_file, trayectoria_izq, trayectoria_der, trayectoria)
+    else:
+        filters = _construir_filtergraph(ass_file, picos_zoom=picos_zoom, trayectoria=trayectoria)
+        vf = ",".join(filters)
 
     # NOTA: sin drawtext — el ffmpeg estático de RunPod no tiene libfreetype
     # ("No such filter: 'drawtext'", rc=8). El hook se QUEMA VÍA ASS:
     # generate_ass_from_segments lo agrega como primer evento con estilo "Hook"
     # (arriba, 0-3s). Este filtergraph usa crop+scale+zoompan+setsar+ass.
 
-    vf = ",".join(filters)
-
     # NVENC con fallback de runtime: si el encode GPU falla (driver sin
     # libnvidia-encode, driver viejo), se reintenta UNA vez con libx264.
     codec_args = _args_codec_video("20")
-    command = _comando_reframe(input_video, output_video, vf, codec_args)
+    command = _comando_reframe(input_video, output_video, vf, codec_args, filter_complex)
 
     logger.info("[video_processor] Reframe vertical + subs + hook...")
     logger.info("[video_processor] Filtros: %s...", vf[:200])
     logger.info("[video_processor] Comando ffmpeg COMPLETO: %s", " ".join(command))
     _log_filtergraph(vf)
 
+    inicio_render = time.perf_counter()
     exito = _ejecutar_ffmpeg_reframe(command, timeout_seconds, output_video)
+    _log_tracking_overhead(deteccion_seconds, time.perf_counter() - inicio_render)
     if not exito and "h264_nvenc" in codec_args:
         logger.warning("[video_processor] Encode NVENC falló — retry con libx264 (CPU)")
-        fallback = _comando_reframe(input_video, output_video, vf, _args_codec_video_libx264("20"))
+        fallback = _comando_reframe(input_video, output_video, vf, _args_codec_video_libx264("20"), filter_complex)
         exito = _ejecutar_ffmpeg_reframe(fallback, timeout_seconds, output_video)
     return exito
 
@@ -711,6 +990,8 @@ def process_clip_vertical(
     sfx_mood: str = MOOD_DEFAULT,
     enable_hook_teaser: bool = True,
     picos_zoom: List[float] | None = None,
+    layout: str = "single_9_16",
+    rms_ventanas: list[dict] | None = None,
 ) -> bool:
     """Procesa un clip completo: corta + reframe vertical + quema subs + hook.
     
@@ -738,6 +1019,10 @@ def process_clip_vertical(
         if not _cortar_clip_horizontal(input_video, horizontal_clip, clip_start, duration):
             return False
 
+        deteccion_inicio = time.perf_counter()
+        trayectoria, trayectoria_izq, trayectoria_der = _trayectorias_layout(horizontal_clip, layout)
+        deteccion_seconds = time.perf_counter() - deteccion_inicio
+
         # 2. ASS del cuerpo: subtítulos SOLO desde el cuerpo a color (issue #116).
         # hook_text=None: el teaser es video B&W re-reproducido; el evento
         # estilo Hook del ASS viejo (0-3s) queda solo para compatibilidad.
@@ -751,7 +1036,13 @@ def process_clip_vertical(
             ass_file=ass_file,
             hook_text=None,
             clip_start=clip_start,
-            picos_zoom=picos_zoom
+            picos_zoom=picos_zoom,
+            trayectoria=trayectoria,
+            trayectoria_izq=trayectoria_izq,
+            trayectoria_der=trayectoria_der,
+            rms_ventanas=rms_ventanas,
+            deteccion_seconds=deteccion_seconds,
+            layout=layout,
         ):
             return False
 
