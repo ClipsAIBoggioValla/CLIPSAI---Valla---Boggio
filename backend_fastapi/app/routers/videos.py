@@ -14,8 +14,14 @@ from sqlalchemy import select
 
 from ..deps import CurrentUser, DbSession
 from ..models import Video
-from ..schemas import VideoResponse
+from ..schemas import VideoFromUrlRequest, VideoResponse
 from ..services.r2_service import get_r2_client
+from ..services.ytdlp_service import (
+    DownloadTooLarge,
+    InvalidVideoUrl,
+    VideoDownloadFailed,
+    download_video_from_url,
+)
 from ..core.security.rate_limiter import RateLimitExceeded, RateLimiter
 
 logger = logging.getLogger(__name__)
@@ -133,6 +139,55 @@ def process_video(payload: ProcessVideoRequest) -> dict[str, Any]:
         video_url = _presigned_get_url(payload)
 
     return _procesar_via_runpod(payload, video_url)
+
+
+def _descargar_video_desde_url(payload: VideoFromUrlRequest):
+    try:
+        return download_video_from_url(payload.url, _get_upload_dir(), MAX_FILE_SIZE)
+    except InvalidVideoUrl as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except DownloadTooLarge as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El video supera el tamaño máximo permitido de 500MB",
+        ) from exc
+    except VideoDownloadFailed as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="No se pudo descargar el video desde la URL indicada",
+        ) from exc
+
+
+@upload_url_router.post(
+    "/from-url",
+    response_model=VideoResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Descargar y registrar un video desde una URL pública",
+)
+def import_video_from_url(
+    payload: VideoFromUrlRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> Video:
+    downloaded = _descargar_video_desde_url(payload)
+    entity = Video(
+        user_id=current_user.id,
+        filename=downloaded.filename,
+        filepath=str(downloaded.filepath),
+        duration_seconds=downloaded.duration_seconds,
+    )
+    try:
+        db.add(entity)
+        db.commit()
+        db.refresh(entity)
+    except Exception as exc:
+        db.rollback()
+        _limpiar_archivos_subida(downloaded.filepath)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="No se pudo guardar el video",
+        ) from exc
+    return entity
 
 ALLOWED_VIDEO_EXTS = {".mp4", ".mov", ".avi"}
 ALLOWED_TRANSCRIPT_EXTS = {".txt", ".srt"}
