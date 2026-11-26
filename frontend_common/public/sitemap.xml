@@ -5,4 +5,16 @@
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
   </url>
+  <url>
+    <loc>https://clipsai.xyz/politica-de-privacidad</loc>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://clipsai.xyz/terminos-y-condiciones</loc>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://clipsai.xyz/eliminacion-de-datos</loc>
+    <priority>0.5</priority>
+  </url>
 </urlset>
