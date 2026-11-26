@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import Literal
@@ -86,8 +88,18 @@ def _filtro_reframe(
     return ",".join(filtros)
 
 
-def _filtro_split_editor(layout: str) -> str:
+def _filtro_split_editor(
+    layout: str,
+    rostro_izq: list[tuple[float, float]] | None = None,
+    rostro_der: list[tuple[float, float]] | None = None,
+    trayectoria: list[tuple[float, float]] | None = None,
+) -> str:
     """Filter_complex para fuentes lado a lado: podcast 50/50, gameplay 1/3+2/3."""
+    if layout not in ("podcast_split", "gameplay_split"):
+        return _filtro_reframe_filter_complex(trayectoria)
+    if not _trayectorias_dobles_validas(rostro_izq, rostro_der):
+        logger.info("[editor] %s sin dos paneles válidos; usando reframe individual", layout)
+        return _filtro_reframe_filter_complex(trayectoria)
     alto_camara, alto_juego = (960, 960) if layout == "podcast_split" else (640, 1280)
     return (
         "[0:v]split=2[cam][game];"
@@ -99,46 +111,125 @@ def _filtro_split_editor(layout: str) -> str:
     )
 
 
+def _filtro_reframe_filter_complex(trayectoria: list[tuple[float, float]] | None) -> str:
+    """Envuelve el reframe single como filter_complex con salida [v]."""
+    return f"[0:v]{_filtro_reframe(trayectoria=trayectoria)}[v]"
+
+
 def _detectar_trayectoria_editor(source: Path) -> list[tuple[float, float]]:
     """Detecta rostros en keyframes de baja resolución; vacío mantiene crop centrado."""
+    captura = None
     try:
         import cv2
-        import mediapipe as mp
         captura = cv2.VideoCapture(str(source))
         if not captura.isOpened():
             return []
-        detector = mp.solutions.face_detection.FaceDetection(model_selection=0, min_detection_confidence=0.5)
+        detector = _cascade_rostros_editor(cv2)
+        if detector is None:
+            return []
         puntos = _keyframes_editor(captura, detector, cv2)
-        captura.release()
         return _suavizar_trayectoria_editor(puntos)
     except Exception as exc:
         logger.info("[editor] face tracking no disponible; crop centrado: %s", exc)
         return []
+    finally:
+        if captura is not None:
+            captura.release()
 
 
-def _keyframes_editor(captura, detector, cv2) -> list[tuple[float, float]]:
+def _cascade_rostros_editor(cv2):
+    """Carga el Haar cascade de OpenCV; None conserva el crop centrado."""
+    cascade_path = os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml")
+    try:
+        cascade = cv2.CascadeClassifier(cascade_path)
+        if not cascade.empty():
+            return cascade
+    except Exception:
+        pass
+    return _cascade_rostros_temporal_editor(cv2, cascade_path)
+
+
+def _cascade_rostros_temporal_editor(cv2, cascade_path: str):
+    """Reintenta la carga desde un XML temporal en una ruta ASCII (Windows)."""
+    try:
+        directorio = tempfile.gettempdir()
+        if not directorio.isascii():
+            directorio = os.path.join(os.environ.get("SystemRoot", "C:\\Windows"), "Temp")
+        if not directorio.isascii():
+            return None
+        with tempfile.TemporaryDirectory(prefix="clipsai_haar_", dir=directorio) as temporal:
+            xml_temporal = Path(temporal) / "haarcascade_frontalface_default.xml"
+            xml_temporal.write_bytes(Path(cascade_path).read_bytes())
+            cascade = cv2.CascadeClassifier(str(xml_temporal))
+            return None if cascade.empty() else cascade
+    except Exception:
+        return None
+
+
+def _keyframes_editor(captura, detector, cv2, panel: str | None = None) -> list[tuple[float, float]]:
     """Analiza hasta 30 keyframes repartidos por todo el video."""
     fps = captura.get(cv2.CAP_PROP_FPS) or 30.0
     frames = int(captura.get(cv2.CAP_PROP_FRAME_COUNT))
     cuenta = min(int(frames / fps / 0.5) + 1, 30)
     indices = [round(i * (frames - 1) / max(cuenta - 1, 1)) for i in range(cuenta)]
-    return [p for i in indices if (p := _rostro_editor(captura, detector, cv2, i, fps))]
+    return [p for i in indices if (p := _rostro_editor(captura, detector, cv2, i, fps, panel))]
 
 
-def _rostro_editor(captura, detector, cv2, indice: int, fps: float):
+def _rostro_editor(captura, detector, cv2, indice: int, fps: float, panel: str | None = None):
     """Devuelve (timestamp, centro X) del rostro mayor en el frame."""
     captura.set(cv2.CAP_PROP_POS_FRAMES, indice)
     ok, frame = captura.read()
     if not ok:
         return None
+    mitad = frame.shape[1] // 2
+    frame = frame[:, :mitad] if panel == "left" else frame[:, mitad:] if panel == "right" else frame
     frame = cv2.resize(frame, (320, max(1, int(frame.shape[0] * 320 / frame.shape[1]))))
-    resultado = detector.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-    detecciones = resultado.detections or []
-    if not detecciones:
+    gris = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    detecciones = detector.detectMultiScale(gris, scaleFactor=1.1, minNeighbors=5, minSize=(20, 20))
+    if len(detecciones) == 0:
         return None
-    caja = max(detecciones, key=lambda d: d.location_data.relative_bounding_box.width)
-    bbox = caja.location_data.relative_bounding_box
-    return indice / fps, bbox.xmin + bbox.width / 2
+    x, y, ancho, alto = max(detecciones, key=lambda caja: caja[2] * caja[3])
+    centro = (x + ancho / 2) / frame.shape[1]
+    if panel == "left":
+        centro /= 2
+    elif panel == "right":
+        centro = 0.5 + centro / 2
+    return indice / fps, centro
+
+
+def _detectar_trayectorias_split_editor(
+    source: Path,
+) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
+    """Detecta un rostro por mitad para validar los layouts split."""
+    captura = None
+    try:
+        import cv2
+        captura = cv2.VideoCapture(str(source))
+        if not captura.isOpened():
+            return [], []
+        detector = _cascade_rostros_editor(cv2)
+        if detector is None:
+            return [], []
+        izquierda = _suavizar_trayectoria_editor(_keyframes_editor(captura, detector, cv2, "left"))
+        derecha = _suavizar_trayectoria_editor(_keyframes_editor(captura, detector, cv2, "right"))
+        return izquierda, derecha
+    except Exception as exc:
+        logger.info("[editor] detección split no disponible; reframe centrado: %s", exc)
+        return [], []
+    finally:
+        if captura is not None:
+            captura.release()
+
+
+def _trayectorias_dobles_validas(
+    izquierda: list[tuple[float, float]] | None,
+    derecha: list[tuple[float, float]] | None,
+) -> bool:
+    """Exige detecciones en ambos paneles en al menos un mismo instante."""
+    if not izquierda or not derecha:
+        return False
+    instantes_derecha = {tiempo for tiempo, _ in derecha}
+    return any(tiempo in instantes_derecha for tiempo, _ in izquierda)
 
 
 def _suavizar_trayectoria_editor(puntos: list[tuple[float, float]]) -> list[tuple[float, float]]:
@@ -164,7 +255,9 @@ def _filtro_crop_tracking_editor(puntos: list[tuple[float, float]] | None) -> st
         tramo = f"min(max({x0:.5f}+(t-{t0:.3f})*{pendiente:.5f},0),1)"
         expresion = f"if(lt(t,{t1:.3f}),{tramo},{expresion})"
     x = f"if(gt(iw/ih,9/16),min(max(({expresion})*iw-ih*9/32,0),iw-ih*9/16),0)"
-    return f"crop='if(gt(iw/ih,9/16),ih*9/16,iw)':'if(gt(iw/ih,9/16),ih,iw*16/9)':'{x}':0:eval=frame"
+    ancho = "if(gt(iw/ih,9/16),ih*9/16,iw)"
+    alto = "if(gt(iw/ih,9/16),ih,iw*16/9)"
+    return f"crop='{ancho}':'{alto}':'{x}':0"
 
 
 def _registrar_overhead_editor(deteccion: float, render: float) -> float:
@@ -178,10 +271,15 @@ def _comando_reframe(
     source: Path, output: Path, picos: list[float] | None = None,
     trayectoria: list[tuple[float, float]] | None = None,
     layout: str = "single_9_16",
+    rostro_izq: list[tuple[float, float]] | None = None,
+    rostro_der: list[tuple[float, float]] | None = None,
 ) -> list[str]:
     """Comando ffmpeg de crop-primero para 9:16 (+ zoompan si hay picos)."""
     split = layout in ("podcast_split", "gameplay_split")
-    filtro = _filtro_split_editor(layout) if split else _filtro_reframe(picos, trayectoria)
+    filtro = (
+        _filtro_split_editor(layout, rostro_izq, rostro_der, trayectoria)
+        if split else _filtro_reframe(picos, trayectoria)
+    )
     logger.info("[editor] reframe_video applying filter: %s", filtro)
     command = [
         "ffmpeg",
@@ -215,11 +313,14 @@ def _ejecutar_ffmpeg_reframe(
     source: Path, output: Path, timeout_seconds: int, picos: list[float] | None = None,
     trayectoria: list[tuple[float, float]] | None = None,
     layout: str = "single_9_16",
+    rostro_izq: list[tuple[float, float]] | None = None,
+    rostro_der: list[tuple[float, float]] | None = None,
 ):
     """Corre ffmpeg para el reencuadre; RuntimeError ante arranque/timeout."""
     try:
         return subprocess.run(
-            _comando_reframe(source, output, picos, trayectoria, layout), capture_output=True, text=True, timeout=timeout_seconds
+            _comando_reframe(source, output, picos, trayectoria, layout, rostro_izq, rostro_der),
+            capture_output=True, text=True, timeout=timeout_seconds
         )
     except FileNotFoundError as exc:
         raise RuntimeError("No se pudo reencuadrar a 9:16: FFmpeg no está instalado o no está en PATH") from exc
@@ -316,10 +417,17 @@ def reframe_video(
         return str(output)
 
     inicio_deteccion = time.perf_counter()
-    trayectoria = _detectar_trayectoria_editor(source) if layout == "single_9_16" else []
+    rostro_izq, rostro_der = ([], [])
+    if layout == "single_9_16":
+        trayectoria = _detectar_trayectoria_editor(source)
+    elif layout in ("podcast_split", "gameplay_split"):
+        rostro_izq, rostro_der = _detectar_trayectorias_split_editor(source)
+        trayectoria = rostro_izq or rostro_der
     deteccion_seconds = time.perf_counter() - inicio_deteccion
     inicio_render = time.perf_counter()
-    result = _ejecutar_ffmpeg_reframe(source, output, timeout_seconds, picos, trayectoria, layout)
+    result = _ejecutar_ffmpeg_reframe(
+        source, output, timeout_seconds, picos, trayectoria, layout, rostro_izq, rostro_der
+    )
     _registrar_overhead_editor(deteccion_seconds, time.perf_counter() - inicio_render)
     if result.returncode != 0:
         _fallar_reframe(result, output)
