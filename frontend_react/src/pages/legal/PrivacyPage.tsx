@@ -20,8 +20,11 @@ export default function PrivacyPage() {
         </p>
         <p>
           <strong>Datos de autenticación social:</strong> si conectás tu cuenta de YouTube, Instagram o TikTok,
-          recibimos un token de acceso OAuth que nos permite publicar en tu nombre. No almacenamos tus
-          contraseñas de redes sociales.
+          recibimos los datos de autorización OAuth y tokens necesarios para las funciones que habilitás. No
+          recibimos ni almacenamos la contraseña de tu red social. Los permisos solicitados se limitan a las
+          funciones de ClipsAI: YouTube (`youtube.readonly` y `youtube.upload`), Instagram
+          (`instagram_basic`, `instagram_content_publish`, `pages_show_list`, `pages_read_engagement` y
+          `business_management`) y TikTok (`user.info.basic`, `video.upload` y `video.publish`).
         </p>
       </section>
 
@@ -29,9 +32,9 @@ export default function PrivacyPage() {
         <h2 className="legal-section-title">2. Cómo usamos tus datos</h2>
         <ul>
           <li>Procesar los videos que subís y generar clips con subtítulos y hooks.</li>
-          <li>Publicar clips en las redes sociales que conectés mediante OAuth.</li>
+          <li>Conectar, consultar la información básica necesaria y publicar clips solo en las redes que autorizás.</li>
           <li>Enviarte notificaciones sobre el estado de tus trabajos (completado, error).</li>
-          <li>Mejorar la calidad del motor de IA y la precisión del scoring de viralidad.</li>
+          <li>Generar títulos, hooks y puntuaciones para los clips que solicitás.</li>
         </ul>
       </section>
 
@@ -39,12 +42,16 @@ export default function PrivacyPage() {
         <h2 className="legal-section-title">3. Con quién compartimos tus datos</h2>
         <p>
           <strong>Proveedores de IA:</strong> los videos y transcripciones se envían a modelos de lenguaje
-          (Anthropic, OpenRouter, OpenAI o DeepSeek) para generar títulos, hooks y scores. Estos proveedores
-          no usan los datos para entrenar modelos.
+          (Anthropic, OpenRouter, OpenAI o DeepSeek, según la configuración del servicio) para generar títulos,
+          hooks y puntuaciones. El contenido se comparte solo en la medida necesaria para prestar esa función y
+          queda sujeto a las condiciones y políticas de privacidad del proveedor correspondiente.
         </p>
         <p>
-          <strong>Redes sociales:</strong> los clips se publican en YouTube, Instagram o TikTok únicamente
-          cuando vos lo solicitás.
+          <strong>Google/YouTube, Meta/Instagram y TikTok:</strong> los datos de autorización se usan para
+          conectar la cuenta y los clips se envían a la plataforma correspondiente cuando iniciás una
+          publicación o tenés una programación configurada. Cada plataforma trata esos datos según sus propias
+          políticas. Revocar la conexión impide nuevas operaciones desde ClipsAI; no elimina publicaciones ya
+          hechas en la plataforma.
         </p>
         <p>
           <strong>No vendemos tus datos.</strong> ClipsAI no comparte información personal con terceros con
@@ -55,8 +62,9 @@ export default function PrivacyPage() {
       <section className="legal-section">
         <h2 className="legal-section-title">4. Seguridad</h2>
         <p>
-          Las contraseñas se almacenan con cifrado bcrypt. Los tokens OAuth se guardan cifrados en nuestra
-          base de datos. Las conexiones entre tu navegador y nuestros servidores usan HTTPS/TLS.
+          Las contraseñas se almacenan con hash bcrypt. Los tokens OAuth se cifran en reposo y se usan para
+          operar únicamente la integración autorizada. Las conexiones entre tu navegador y nuestros servidores
+          de producción usan HTTPS/TLS.
         </p>
       </section>
 
@@ -85,7 +93,7 @@ export default function PrivacyPage() {
         </p>
       </section>
 
-      <p className="legal-updated">Última actualización: octubre de 2026</p>
+      <p className="legal-updated">Última actualización: noviembre de 2026</p>
     </LegalLayout>
   )
 }

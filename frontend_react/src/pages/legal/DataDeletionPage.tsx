@@ -22,8 +22,12 @@ export default function DataDeletionPage() {
           <strong>"Solicitud de eliminación de datos"</strong> y la dirección de correo asociada a tu cuenta.
         </p>
         <p>
-          También podés eliminar tu cuenta directamente desde la aplicación en{' '}
-          <strong>Configuración → Cuenta → Eliminar cuenta</strong>.
+          No incluyas contraseñas ni tokens en el correo. Confirmaremos la identidad de la cuenta antes de
+          procesar el pedido. Esta página es el canal público de solicitud para usuarios y revisores de las
+          plataformas conectadas.
+        </p>
+        <p>
+          También podés iniciar la eliminación desde la configuración de tu cuenta si esa opción está disponible.
         </p>
       </section>
 
@@ -33,7 +37,7 @@ export default function DataDeletionPage() {
           <li>Tu cuenta de usuario y credenciales de acceso.</li>
           <li>Los videos que subiste y sus transcripciones.</li>
           <li>Los clips generados a partir de tus videos.</li>
-          <li>Los tokens de acceso OAuth a YouTube, Instagram y TikTok.</li>
+          <li>Los tokens y datos de autorización OAuth de Google/YouTube, Meta/Instagram y TikTok.</li>
           <li>Los datos de uso y métricas asociados a tu cuenta.</li>
         </ul>
       </section>
@@ -41,8 +45,10 @@ export default function DataDeletionPage() {
       <section className="legal-section">
         <h2 className="legal-section-title">3. Plazo de eliminación</h2>
         <p>
-          Procesamos las solicitudes de eliminación dentro de los <strong>30 días</strong> hábiles. Recibirás
-          una confirmación por correo electrónico cuando la eliminación se haya completado.
+          Procesamos las solicitudes en un máximo de <strong>30 días</strong> hábiles. Recibirás una
+          confirmación por correo electrónico cuando se complete. La eliminación en ClipsAI no borra videos o
+          publicaciones ya enviados a YouTube, Instagram o TikTok; para retirarlos, usá los controles de esas
+          plataformas.
         </p>
       </section>
 
@@ -57,9 +63,10 @@ export default function DataDeletionPage() {
       <section className="legal-section">
         <h2 className="legal-section-title">5. Revocación de acceso OAuth</h2>
         <p>
-          Si solo querés revocar el acceso de ClipsAI a tus redes sociales sin eliminar tu cuenta, podés
-          hacerlo desde <strong>Configuración → Integraciones</strong> desconectando cada red, o directamente
-          desde la configuración de aplicaciones de YouTube, Instagram o TikTok.
+          Si solo querés revocar el acceso de ClipsAI a tus redes sociales sin eliminar tu cuenta, desconectá
+          cada integración desde la aplicación o revocá ClipsAI desde la configuración de aplicaciones
+          autorizadas de Google, Meta o TikTok. La revocación evita futuras operaciones; no elimina los datos
+          conservados por la plataforma social ni tus publicaciones previas.
         </p>
       </section>
 
@@ -71,7 +78,7 @@ export default function DataDeletionPage() {
         </p>
       </section>
 
-      <p className="legal-updated">Última actualización: octubre de 2026</p>
+      <p className="legal-updated">Última actualización: noviembre de 2026</p>
     </LegalLayout>
   )
 }
