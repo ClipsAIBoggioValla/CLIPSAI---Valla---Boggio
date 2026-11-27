@@ -1,20 +1,19 @@
-import { LANDING_ABOUT, LANDING_STACK } from './landingData'
+import { LANDING_ABOUT } from './landingData'
 
-/** "Sobre nosotros": motor de IA, análisis de audio y scoring de viralidad. */
+/** Beneficios cotidianos para publicar más y editar menos. */
 export default function LandingAbout() {
   return (
     <section id="sobre-nosotros" className="landing-section" aria-labelledby="sobre-nosotros-title">
       <div className="landing-container">
         <div className="landing-section-head">
           <span className="landing-eyebrow">
-            <i className="bi bi-code-slash" aria-hidden="true" /> Sobre nosotros
+            <i className="bi bi-stars" aria-hidden="true" /> Beneficios
           </span>
           <h2 id="sobre-nosotros-title" className="landing-heading">
-            El motor por debajo <span className="landing-accent">del botón</span>
+            Menos edición, <span className="landing-accent">más alcance.</span>
           </h2>
           <p className="landing-lead">
-            ClipsAI no es una caja negra: escribimos el pipeline completo —audio, prompt, scoring, render y
-            publicación— y lo auditamos en cada job.
+            Tus mejores momentos, listos para compartir en minutos.
           </p>
         </div>
 
@@ -26,16 +25,18 @@ export default function LandingAbout() {
               </span>
               <h3 className="landing-about-title">{pillar.title}</h3>
               <p className="landing-about-text">{pillar.text}</p>
-              <code className="landing-about-code">{pillar.code}</code>
             </article>
           ))}
         </div>
 
-        <div className="landing-stack" aria-label="Stack tecnológico de ClipsAI">
-          {LANDING_STACK.map((tech) => (
-            <span key={tech}>{tech}</span>
-          ))}
-        </div>
+        <aside className="landing-panel mt-6">
+          <h3 className="landing-panel-title">Un video adentro, tres redes publicadas.</h3>
+          <ul className="landing-panel-list">
+            <li><i className="bi bi-check-circle-fill" aria-hidden="true" /><span>Subtítulos y gancho inicial.</span></li>
+            <li><i className="bi bi-check-circle-fill" aria-hidden="true" /><span>Formato vertical listo para compartir.</span></li>
+            <li><i className="bi bi-check-circle-fill" aria-hidden="true" /><span>Publicación automática en tus redes.</span></li>
+          </ul>
+        </aside>
       </div>
     </section>
   )

@@ -28,8 +28,8 @@ function renderActiveJobBanner(activeJobId: string | null) {
   if (!activeJobId) return null
   return (
     <div className="rounded-xl border border-[rgba(180,241,5,0.22)] bg-[rgba(180,241,5,0.08)] px-4 py-3 flex items-center justify-between gap-3 mb-6">
-      <span className="text-sm font-bold text-[#B4F105] flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-[#B4F105] animate-pulse" /> Procesamiento activo detectado</span>
-      <Link to={`/jobs/${activeJobId}`} className="btn-custom btn-custom-primary btn-custom-sm">Ver progreso {activeJobId.slice(0, 8)} →</Link>
+      <span className="text-sm font-bold text-[#B4F105] flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-[#B4F105] animate-pulse" /> Tus clips se están preparando</span>
+      <Link to={`/jobs/${activeJobId}`} className="btn-custom btn-custom-primary btn-custom-sm">Ver progreso →</Link>
     </div>
   )
 }
@@ -55,18 +55,18 @@ function transcriptLabel(transcriptFile: File | null): string {
 function transcriptBadge(transcriptFile: File | null) {
   if (!transcriptFile) return null
   return (
-    <span className="inline-flex items-center gap-1.5 mt-2 px-2.5 py-1 rounded-full text-xs font-bold bg-[rgba(180,241,5,0.14)] text-[#B4F105] border border-[rgba(180,241,5,0.25)]"><i className="bi bi-check-circle-fill" /> {(transcriptFile.size / 1024).toFixed(0)} KB</span>
+    <span className="score-badge-neon high mt-2"><i className="bi bi-check-circle-fill" /> {(transcriptFile.size / 1024).toFixed(0)} KB</span>
   )
 }
 
 function submitButtonContent(isUploading: boolean, status: UploadState) {
   if (!isUploading) {
-    return (<><i className="bi bi-lightning-charge-fill" /> Subir y procesar</>)
+    return (<><i className="bi bi-lightning-charge-fill" /> Crear mis clips</>)
   }
   return (
     <>
-      <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#080C14]/30 border-t-[#080C14]" />
-      {status === 'uploading' ? 'Subiendo archivos...' : 'Iniciando procesamiento...'}
+      <span className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--bg-sidebar)]/30 border-t-[var(--bg-sidebar)]" />
+      {status === 'uploading' ? 'Subiendo tu video...' : 'Preparando tus clips...'}
     </>
   )
 }
@@ -169,44 +169,44 @@ export default function UploadPage() {
   return (
     <div className="max-w-3xl mx-auto">
       {renderActiveJobBanner(activeJobId)}
-      <div className="page-header" style={{ marginBottom: '2rem' }}>
+      <div className="page-header mb-8">
         <div>
           <div className="flex flex-wrap items-center gap-3 mb-4">
-            <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-[#B4F105] text-[#080C14] border border-[rgba(180,241,5,0.3)] shadow-[0_0_16px_rgba(180,241,5,0.35)]"><i className="bi bi-cloud-arrow-up" style={{ fontSize: '1.15rem' }} /></span>
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-[#B4F105] text-[#080C14] shadow-[0_0_12px_rgba(180,241,5,0.25)]"><i className="bi bi-stars" /> Nuevo</span>
+            <span className="dropzone-icon-neon"><i className="bi bi-cloud-arrow-up" /></span>
+            <span className="score-badge-neon high"><i className="bi bi-stars" /> NUEVO</span>
           </div>
-          <h1 className="page-title" style={{ marginBottom: 0, fontSize: '2.25rem', fontWeight: 800, letterSpacing: '-0.03em', lineHeight: 1.1, color: '#F1F5F9' }}>Subir video</h1>
-          <p className="page-subtitle" style={{ marginBottom: 0, marginTop: '0.7rem', fontSize: '0.92rem', fontWeight: 500, color: '#94A3B8', lineHeight: 1.6, maxWidth: '640px' }}>Sube tu video y su transcripción para generar clips automáticamente con IA.</p>
+          <h1 className="page-title mb-0 text-4xl font-extrabold tracking-tight">Subir video</h1>
+          <p className="page-subtitle mt-3 mb-0 max-w-2xl text-sm leading-relaxed">Sube un video y encuentra momentos destacados para convertirlos en clips con IA.</p>
         </div>
       </div>
 
       {renderErrorAlert(error)}
 
-      <div role="tablist" aria-label="Método de carga" className="mb-4 flex gap-2">
-        <button type="button" role="tab" aria-selected={activeTab === 'file'} onClick={() => { setActiveTab('file'); setError(null) }} className={`btn-custom ${activeTab === 'file' ? 'btn-custom-primary' : 'btn-custom-secondary'}`}>Subir archivo</button>
-        <button type="button" role="tab" aria-selected={activeTab === 'url'} onClick={() => { setActiveTab('url'); setError(null) }} className={`btn-custom ${activeTab === 'url' ? 'btn-custom-primary' : 'btn-custom-secondary'}`}>Pegar enlace</button>
+      <div role="tablist" aria-label="Método de carga" className="mb-4 grid grid-cols-2 gap-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-sidebar)] p-1">
+        <button type="button" role="tab" aria-selected={activeTab === 'file'} onClick={() => { setActiveTab('file'); setError(null) }} className={`rounded-lg px-4 py-2.5 text-sm font-bold transition ${activeTab === 'file' ? 'bg-[var(--bg-card)] text-[var(--brand-lime)] shadow-[var(--shadow-sm)]' : 'text-[var(--text-secondary)] hover:bg-white/5 hover:text-[var(--text-primary)]'}`}><i className="bi bi-upload mr-2" />Subir archivo</button>
+        <button type="button" role="tab" aria-selected={activeTab === 'url'} onClick={() => { setActiveTab('url'); setError(null) }} className={`rounded-lg px-4 py-2.5 text-sm font-bold transition ${activeTab === 'url' ? 'bg-[var(--bg-card)] text-[var(--brand-lime)] shadow-[var(--shadow-sm)]' : 'text-[var(--text-secondary)] hover:bg-white/5 hover:text-[var(--text-primary)]'}`}><i className="bi bi-link-45deg mr-2" />Pegar enlace</button>
       </div>
 
       <form onSubmit={activeTab === 'url' ? handleUrlSubmit : handleSubmit} className="card-spark space-y-6">
         {activeTab === 'url' ? (
           <div>
             <label htmlFor="video-source-url" className="form-label-custom">Enlace público de YouTube o Twitch</label>
-            <input id="video-source-url" type="url" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} placeholder="https://www.youtube.com/watch?v=…" className="w-full rounded-xl border border-slate-600 bg-slate-900 px-4 py-3 text-slate-100 focus:border-lime-400 focus:outline-none" autoComplete="url" disabled={urlBusy} />
-            <p className="mt-2 text-xs" style={{ color: '#94A3B8' }}>El video debe ser público y estar disponible en la región del servidor.</p>
+            <input id="video-source-url" type="url" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} placeholder="https://www.youtube.com/watch?v=…" className="form-control-custom" autoComplete="url" disabled={urlBusy} />
+            <p className="mt-2 text-xs text-[var(--text-secondary)]">El video debe ser público y estar disponible en la región del servidor.</p>
           </div>
         ) : (
           <>
         <div>
-          <label className="form-label-custom">Archivo de Video <span className="text-[#B4F105]">*</span></label>
+          <label className="form-label-custom">Archivo de Video <span className="text-[var(--brand-lime)]">*</span></label>
           <Dropzone videoFile={videoFile} onVideoChange={onVideoChange} sampleState={sampleState} sampleError={sampleError} isUploading={isUploading} isDirectUploadBusy={isDirectUploadBusy} isSampleBusy={isSampleBusy} onSampleJob={handleSampleJob} />
         </div>
 
         <div>
-          <label className="form-label-custom">Archivo de Transcripción <span className="text-[#94A3B8] font-normal">(opcional)</span></label>
+          <label className="form-label-custom">Archivo de Transcripción <span className="text-[var(--text-secondary)] font-normal">(opcional)</span></label>
           <label className={transcriptDropzoneClass(transcriptFile)}>
             <span className="dropzone-icon-neon mb-3"><i className="bi bi-file-earmark-text" /></span>
-            <span className="text-sm font-bold" style={{ color: '#F1F5F9' }}>{transcriptLabel(transcriptFile)}</span>
-            <span className="text-xs mt-1" style={{ color: '#94A3B8' }}>.txt, .srt (UTF-8)</span>
+            <span className="text-sm font-bold text-[var(--text-primary)]">{transcriptLabel(transcriptFile)}</span>
+            <span className="text-xs mt-1 text-[var(--text-secondary)]">.txt, .srt (UTF-8)</span>
             {transcriptBadge(transcriptFile)}
             <input type="file" accept=".txt,.srt,text/plain" onChange={onTranscriptChange} className="hidden" disabled={isUploading} />
           </label>
@@ -216,14 +216,14 @@ export default function UploadPage() {
           </>
         )}
 
-        <button type="submit" disabled={activeTab === 'url' ? urlBusy || !sourceUrl.trim() : submitDisabled(isUploading, isDirectUploadBusy, !!videoFile)} className="btn-custom btn-custom-primary w-full justify-center btn-custom-lg shadow-[0_0_28px_rgba(180,241,5,0.35)]">
-          {activeTab === 'url' ? (urlBusy ? 'Descargando e iniciando procesamiento…' : 'Descargar y procesar') : submitButtonContent(isUploading, status)}
+        <button type="submit" disabled={activeTab === 'url' ? urlBusy || !sourceUrl.trim() : submitDisabled(isUploading, isDirectUploadBusy, !!videoFile)} className="btn-custom btn-custom-primary w-full justify-center btn-custom-lg shadow-[var(--brand-lime-glow)]">
+          {activeTab === 'url' ? (urlBusy ? 'Descargando tu video…' : 'Crear mis clips') : submitButtonContent(isUploading, status)}
         </button>
 
         {activeTab === 'file' && isUploading && (
           <div className="space-y-2">
             <div className="progress"><div className="progress-bar w-full animate-pulse" style={{ height: '10px', borderRadius: '50rem' }} /></div>
-            <p className="text-xs text-center" style={{ color: '#94A3B8' }}><i className="bi bi-shield-lock mr-1" /> No cierres esta ventana</p>
+            <p className="text-xs text-center text-[var(--text-secondary)]"><i className="bi bi-shield-lock mr-1" /> No cierres esta ventana</p>
           </div>
         )}
       </form>

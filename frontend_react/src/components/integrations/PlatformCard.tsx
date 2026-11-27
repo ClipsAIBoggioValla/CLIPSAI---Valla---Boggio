@@ -27,11 +27,11 @@ export default function PlatformCard(props: PlatformCardProps) {
       <div className="flex items-center gap-3 mb-3">
         <span className={iconWrapClass}><i className={icon} /></span>
         <div>
-          <h3 className="font-bold text-white">{name}</h3>
+          <h3 className="font-bold text-[var(--text-primary)]">{name}</h3>
           {connected && username ? (
-            <p className="text-xs font-mono text-emerald-300">@{username}</p>
+            <p className="text-xs text-emerald-300">@{username}</p>
           ) : (
-            <p className="text-xs text-[#94A3B8]">{description}</p>
+            <p className="text-xs text-[var(--text-secondary)]">{description}</p>
           )}
         </div>
         {connected ? (
@@ -39,10 +39,10 @@ export default function PlatformCard(props: PlatformCardProps) {
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Conectado
           </span>
         ) : (
-          <span className="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-white/5 text-[#94A3B8] border border-white/10">No conectado</span>
+          <span className="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-white/5 text-[var(--text-secondary)] border border-[var(--border-subtle)]">No conectado</span>
         )}
       </div>
-      <p className="text-sm text-[#94A3B8] mb-4">{descriptionLong}</p>
+      <p className="text-sm text-[var(--text-secondary)] mb-4">{descriptionLong}</p>
       <button className={connectClass} disabled={loading} data-testid={`connect-${name.toLowerCase()}-btn`} onClick={onConnect}>
         {loading ? (
           <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" /> Conectando...</>
@@ -50,7 +50,7 @@ export default function PlatformCard(props: PlatformCardProps) {
           <><i className={connectIcon} /> {connectLabel}</>
         )}
       </button>
-      <p className="text-xs text-[#64748B] mt-2 text-center">{endpointHint}</p>
+      <p className="text-xs text-[var(--text-secondary)] mt-2 text-center">{endpointHint}</p>
       {props.children}
     </div>
   )

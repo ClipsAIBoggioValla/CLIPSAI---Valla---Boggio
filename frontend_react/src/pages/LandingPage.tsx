@@ -36,18 +36,17 @@ export default function LandingPage() {
           <section className="landing-container" aria-labelledby="cta-final-title">
             <div className="landing-cta-band">
               <h2 id="cta-final-title" className="landing-heading">
-                Subí tu video y mirá <span className="landing-accent">qué clip sale primero</span>
+                Grabá una vez. <span className="landing-accent">Aparecé todos los días.</span>
               </h2>
               <p className="landing-lead">
-                Creás la cuenta gratis, subís un video largo y en minutos tenés clips verticales con subtítulos,
-                score de viralidad y publicación automática.
+                Tus mejores momentos, listos para crecer en redes.
               </p>
               <div className="landing-cta-row landing-cta-row-center">
                 <Link to="/auth" className="landing-btn landing-btn-primary">
                   Probar gratis <i className="bi bi-arrow-right" aria-hidden="true" />
                 </Link>
                 <a href="#features" className="landing-btn landing-btn-ghost">
-                  Ver features
+                  Ver funciones
                 </a>
               </div>
             </div>

@@ -3,11 +3,11 @@ import { HERO_STATS } from './landingData'
 
 const WAVE_BARS = Array.from({ length: 26 }, (_, i) => i)
 
-const PIPELINE = [
-  { icon: 'bi-soundwave', label: 'Audio analizado: 50 momentos' },
-  { icon: 'bi-stars', label: 'IA: 10 clips con score' },
-  { icon: 'bi-phone', label: 'Render 9:16 + subtítulos ASS' },
-  { icon: 'bi-send-check', label: 'Publicado en 3 redes' },
+const PREVIEW_STEPS = [
+  { icon: 'bi-soundwave', label: 'Mejores momentos' },
+  { icon: 'bi-stars', label: 'Los mejores clips' },
+  { icon: 'bi-phone', label: 'Vertical y subtitulado' },
+  { icon: 'bi-send-check', label: 'Listo para tus redes' },
 ]
 
 /** Hero: titular de impacto, propuesta de valor y CTA "Probar gratis" → /auth. */
@@ -17,15 +17,14 @@ export default function LandingHero() {
       <div className="landing-container landing-hero-grid">
         <div>
           <span className="landing-eyebrow">
-            <i className="bi bi-stars" aria-hidden="true" /> Motor IA propio · audio real · autopublicación
+            <i className="bi bi-stars" aria-hidden="true" /> Subí un video. Publicá en todos lados.
           </span>
           <h1 id="hero-title" className="landing-heading">
-            De un video largo a <span className="landing-accent">clips que se publican solos</span>
+            Tus videos largos, <span className="landing-accent">listos para viralizarse solos.</span>
           </h1>
           <p className="landing-lead">
-            ClipsAI escucha el audio de tu video, encuentra con IA los momentos que enganchan, los corta en
-            vertical 9:16 con subtítulos palabra por palabra y los publica en YouTube, Instagram y TikTok. Sin
-            editor, sin exporting a mano, sin posts que quedan en el borrador.
+            Detectamos los mejores momentos, los pasamos a vertical con subtítulos y los publicamos en YouTube,
+            Instagram y TikTok.
           </p>
           <div className="landing-cta-row">
             <Link to="/auth" className="landing-btn landing-btn-primary">
@@ -36,8 +35,7 @@ export default function LandingHero() {
             </a>
           </div>
           <p className="landing-cta-note">
-            <i className="bi bi-shield-check" aria-hidden="true" /> Sin tarjeta de crédito · tu video solo se usa
-            para generar tus clips
+            Sin tarjeta · Listo en minutos · Todo en un clic
           </p>
         </div>
 
@@ -45,9 +43,21 @@ export default function LandingHero() {
           <div className="landing-hero-badge">
             <i className="bi bi-graph-up-arrow" /> +38 % retención
           </div>
+          <div className="landing-clip-card landing-clip-card-featured">
+            <span className="landing-clip-card-kicker"><i className="bi bi-stars" /> Clip destacado</span>
+            <div className="landing-clip-card-preview">
+              <span className="landing-clip-card-hook">Gancho inicial</span>
+              <p>“Esto cambia todo”</p>
+              <span className="landing-clip-card-subtitle">Subtítulos animados</span>
+            </div>
+            <div className="landing-clip-card-meta">
+              <strong>Puntaje 9.1</strong>
+              <span>Vertical 9:16</span>
+            </div>
+          </div>
           <div className="landing-phone">
             <div className="landing-phone-top">
-              <span className="landing-chip">SCORE 9.1</span>
+              <span className="landing-chip">Score 9.1</span>
               <span>0:46 · 9:16</span>
             </div>
             <div className="landing-phone-screen">
@@ -57,7 +67,7 @@ export default function LandingHero() {
                 ))}
               </div>
               <p className="landing-phone-sub">
-                nadie te dice <em>esto</em>
+                lo que nadie <em>te cuenta</em>
               </p>
             </div>
             <div>
@@ -65,13 +75,19 @@ export default function LandingHero() {
                 <span style={{ width: '82%' }} />
               </div>
               <div className="landing-phone-pipeline">
-                {PIPELINE.map((item) => (
+                {PREVIEW_STEPS.map((item) => (
                   <span key={item.label}>
                     <i className={`bi ${item.icon}`} /> {item.label}
                   </span>
                 ))}
               </div>
             </div>
+          </div>
+          <div className="landing-clip-card landing-clip-card-social">
+            <span className="landing-clip-card-kicker"><i className="bi bi-send-check" /> Listo para publicar</span>
+            <div className="landing-social-row"><i className="bi bi-youtube" /><span>YouTube Shorts</span><b>Listo</b></div>
+            <div className="landing-social-row"><i className="bi bi-instagram" /><span>Instagram Reels</span><b>Listo</b></div>
+            <div className="landing-social-row"><i className="bi bi-tiktok" /><span>TikTok</span><b>Listo</b></div>
           </div>
         </div>
       </div>

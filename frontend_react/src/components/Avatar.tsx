@@ -56,8 +56,8 @@ export default function Avatar({ name, email, avatarUrl, size = 32, className = 
   const initials = getInitials(name, email)
   return (
     <span
-      className={`inline-flex items-center justify-center rounded-full font-extrabold shrink-0 bg-gradient-to-tr from-emerald-500 to-[#B4F105] text-[#080C14] shadow-[0_0_16px_rgba(180,241,5,0.35)] ${className}`}
-      style={{ width: px, height: px, fontSize: size * 0.38, border: '1px solid rgba(180,241,5,0.3)' }}
+      className={`inline-flex items-center justify-center rounded-full font-extrabold shrink-0 border border-[var(--brand-lime)] bg-gradient-to-tr from-emerald-500 to-[var(--brand-lime)] text-[var(--bg-sidebar)] shadow-[var(--brand-lime-glow)] ${className}`}
+      style={{ width: px, height: px, fontSize: size * 0.38 }}
       aria-label={avatarLabel(name, email)}
     >
       {initials}

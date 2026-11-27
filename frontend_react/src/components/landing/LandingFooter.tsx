@@ -44,8 +44,7 @@ export default function LandingFooter() {
               <i className="bi bi-asterisk" aria-hidden="true" /> clipsai
             </span>
             <p className="landing-footer-about">
-              Motor de viralidad automatizado: analizamos el audio de tu video, elegimos los momentos que
-              enganchan y los publicamos en vertical. Construido por el equipo de ClipsAI.
+              Tus videos, convertidos en clips listos para compartir. Publicá más y editá menos.
             </p>
             <a href={`mailto:${LANDING_CONTACT.email}`} className="landing-footer-link">
               <i className="bi bi-envelope me-2" aria-hidden="true" />

@@ -49,7 +49,7 @@ export default function SettingsForms(props: SettingsFormsProps) {
           </div>
         )}
         <div className="mb-3">
-          <label className="form-label-custom">Nombre de usuario / Nombre completo</label>
+          <label className="form-label-custom">Nombre completo</label>
           <input value={p.fullName} onChange={(e) => p.setFullName(e.target.value)} placeholder="Tu nombre" className="form-control-custom" />
         </div>
         <div className="mb-4">
@@ -112,7 +112,7 @@ export default function SettingsForms(props: SettingsFormsProps) {
           </select>
         </div>
         <div className="mb-4">
-          <label className="form-label-custom">Formato preferido de exportación CSV/JSON</label>
+          <label className="form-label-custom">Formato para descargar tus datos</label>
           <select value={p.exportFormat} onChange={(e) => p.setExportFormat(e.target.value as 'csv' | 'json')} className="form-select-custom">
             <option value="csv">CSV (.csv)</option>
             <option value="json">JSON (.json)</option>

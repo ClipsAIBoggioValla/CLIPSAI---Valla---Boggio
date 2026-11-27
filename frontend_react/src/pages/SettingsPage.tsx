@@ -34,13 +34,13 @@ function applyStoredUserFallback(user: ProfileWithName | null | undefined, apply
 }
 
 function profileErrorMessage(err: unknown): string | null {
-  if (err instanceof ApiError) return err.detail
-  if (err instanceof Error) return err.message
-  return null
+  if (err instanceof ApiError || err instanceof Error) return 'No pudimos cargar tu perfil. Intenta actualizar la página.'
+  return 'No pudimos cargar tu perfil. Intenta actualizar la página.'
 }
 
 function profileSaveErrorMessage(err: unknown): string {
-  return err instanceof ApiError ? err.detail : err instanceof Error ? err.message : 'Error al guardar perfil'
+  if (err instanceof ApiError || err instanceof Error) return 'No pudimos guardar tus datos. Inténtalo de nuevo.'
+  return 'No pudimos guardar tus datos. Inténtalo de nuevo.'
 }
 
 function restoreSavedPreferences(apply: { setTheme: (v: ThemePreference) => void; setExportFormat: (v: ExportFormat) => void }): void {
@@ -72,16 +72,16 @@ function passwordChangeError(current: string, next: string, confirm: string): st
   return null
 }
 
-function password400Message(detail: string): string {
-  return detail || 'La contraseña actual es incorrecta'
+function password400Message(): string {
+  return 'La contraseña actual es incorrecta'
 }
 
 function passwordRequestErrorMessage(err: unknown): string | null {
   if (err instanceof ApiError) {
-    if (err.status === 400) return password400Message(err.detail)
-    return err.detail
+    if (err.status === 400) return password400Message()
+    return 'No pudimos cambiar tu contraseña. Inténtalo de nuevo.'
   }
-  if (err instanceof Error) return err.message
+  if (err instanceof Error) return 'No pudimos cambiar tu contraseña. Inténtalo de nuevo.'
   return null
 }
 
@@ -151,8 +151,8 @@ export default function SettingsPage() {
     if (problem) { setPasswordError(problem); return }
     setSavingPassword(true)
     try {
-      const res = await userService.changePassword({ current_password: currentPassword, new_password: newPassword })
-      setPasswordToast(res.detail || 'Contraseña actualizada correctamente')
+      await userService.changePassword({ current_password: currentPassword, new_password: newPassword })
+      setPasswordToast('Contraseña actualizada correctamente')
       setCurrentPassword(''); setNewPassword(''); setConfirmPassword('')
       setTimeout(() => { logout(); navigate('/auth', { replace: true }) }, 1000)
     } catch (err: unknown) {
@@ -167,16 +167,15 @@ export default function SettingsPage() {
 
   return (
     <div className="max-w-4xl mx-auto">
-      <div className="page-header" style={{ marginBottom: '2.5rem' }}>
+      <div className="page-header mb-10">
         <div className="flex items-center gap-4">
-          <span className="inline-flex h-12 w-12 items-center justify-center rounded-xl shrink-0 bg-[#B4F105] text-[#080C14] border border-[rgba(180,241,5,0.3)] shadow-[0_0_16px_rgba(180,241,5,0.35)]"><i className="bi bi-gear" style={{ fontSize: '1.35rem' }} /></span>
+          <span className="dropzone-icon-neon shrink-0"><i className="bi bi-gear" /></span>
           <Avatar name={fullName || undefined} email={email} size={56} />
           <div>
             <div className="flex flex-wrap items-center gap-3 mb-1">
-              <h1 className="page-title" style={{ marginBottom: 0, fontSize: '2.35rem', fontWeight: 800, letterSpacing: '-0.03em', lineHeight: 1.1, color: '#F1F5F9' }}>Ajustes</h1>
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-[#B4F105] text-[#080C14] shadow-[0_0_12px_rgba(180,241,5,0.25)]"><i className="bi bi-shield-check" /> Seguro</span>
+              <h1 className="page-title mb-0 text-4xl font-extrabold tracking-tight">Ajustes de cuenta</h1>
             </div>
-            <p className="page-subtitle" style={{ marginBottom: 0, fontSize: '0.98rem', fontWeight: 500, color: '#94A3B8', lineHeight: 1.6 }}>Gestiona tu perfil y preferencias. Sesión activa como {email}</p>
+            <p className="page-subtitle mb-0 text-sm">Administra tus datos, seguridad y preferencias.</p>
           </div>
         </div>
       </div>
