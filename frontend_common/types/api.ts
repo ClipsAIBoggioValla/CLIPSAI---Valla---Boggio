@@ -122,6 +122,66 @@ export interface ReRenderResponse {
   enable_hook: boolean
 }
 
+export type CaptionStyle = 'karaoke_yellow' | 'neon_green' | 'minimal_white'
+
+export type SfxMood = 'tension' | 'impact' | 'transition' | 'none'
+
+export interface RetrimSubtitleCue {
+  start: number
+  end: number
+  text: string
+}
+
+export interface RetrimRenderConfig {
+  caption_style?: CaptionStyle
+  enable_auto_crop?: boolean
+  watermark_path?: string | null
+  outro_path?: string | null
+  resolution?: string
+  fps?: number
+  loudnorm_enabled?: boolean
+  enable_hook_teaser?: boolean
+  sfx_mood?: SfxMood
+}
+
+export interface RetrimRequest {
+  start_time: number
+  end_time: number
+  subtitles_text?: string | null
+  subtitle_cues?: RetrimSubtitleCue[] | null
+  render_config?: RetrimRenderConfig | null
+  enable_hook_teaser?: boolean
+  sfx_mood?: SfxMood
+}
+
+export interface RetrimResponse {
+  clip_id: string
+  start_time: number
+  end_time: number
+  duration: number
+  status: string
+  file_path: string | null
+  retrim_count: number
+  retrim_limit: number
+  caption_style: string
+}
+
+export interface RetrimOptions {
+  clip_id: string
+  start_time: number
+  end_time: number
+  source_duration: number | null
+  duration: number
+  subtitles: RetrimSubtitleCue[]
+  subtitles_text: string
+  retrim_count: number
+  retrim_limit: number
+  caption_styles: CaptionStyle[]
+  default_caption_style: CaptionStyle
+  has_hook: boolean
+  watermark_path: string | null
+}
+
 export type PublishPlatform = 'tiktok' | 'instagram' | 'youtube' | 'webhook'
 
 export interface PublishClipPayload {

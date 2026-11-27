@@ -68,13 +68,14 @@ interface ClipResultsProps {
   handleDownload: (c: ClipListItem) => void
   handleToggle: (c: ClipListItem, ass: boolean, hook: boolean) => void
   openPublish: (c: ClipListItem) => void
+  onEdit: (c: ClipListItem) => void
 }
 
 export default function ClipResults(props: ClipResultsProps) {
   const {
     data, loading, error, viewMode, hasFilters, page, totalPages,
     rerendering, publishing, ssePublishing, sseStatus, activePublishId, sseUrl,
-    onFetchClips, onResetFilters, onSetPage, setPreviewClip, handleDownload, handleToggle, openPublish,
+    onFetchClips, onResetFilters, onSetPage, setPreviewClip, handleDownload, handleToggle, openPublish, onEdit,
   } = props
 
   if (loading) {
@@ -122,7 +123,7 @@ export default function ClipResults(props: ClipResultsProps) {
               const flags = clipFlags(clip, rerendering, publishing, ssePublishing, sseStatus, activePublishId)
               const isBusy = flags.isBusy || clip.status === 'PUBLISHING'
               return (
-                <ClipCard key={clip.id} clip={clip} isRerendering={flags.isRerendering} isPublishing={flags.isPublishing} isBusy={isBusy} isPublished={flags.isPublished} sseUrl={sseUrl} onPreview={setPreviewClip} onDownload={handleDownload} onToggle={handleToggle} onOpenPublish={openPublish} />
+                <ClipCard key={clip.id} clip={clip} isRerendering={flags.isRerendering} isPublishing={flags.isPublishing} isBusy={isBusy} isPublished={flags.isPublished} sseUrl={sseUrl} onPreview={setPreviewClip} onDownload={handleDownload} onToggle={handleToggle} onOpenPublish={openPublish} onEdit={onEdit} />
               )
             })}
           </div>
@@ -164,6 +165,7 @@ export default function ClipResults(props: ClipResultsProps) {
                           <div className="flex items-center gap-1">
                             <button type="button" onClick={() => setPreviewClip(clip)} className="btn-custom btn-custom-light btn-custom-sm !text-xs" title="Vista previa vertical"><i className="bi bi-eye" /></button>
                             <button type="button" onClick={() => handleDownload(clip)} className="btn-custom btn-custom-light btn-custom-sm !text-xs" title="Descargar MP4"><i className="bi bi-download" /></button>
+                            <button type="button" onClick={() => onEdit(clip)} disabled={!!isBusy} className="btn-custom btn-custom-light btn-custom-sm !text-xs disabled:opacity-50" title="Editar clip"><i className="bi bi-pencil-square" /></button>
                             <button type="button" onClick={() => openPublish(clip)} disabled={!!isBusy} className="btn-custom btn-custom-primary btn-custom-sm !text-xs disabled:opacity-50">{isPublishing ? 'Publicando...' : isPublished ? 'Publicado ✅' : 'Publicar'}</button>
                           </div>
                         </td>
