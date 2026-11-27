@@ -155,6 +155,33 @@ class RunPodHandlerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "video_url"):
             process_video_job({"input": {}})
 
+    def test_handler_ingesta_source_url_con_ytdlp_mockeado(self) -> None:
+        async def fake_ingest(_url: str, upload_dir: str) -> str:
+            source = Path(upload_dir) / "source-id.mp4"
+            source.write_bytes(b"mocked yt-dlp video")
+            return "source-id"
+
+        resultado_engine = SimpleNamespace(
+            exito=False, clips=[], carpeta_salida="", error="sin audio", error_tipo="SinClipsValidos", error_detalle=""
+        )
+        processed_bytes: list[bytes] = []
+
+        def fake_process(video_path: str, _transcript_path: str):
+            processed_bytes.append(Path(video_path).read_bytes())
+            return resultado_engine
+
+        engine = types.ModuleType("engine")
+        engine.procesar_video = Mock(side_effect=fake_process)
+        with (
+            patch.dict(sys.modules, {"engine": engine}),
+            patch("backend.services.ingestion.service.ingest_ytdlp", side_effect=fake_ingest),
+        ):
+            result = process_video_job({"input": {"source_url": "https://www.youtube.com/watch?v=abc123"}})
+
+        self.assertEqual(result["status"], "FAILED")
+        engine.procesar_video.assert_called_once()
+        self.assertEqual(processed_bytes, [b"mocked yt-dlp video"])
+
 
 class RunPodClientTests(unittest.TestCase):
     @patch.dict(

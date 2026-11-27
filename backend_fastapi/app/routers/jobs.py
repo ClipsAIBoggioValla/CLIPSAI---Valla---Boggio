@@ -1954,6 +1954,19 @@ def _persistir_fallo_wrapper(db2: Any, job_ref: Any, e: Exception, error_trace: 
     _flush_stdout()
 
 
+def create_job_for_video(db: Any, video_id: uuid.UUID, background_tasks: Any) -> Job:
+    """Crea el job y agenda el pipeline compartido con la subida directa."""
+    job = Job(video_id=video_id, status=JobStatus.PENDING.value, progress=0)
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    try:
+        background_tasks.add_task(run_job_safely, str(job.id))
+    except Exception:
+        background_tasks.add_task(_run_job, job.id)
+    return job
+
+
 @router.post(
     "/videos/{video_id}/jobs",
     response_model=JobResponse,
@@ -1972,23 +1985,7 @@ def create_job(
     if video.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado para este video")
 
-    job = Job(
-        video_id=video.id,
-        status=JobStatus.PENDING.value,
-        progress=0,
-    )
-    db.add(job)
-    db.commit()
-    db.refresh(job)
-
-    # Usar wrapper global async con captura de errores y logging unbuffered
-    try:
-        background_tasks.add_task(run_job_safely, str(job.id))  # type: ignore
-    except Exception:
-        # Fallback sync si BackgroundTasks no soporta async en esta versión
-        background_tasks.add_task(_run_job, job.id)
-
-    return job
+    return create_job_for_video(db, video.id, background_tasks)
 
 
 @router.get(

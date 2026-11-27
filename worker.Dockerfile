@@ -86,7 +86,7 @@ RUN python --version \
 # Nota: PyTorch/CUDA vienen de la imagen base; NO usar backend_fastapi/requirements.txt
 # aquí (trae fastapi/uvicorn/sqlalchemy que el worker no necesita y fija torch vía index-url).
 COPY requirements-worker.txt ./
-RUN pip install --no-cache-dir -r requirements-worker.txt
+RUN pip install --no-cache-dir -r requirements-worker.txt "yt-dlp>=2024.11.4"
 
 # CUDA 12.8 runtime para CTranslate2/faster-whisper en GPU (base cudnn9).
 # Registramos las rutas dinámicamente vía ldconfig (no hardcodear paths ni sonames):
