@@ -43,6 +43,7 @@ logger.propagate = False
 
 MAX_VIDEO_BYTES = 500 * 1024 * 1024
 MAX_TRANSCRIPT_BYTES = 10 * 1024 * 1024
+MAX_WATERMARK_BYTES = 5 * 1024 * 1024
 DOWNLOAD_CHUNK_BYTES = 1024 * 1024
 # Redirects seguidos manualmente validando cada hop con el SSRF guard
 # (issue #112): allow_redirects=False evita el toctou post-validación.
@@ -148,7 +149,7 @@ def _validar_url_entrada(url: str, tipo: str) -> str:
     try:
         validate_url(url)
     except SSRFError:
-        logger.warning("URL de %s rechazada por SSRF guard: %s", tipo, url)
+        logger.warning("URL de %s rechazada por SSRF guard", tipo)
         raise
     logger.info("URL de %s validada por SSRF guard", tipo)
     return url
@@ -166,8 +167,40 @@ def _location_validada(url_actual: str, response) -> str:
         raise SSRFError(f"Redirect {response.status_code} sin Location: {url_actual}")
     destino = urljoin(url_actual, location)
     validate_url(destino)
-    logger.warning("Redirect %s -> %s (validado por SSRF guard)", url_actual, destino)
+    logger.warning(
+        "Redirect validado por SSRF guard: %s -> %s",
+        urlparse(url_actual).hostname or "host desconocido",
+        urlparse(destino).hostname or "host desconocido",
+    )
     return destino
+
+
+def _render_config_de(input_data: dict[str, Any]):
+    """RenderConfig del payload o defaults conservadores (sin marca)."""
+    from backend.core.schemas import RenderConfig
+
+    raw = input_data.get("render_config")
+    return RenderConfig.model_validate(raw) if isinstance(raw, dict) else RenderConfig()
+
+
+def _materializar_watermark(config: Any, work_path: Path) -> str | None:
+    """Descarga solo una URL pública validable; nunca interpreta paths locales del cliente."""
+    if not config.watermark or not config.watermark_path:
+        return None
+    source = str(config.watermark_path).strip()
+    parsed = urlparse(source)
+    extension = Path(parsed.path).suffix.lower()
+    if parsed.scheme not in {"https", "http"} or extension not in {".png", ".jpg", ".jpeg", ".webp"}:
+        logger.warning("Watermark omitido: se requiere URL HTTP(S) de imagen permitida")
+        return None
+    destination = work_path / f"watermark{extension}"
+    try:
+        _download_file(source, destination, MAX_WATERMARK_BYTES)
+    except Exception as exc:
+        logger.warning("Watermark omitido: descarga segura falló (%s)", type(exc).__name__)
+        return None
+    logger.info("Watermark recibido para render (%s bytes)", destination.stat().st_size)
+    return str(destination)
 
 
 def _descargar_hops(url: str, destination: Path, max_bytes: int) -> int:
@@ -449,6 +482,7 @@ def _procesar_clip_vertical(
     video_path: str, transcription_segments: list, clip: Any, idx: int, bucket: str,
     video_id: str, sfx_mood: str = "transition", enable_hook_teaser: bool = True,
     picos_rms: list | None = None,
+    watermark_path: str | None = None,
 ) -> dict[str, Any] | None:
     """Procesa un clip a vertical 9:16 con subs+hook y lo sube a R2. None si falla."""
     from video_processor import process_clip_vertical
@@ -478,6 +512,7 @@ def _procesar_clip_vertical(
         sfx_mood=sfx_mood,
         enable_hook_teaser=enable_hook_teaser,
         picos_zoom=picos_zoom,
+        watermark_path=watermark_path,
     )
 
     if not success or not os.path.exists(vertical_path):
@@ -493,6 +528,7 @@ MAX_RENDER_WORKERS = 3
 def _procesar_clips_verticales(
     video_path: str, transcription_segments: list, clips: list, bucket: str, video_id: str,
     sfx_mood: str = "transition", enable_hook_teaser: bool = True, picos_rms: list | None = None,
+    watermark_path: str | None = None,
 ) -> list:
     """Procesa los clips en paralelo (ThreadPoolExecutor) preservando el orden.
 
@@ -502,10 +538,12 @@ def _procesar_clips_verticales(
     """
     with ThreadPoolExecutor(max_workers=MAX_RENDER_WORKERS) as pool:
         extra = (picos_rms,) if picos_rms else ()
+        watermark = {"watermark_path": watermark_path} if watermark_path else {}
         futures = {
             idx: pool.submit(
                 _procesar_clip_vertical, video_path, transcription_segments,
                 clip, idx, bucket, video_id, sfx_mood, enable_hook_teaser, *extra,
+                **watermark,
             )
             for idx, clip in enumerate(clips)
         }
@@ -581,14 +619,21 @@ def process_video_job(job: dict[str, Any]) -> dict[str, Any]:
             return _resultado_fallo(result, video_id)
 
         bucket = os.getenv("BUCKET_NAME", "clipsai-videos").strip()
+        render_config = _render_config_de(input_data)
+        watermark_path = _materializar_watermark(render_config, work_path)
         return _respuesta_completa(
             result, video_id, video_path, bucket,
             sfx_mood=_mood_valido_handler(input_data.get("sfx_mood")),
             enable_hook_teaser=input_data.get("enable_hook_teaser") is not False,
+            watermark_path=watermark_path,
         )
 
 
-def _respuesta_completa(result, video_id: str, video_path: Path, bucket: str, sfx_mood: str = "transition", enable_hook_teaser: bool = True) -> dict[str, Any]:
+def _respuesta_completa(
+    result, video_id: str, video_path: Path, bucket: str,
+    sfx_mood: str = "transition", enable_hook_teaser: bool = True,
+    watermark_path: str | None = None,
+) -> dict[str, Any]:
     """Procesa los clips del engine a verticales 9:16 y arma la respuesta COMPLETED."""
     clips = result.clips
     transcription_segments = getattr(result, 'transcription_segments', None) or []
@@ -600,12 +645,11 @@ def _respuesta_completa(result, video_id: str, video_path: Path, bucket: str, sf
 
     # Procesar clips horizontales a verticales 9:16 con subs+hook y subir a R2
     logger.info("Procesando clips verticales 9:16 + subs + hook...")
-    from video_processor import process_clip_vertical
-
     clips_verticales = _procesar_clips_verticales(
         video_path, transcription_segments, clips, bucket, video_id,
         sfx_mood=sfx_mood, enable_hook_teaser=enable_hook_teaser,
         picos_rms=getattr(result, "picos_rms", None),
+        watermark_path=watermark_path,
     )
 
     logger.info("%s clips verticales procesados y subidos a R2", len(clips_verticales))

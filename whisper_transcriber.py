@@ -11,7 +11,9 @@ Modos:
 import os
 import re
 import subprocess
+import threading
 import time
+from pathlib import Path
 from typing import List
 
 
@@ -267,50 +269,108 @@ def _importar_faster_whisper():
     return WhisperModel
 
 
-# Cache de modelos HF: /runpod-volume solo si el Network Volume está montado
-# Y escribible; si no, /tmp/cache (grabable por el usuario no-root). Escribir
-# en /runpod-volume no-montado lanza [Errno 13] Permission denied.
-_CACHE_HF_VOLUMEN = "/runpod-volume/huggingface"
+# Cache HF persistente de RunPod; el fallback efímero mantiene el worker usable
+# en local, tests y endpoints que no tengan Network Volume.
+_CACHE_HF_VOLUMEN = "/runpod-volume/hf_cache"
 _CACHE_HF_DEFAULT = "/tmp/cache/huggingface"
+_WHISPER_MODEL_LOCK = threading.RLock()
+_WHISPER_MODEL_INSTANCES: dict[tuple[str, str, str, str], object] = {}
 
 
 def _volume_utilizable(ruta: str) -> bool:
-    """True si la ruta del Network Volume existe y es escribible por este usuario."""
-    return os.path.isdir(ruta) and os.access(ruta, os.W_OK)
+    """True si el mount existe y permite crear/escribir el cache HF."""
+    padre = os.path.dirname(ruta)
+    if os.path.isdir(ruta):
+        return os.access(ruta, os.W_OK)
+    if not os.path.isdir(padre) or not os.access(padre, os.W_OK):
+        return False
+    try:
+        os.makedirs(ruta, exist_ok=True)
+    except OSError:
+        return False
+    return os.access(ruta, os.W_OK)
 
 
 def _directorio_cache_hf() -> str:
-    """Directorio de cache de HuggingFace con fallback automático.
-
-    Usa /runpod-volume/huggingface SOLO si el Network Volume está montado y
-    escribible (isdir + os.access W_OK); cualquier otro caso cae a /tmp/cache,
-    que el Dockerfile crea con permisos a+rwX para el usuario no-root.
-    """
-    if _volume_utilizable(_CACHE_HF_VOLUMEN):
-        return _CACHE_HF_VOLUMEN
+    """Selecciona cache persistente o /tmp y alinea las variables de HF."""
+    cache_home = _CACHE_HF_VOLUMEN if _volume_utilizable(_CACHE_HF_VOLUMEN) else _CACHE_HF_DEFAULT
+    hub_cache = os.path.join(cache_home, "hub")
     try:
-        os.makedirs(_CACHE_HF_DEFAULT, exist_ok=True)
-    except Exception:  # no fatal: HF maneja directorio inexistente creándolo
+        os.makedirs(hub_cache, exist_ok=True)
+    except OSError:  # HF intentará crearla; mantiene el fallback para compatibilidad
         pass
-    return _CACHE_HF_DEFAULT
+    os.environ["HF_HOME"] = cache_home
+    os.environ["HUGGINGFACE_HUB_CACHE"] = hub_cache
+    return hub_cache
 
 
 def _resolver_modelo(modelo: str) -> tuple:
-    """(model_id, ruta_cache) según el modelo pedido y el cache local."""
+    """(model_id, download_root) según el modelo pedido y el cache HF activo."""
     model_name = MODELO_MAPA.get(modelo, "deepdml/faster-whisper-large-v3-turbo-ct2")
-
-    # Modelo local precargado durante el build (si existe, se usa sin descargar)
-    whisper_model_cache = os.environ.get("WHISPER_MODEL_PATH", "/app/whisper_model/models--deepdml--faster-whisper-large-v3-turbo-ct2")
-    if os.path.isdir(whisper_model_cache):
-        print(f"      Usando modelo local: {whisper_model_cache}")
-        return whisper_model_cache, whisper_model_cache
-    return model_name, whisper_model_cache
+    local_model = os.environ.get("WHISPER_MODEL_PATH", "").strip()
+    if local_model and Path(local_model).is_dir():
+        return local_model, _directorio_cache_hf()
+    return model_name, _directorio_cache_hf()
 
 
-def _log_descarga_modelo(whisper_model_cache: str, model_id: str) -> None:
-    """Avisa si el modelo se va a descargar (no hay cache local)."""
-    if not os.path.isdir(whisper_model_cache):
-        print(f"[Whisper] Descargando modelo {model_id} (solo la primera vez)...")
+def _snapshot_cacheado(model_id: str, cache_root: str) -> str | None:
+    """Ruta de snapshot usable para evitar cualquier descarga del repo cacheado."""
+    if Path(model_id).is_dir():
+        return model_id
+    repo_cache = Path(cache_root) / f"models--{model_id.replace('/', '--')}"
+    snapshots = repo_cache / "snapshots"
+    try:
+        revision = (repo_cache / "refs" / "main").read_text(encoding="utf-8").strip()
+        candidates = [snapshots / revision]
+    except OSError:
+        candidates = []
+    if snapshots.is_dir():
+        candidates.extend(path for path in snapshots.iterdir() if path not in candidates)
+    return next((str(path) for path in candidates if (path / "model.bin").is_file()), None)
+
+
+def _modelo_desde_cache(model_id: str, cache_root: str) -> tuple[str, bool]:
+    """Resuelve hit/miss sobre la ruta realmente usada por faster-whisper."""
+    snapshot = _snapshot_cacheado(model_id, cache_root)
+    if snapshot:
+        print(f"[Whisper] Cache hit en disco: {snapshot}")
+        return snapshot, True
+    print(f"[Whisper] Cache miss: {model_id}; se descargará al cache configurado.")
+    return model_id, False
+
+
+def _crear_modelo_whisper(model_id: str, device: str, compute_type: str, download_root: str, local_files_only: bool):
+    """Construye una instancia Whisper para el proceso warm actual."""
+    WhisperModel = _importar_faster_whisper()
+    return WhisperModel(
+        model_id,
+        device=device,
+        compute_type=compute_type,
+        download_root=download_root,
+        local_files_only=local_files_only,
+    )
+
+
+def _cargar_modelo_whisper(model_name: str, device: str, compute_type: str, cache_root: str):
+    """Carga desde disco o reutiliza instancia en memoria y mide el tiempo."""
+    key = (model_name, device, compute_type, cache_root)
+    with _WHISPER_MODEL_LOCK:
+        if key in _WHISPER_MODEL_INSTANCES:
+            print("[Whisper] Modelo hit en memoria; reutilizando instancia warm.")
+            return _WHISPER_MODEL_INSTANCES[key]
+        _WHISPER_MODEL_INSTANCES.clear()
+        resolved_model, cached = _modelo_desde_cache(model_name, cache_root)
+        started = time.perf_counter()
+        try:
+            model = _crear_modelo_whisper(resolved_model, device, compute_type, cache_root, cached)
+        except Exception:
+            print(f"[Whisper] Falló carga del modelo tras {time.perf_counter() - started:.3f}s")
+            raise
+        _WHISPER_MODEL_INSTANCES[key] = model
+        elapsed = time.perf_counter() - started
+    state = "hit en disco" if cached else "miss"
+    print(f"[Whisper] Modelo {state}; carga={elapsed:.3f}s; device={device}")
+    return model
 
 
 def _transcribir_segmentos(model, audio_path: str, idioma: str, salida: str) -> str:
@@ -379,23 +439,14 @@ def transcribir_audio(
     """Transcribe audio WAV con faster-whisper y genera transcripcion_formatted.txt."""
     print(f"[Whisper] Transcribiendo audio: {audio_path}")
 
-    WhisperModel = _importar_faster_whisper()
-
     # Forzar GPU en RunPod (siempre tiene GPU RTX)
     device, compute_type = detectar_device(force_gpu=True)
     print(f"      Device: {device} ({compute_type})")
 
-    model_id, whisper_model_cache = _resolver_modelo(modelo)
+    model_id, cache_root = _resolver_modelo(modelo)
 
     try:
-        _log_descarga_modelo(whisper_model_cache, model_id)
-        model = WhisperModel(
-            model_id,
-            device=device,
-            compute_type=compute_type,
-            download_root=_directorio_cache_hf(),
-            local_files_only=False,
-        )
+        model = _cargar_modelo_whisper(model_id, device, compute_type, cache_root)
 
         return _transcribir_segmentos(model, audio_path, idioma, salida)
 
@@ -414,25 +465,16 @@ def transcribir_video(
     print(f"      Modelo: {modelo}")
     print(f"      Estimación: ~5-6 min para video de 11min en CPU")
 
-    WhisperModel = _importar_faster_whisper()
-
     # Forzar GPU en RunPod (siempre tiene GPU RTX)
     device, compute_type = detectar_device(force_gpu=True)
     print(f"      Device: {device} ({compute_type})")
 
-    model_id, whisper_model_cache = _resolver_modelo(modelo)
+    model_id, cache_root = _resolver_modelo(modelo)
 
     audio_temp = _extraer_audio(video_path)
 
     try:
-        _log_descarga_modelo(whisper_model_cache, model_id)
-        model = WhisperModel(
-            model_id,
-            device=device,
-            compute_type=compute_type,
-            download_root=_directorio_cache_hf(),
-            local_files_only=False,
-        )
+        model = _cargar_modelo_whisper(model_id, device, compute_type, cache_root)
 
         _transcribir_segmentos(model, audio_temp, idioma, salida)
 

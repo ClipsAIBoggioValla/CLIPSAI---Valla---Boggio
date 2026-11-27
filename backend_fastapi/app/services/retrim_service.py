@@ -439,6 +439,8 @@ def _render_trimmed(plan: RetrimPlan, output: Path) -> None:
 
 
 def _watermark_path(config: RenderConfig) -> Path | None:
+    if not config.watermark:
+        return None
     raw = getattr(config, "watermark_path", None)
     if not raw:
         return None
@@ -456,14 +458,18 @@ def _scale_filter(width: int, height: int, fps: int) -> str:
 
 
 def _overlay_filter(width: int, height: int, fps: int) -> str:
-    return f"[0:v]{_scale_filter(width, height, fps)}[base];[base][1:v]overlay=W-w-24:H-h-48[outv]"
+    return (
+        f"[0:v]{_scale_filter(width, height, fps)}[base];"
+        "[1:v]scale=220:-1,format=rgba,colorchannelmixer=aa=0.6[wm];"
+        "[base][wm]overlay=W-w-24:H-h-48[outv]"
+    )
 
 
 def _run_finalize(rendered: Path, final: Path, target: tuple[int, int, int], watermark: Path | None) -> None:
     width, height, fps = target
     cmd = ["ffmpeg", "-y", "-i", str(rendered)]
     if watermark:
-        cmd += ["-i", str(watermark), "-filter_complex", _overlay_filter(width, height, fps), "-map", "[outv]", "-map", "0:a?"]
+        cmd += ["-loop", "1", "-i", str(watermark), "-filter_complex", _overlay_filter(width, height, fps), "-map", "[outv]", "-map", "0:a?"]
     else:
         cmd += ["-vf", _scale_filter(width, height, fps)]
     cmd += ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(final)]

@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class WordToken(BaseModel):
@@ -95,7 +95,8 @@ class RenderConfig(BaseModel):
         description="'karaoke_yellow', 'neon_green', 'minimal_white'",
     )
     enable_auto_crop: bool = True
-    watermark_path: Optional[str] = Field(default=None, description="Ruta absoluta o s3://")
+    watermark: bool = False
+    watermark_path: Optional[str] = Field(default=None, description="Asset local permitido o URL HTTP(S) accesible por worker")
     outro_path: Optional[str] = Field(default=None, description="Ruta absoluta o s3://")
     resolution: str = Field(default="1080x1920", pattern=r"^\d+x\d+$")
     fps: int = Field(default=30, ge=24, le=60)
@@ -111,6 +112,14 @@ class RenderConfig(BaseModel):
         if v not in allowed:
             raise ValueError(f"caption_style debe ser uno de {allowed}")
         return v
+
+    @model_validator(mode="before")
+    @classmethod
+    def enable_legacy_watermark_path(cls, values: Any) -> Any:
+        """Activa la marca para payloads antiguos que solo enviaban watermark_path."""
+        if isinstance(values, dict) and "watermark" not in values and values.get("watermark_path"):
+            return {**values, "watermark": True}
+        return values
 
     model_config = {"extra": "forbid"}
 

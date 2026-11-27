@@ -963,6 +963,32 @@ def _copiar_cuerpo_como_fallback(body_path: str, output_video: str) -> bool:
     return os.path.exists(output_video) and os.path.getsize(output_video) > 0
 
 
+def _watermark_filter() -> str:
+    """Watermark inferior escalado y con opacidad del 60%."""
+    return "[1:v]scale=220:-1,format=rgba,colorchannelmixer=aa=0.6[wm];[0:v][wm]overlay=W-w-24:H-h-24:shortest=1[outv]"
+
+
+def _aplicar_watermark(output_video: str, watermark_path: str | None) -> bool:
+    """Superpone una marca local y reemplaza el render solo si FFmpeg termina bien."""
+    if not watermark_path or not os.path.isfile(watermark_path):
+        return True
+    with tempfile.TemporaryDirectory(prefix="clipsai_watermark_") as temp_dir:
+        watermarked = os.path.join(temp_dir, "watermarked.mp4")
+        command = [
+            FFMPEG_BIN, "-y", "-i", output_video, "-loop", "1", "-i", watermark_path,
+            "-filter_complex", _watermark_filter(), "-map", "[outv]", "-map", "0:a?",
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "20", "-c:a", "copy",
+            "-movflags", "+faststart", watermarked,
+        ]
+        result = subprocess.run(command, capture_output=True, text=True, timeout=300)
+        if not _salida_ffmpeg_ok(result, watermarked):
+            logger.warning("[video_processor] Watermark FFmpeg falló; clip no publicado")
+            return False
+        shutil.move(watermarked, output_video)
+    logger.info("[video_processor] Watermark aplicado (60%%, esquina inferior)")
+    return True
+
+
 def _componer_teaser_worker(
     input_video: str, clip_start: float, body_path: str, output_video: str,
     sfx_mood: str = MOOD_DEFAULT, enable_hook_teaser: bool = True,
@@ -992,6 +1018,7 @@ def process_clip_vertical(
     picos_zoom: List[float] | None = None,
     layout: str = "single_9_16",
     rms_ventanas: list[dict] | None = None,
+    watermark_path: str | None = None,
 ) -> bool:
     """Procesa un clip completo: corta + reframe vertical + quema subs + hook.
     
@@ -1047,7 +1074,8 @@ def process_clip_vertical(
             return False
 
         # 4. Teaser B&W 5s + ensamble (unificación worker/backend, issue #116)
-        return _componer_teaser_worker(
+        composed = _componer_teaser_worker(
             input_video, clip_start, body_path, output_video,
             sfx_mood=_mood_valido(sfx_mood), enable_hook_teaser=enable_hook_teaser,
         )
+        return composed and _aplicar_watermark(output_video, watermark_path)
