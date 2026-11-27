@@ -193,6 +193,18 @@ def _build_output_schema(sentence_ids: list[str]) -> dict[str, Any]:
                         "end_sentence_id": {"type": "string", "enum": sentence_ids},
                         "score": {"type": "number", "minimum": 1, "maximum": 10},
                         "title": {"type": "string", "maxLength": 60},
+                        "tiktok_caption": {"type": "string", "maxLength": 500},
+                        "reels_caption": {"type": "string", "maxLength": 500},
+                        "shorts_title": {"type": "string", "maxLength": 100},
+                        "hashtags": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "tiktok": {"type": "array", "maxItems": 5, "items": {"type": "string", "maxLength": 30}},
+                                "reels": {"type": "array", "maxItems": 5, "items": {"type": "string", "maxLength": 30}},
+                                "shorts": {"type": "array", "maxItems": 5, "items": {"type": "string", "maxLength": 30}},
+                            },
+                        },
                         "hook_candidates": {
                             "type": "array",
                             "maxItems": 5,
@@ -267,6 +279,10 @@ TAREA: Selecciona 1 a 3 clips de 15-60s que contengan ideas completas y con mayo
 - end_sentence_id: ID de la última oración completa del clip
 - score: puntuación virabilidad 1-10 (float, 1=bajo, 10=máximo)
 - title: título del clip (max 60 chars, rioplatense, concreto)
+- tiktok_caption: copy para TikTok (máx. 500 caracteres, gancho y CTA natural)
+- reels_caption: copy para Instagram Reels (máx. 500 caracteres, tono conversacional)
+- shorts_title: título para YouTube Shorts (máx. 100 caracteres, claro y concreto)
+- hashtags: objeto con listas de hasta 5 hashtags por plataforma (tiktok/reels/shorts), pertinentes al tono y tema; cada hashtag <=30 caracteres
 - hook_candidates: array de hasta 5 oraciones completas que puedan funcionar como teaser hook; pueden aparecer antes, dentro o después del cuerpo del clip
 - has_hook: true solo si existe al menos un candidato con curiosity_score >= 8 y makes_sense_standalone=true; de lo contrario false
 - Prioriza hook_candidates completos que duren entre 2.5 y 5.5 segundos según los timestamps de palabra
@@ -651,6 +667,57 @@ def _score_normalizado(score: float) -> float | None:
     return None
 
 
+_GENERIC_HASHTAGS = {
+    "tiktok": ["#parati", "#viral", "#clipsai"],
+    "reels": ["#reels", "#viral", "#clipsai"],
+    "shorts": ["#shorts", "#viral", "#clipsai"],
+}
+
+
+def _texto_social(valor: Any, fallback: str, limite: int) -> str:
+    """Texto social no vacío y limitado al máximo seguro de publicación."""
+    texto = str(valor or "").strip()
+    return (texto or fallback)[:limite]
+
+
+def _hashtags_sociales(valores: Any, plataforma: str) -> list[str]:
+    """Hasta cinco hashtags limpios para una plataforma."""
+    items = valores if isinstance(valores, list) else []
+    resultado = []
+    for item in items[:5]:
+        tag = re.sub(r"[^\w]", "", str(item or "").lstrip("#"), flags=re.UNICODE)[:29]
+        if tag:
+            resultado.append(f"#{tag}")
+    return resultado or list(_GENERIC_HASHTAGS[plataforma])
+
+
+def fallback_social_copy(title: str | None) -> dict[str, Any]:
+    """Copy y hashtags determinísticos cuando no hay respuesta válida del LLM."""
+    base = _texto_social(title, "Mirá este momento", 100)
+    return {
+        "tiktok_caption": _texto_social(base, "Mirá este momento", 500),
+        "reels_caption": _texto_social(base, "Mirá este momento", 500),
+        "shorts_title": _texto_social(base, "Mirá este momento", 100),
+        "hashtags": {platform: list(tags) for platform, tags in _GENERIC_HASHTAGS.items()},
+    }
+
+
+def normalize_social_copy(title: str | None, raw: Any = None) -> dict[str, Any]:
+    """Completa y limita copy de plataformas, tolerando payloads antiguos/incompletos."""
+    data = raw if isinstance(raw, dict) else {}
+    hashtags = data.get("hashtags") if isinstance(data.get("hashtags"), dict) else {}
+    fallback = fallback_social_copy(title)
+    return {
+        "tiktok_caption": _texto_social(data.get("tiktok_caption"), fallback["tiktok_caption"], 500),
+        "reels_caption": _texto_social(data.get("reels_caption"), fallback["reels_caption"], 500),
+        "shorts_title": _texto_social(data.get("shorts_title"), fallback["shorts_title"], 100),
+        "hashtags": {
+            platform: _hashtags_sociales(hashtags.get(platform), platform)
+            for platform in ("tiktok", "reels", "shorts")
+        },
+    }
+
+
 def _campos_base_de_clip(c: dict) -> tuple | None:
     """Campos crudos del clip validados en formato; None si no cumplen el esquema."""
     if _tiene_campos_de_timestamp(c):
@@ -684,6 +751,7 @@ def _validar_clip_candidato(c: dict) -> dict | None:
         return None
     start_sentence_id, end_sentence_id, score, title, raw_hook_candidates, raw_has_hook = campos
     hook_candidates = _validar_hook_candidates(raw_hook_candidates)
+    social_copy = normalize_social_copy(title, c)
     return {
         "start_sentence_id": start_sentence_id,
         "end_sentence_id": end_sentence_id,
@@ -692,6 +760,7 @@ def _validar_clip_candidato(c: dict) -> dict | None:
         "hook_candidates": hook_candidates,
         "has_hook": _has_hook_efectivo(raw_has_hook, hook_candidates),
         "emojis": _emojis_validos(c.get("emojis")),
+        "social_copy": social_copy,
     }
 
 

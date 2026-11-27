@@ -1,4 +1,5 @@
 import type { ClipListItem, PublishPlatform } from '@/types/api'
+import { getPlatformCaption } from './publishCopy'
 
 interface PublishDialogProps {
   clip: ClipListItem
@@ -39,14 +40,14 @@ export default function PublishDialog(props: PublishDialogProps) {
         <label className="form-label-custom">Plataforma</label>
         <div className="grid grid-cols-2 gap-2 mb-3">
           {(['tiktok', 'instagram', 'youtube', 'webhook'] as PublishPlatform[]).map((p) => (
-            <button key={p} type="button" onClick={() => setPlatform(p)} className={`btn-custom w-full !px-3 !py-2.5 text-xs capitalize ${platform === p ? 'btn-custom-primary' : 'btn-custom-light'}`}>
+            <button key={p} type="button" onClick={() => { if (p !== platform) { setPlatform(p); setCaption(getPlatformCaption(clip, p)) } }} className={`btn-custom w-full !px-3 !py-2.5 text-xs capitalize ${platform === p ? 'btn-custom-primary' : 'btn-custom-light'}`}>
               {platformLabel(p)}
             </button>
           ))}
         </div>
         <label className="form-label-custom">Texto de la publicación</label>
-        <textarea value={caption} onChange={(e) => setCaption(e.target.value)} rows={3} maxLength={500} placeholder="Escribe el texto para acompañar tu clip" className="form-control-custom resize-none" />
-        <p className="text-[11px] text-[var(--text-secondary)] text-right mt-1">{caption.length}/500</p>
+        <textarea value={caption} onChange={(e) => setCaption(e.target.value)} rows={3} maxLength={platform === 'youtube' ? 100 : 500} placeholder="Escribe el texto para acompañar tu clip" className="form-control-custom resize-none" />
+        <p className="text-[11px] text-[var(--text-secondary)] text-right mt-1">{caption.length}/{platform === 'youtube' ? 100 : 500}</p>
         {platform === 'webhook' && (
           <>
             <label className="form-label-custom mt-3">Dirección de publicación personalizada</label>

@@ -6,6 +6,7 @@ import { usePublishSSE } from '@/hooks/usePublishSSE'
 import FilterBar from '@/components/clip-library/FilterBar'
 import ClipResults from '@/components/clip-library/ClipResults'
 import PublishDialog from '@/components/clip-library/PublishDialog'
+import { getPlatformCaption } from '@/components/clip-library/publishCopy'
 import PreviewModal from '@/components/clip-library/PreviewModal'
 import RetrimEditorModal from '@/components/clip-library/RetrimEditorModal'
 import ClipLibraryHeader from '@/components/clip-library/ClipLibraryHeader'
@@ -106,7 +107,7 @@ export default function ClipLibraryPage() {
 
   function openPublish(clip: ClipListItem) {
     setPublishClip(clip); setPlatform('tiktok')
-    setCaption(clip.title ? `${clip.title} #viral` : '¡Increíble momento! #RiverPlate')
+    setCaption(getPlatformCaption(clip, 'tiktok'))
     setWebhookUrl('')
   }
 

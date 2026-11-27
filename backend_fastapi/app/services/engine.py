@@ -943,6 +943,7 @@ def _mapear_clip_claude(clip_raw: dict, sentence_map: dict) -> dict | None:
             "emojis": clip_raw.get("emojis", []),
             "titulo": titulo,
             "titulo_sugerido": titulo,
+            "social_copy": clip_raw.get("social_copy"),
             "score": float(clip_raw.get("score", 8)),
             "criterio_principal": "claude_semantico",
             "hook_texto": str(hook_selection.get("text", ""))[:120],

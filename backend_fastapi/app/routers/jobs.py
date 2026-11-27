@@ -1354,9 +1354,9 @@ def _score_del_item(item: dict) -> float | None:
 
 
 def _tags_del_item(item: dict) -> Any:
-    """Tags crudos del item, normalizados a lista si vienen como otro tipo."""
+    """Tags crudos del item; conserva dicts y listas, encapsula escalares legacy."""
     tags = item.get("tags")
-    if tags is not None and not isinstance(tags, list):
+    if tags is not None and not isinstance(tags, (list, dict)):
         tags = [str(tags)]
     return tags
 
@@ -1376,16 +1376,32 @@ def _emojis_del_item(item: dict) -> list:
     return emojis if isinstance(emojis, list) else []
 
 
+def _social_copy_del_item(item: dict, title: str) -> dict:
+    """Copy de redes normalizado, con alternativa determinística para datos viejos."""
+    from ..services.claude_service import normalize_social_copy
+
+    raw = item.get("social_copy")
+    if not isinstance(raw, dict) and isinstance(item.get("tags"), dict):
+        raw = item["tags"].get("social_copy")
+    raw = dict(raw) if isinstance(raw, dict) else {}
+    for key in ("tiktok_caption", "reels_caption", "shorts_title", "hashtags"):
+        if key not in raw and key in item:
+            raw[key] = item[key]
+    return normalize_social_copy(title, raw)
+
+
 def _parsear_clip_item(item: dict, idx: int) -> dict:
     """Normaliza un item del payload del engine: title, start/end (con clamp), score y tags."""
     start, end = _tiempos_del_item(item, idx)
+    title = _titulo_del_item(item)
     return {
-        "title": _titulo_del_item(item),
+        "title": title,
         "start": start,
         "end": end,
         "score_val": _score_del_item(item),
         "tags": _tags_del_item(item),
         "emojis": _emojis_del_item(item),
+        "social_copy": _social_copy_del_item(item, str(title)),
     }
 
 
@@ -1600,11 +1616,13 @@ def _crear_clip_persistible(video: Any, job: Any, datos: dict, base_tags: dict, 
     )
 
 
-def _base_tags_de(tags: Any) -> dict:
-    """Base tags del clip: _raw_tags si el item traía una lista."""
-    base_tags: dict = {}
+def _base_tags_de(tags: Any, social_copy: dict | None = None) -> dict:
+    """Tags del clip: metadata social normalizada y _raw_tags si corresponde."""
+    base_tags: dict = dict(tags) if isinstance(tags, dict) else {}
     if isinstance(tags, list) and tags:
         base_tags["_raw_tags"] = tags
+    if social_copy is not None:
+        base_tags["social_copy"] = social_copy
     return base_tags
 
 
@@ -1629,7 +1647,7 @@ def _renderizar_clips(
         _log_ventana_clip(idx, datos, segments, hook_sel)
 
         tags = datos["tags"]
-        base_tags = _base_tags_de(tags)
+        base_tags = _base_tags_de(tags, datos["social_copy"])
         final_storage = _renderar_clip_item(db, video, job, job_id, idx, item, datos, segments, hook_sel, len(clips_payload), render_stats, base_tags)
         clips_to_create.append(_crear_clip_persistible(video, job, datos, base_tags, tags, final_storage))
 

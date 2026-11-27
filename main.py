@@ -541,9 +541,15 @@ REGLAS OBLIGATORIAS DE DURACIÓN:
 "hook_texto": "Lo que nadie te contó",
 "primer_segundo": "frase exacta con la que arranca el clip",
 "motivo": "explicación de por qué es viral en 1 oración",
-"tipo_contenido": "exclusiva",
-"audio_score": 8,
-"emojis": [{{"segundo": 12.5, "emoji": "🔥"}}, {{"segundo": 27.0, "emoji": "😱"}}]
+ "tipo_contenido": "exclusiva",
+ "audio_score": 8,
+ "social_copy": {{
+   "tiktok_caption": "Copy breve para TikTok",
+   "reels_caption": "Copy conversacional para Reels",
+   "shorts_title": "Título claro para Shorts",
+   "hashtags": {{"tiktok": ["#parati", "#tema"], "reels": ["#reels", "#tema"], "shorts": ["#shorts", "#tema"]}}
+ }},
+ "emojis": [{{"segundo": 12.5, "emoji": "🔥"}}, {{"segundo": 27.0, "emoji": "😱"}}]
 }}
 
 CAMPOS OBLIGATORIOS:
@@ -557,6 +563,7 @@ CAMPOS OBLIGATORIOS:
 - motivo: por qué este momento específico va a generar engagement
 - tipo_contenido: uno de [exclusiva, analisis, emocion, prediccion, controversia]
 - audio_score: 1-10 basado en los datos de audio en ese rango de tiempo
+- social_copy: obligatorio; copy en español rioplatense para TikTok/Reels (máx. 500 caracteres cada uno) y título Shorts (máx. 100); hasta 5 hashtags pertinentes al tema y tono de cada red, cada uno <=30 caracteres y comenzando con #. No inventes nombres/datos ausentes del video
 - emojis: OPCIONAL (issue #117) - hasta 5 emojis contextuales por clip, 1 cada 4-6 palabras de los subtítulos (sin spam); segundo = timestamp ABSOLUTO de la transcripción dentro del clip; omite el campo si no aportan
 
 REGLAS FINALES:
@@ -1089,6 +1096,31 @@ def _emojis_validos(emojis: Any) -> List[Dict]:
     return [e for e in validos if e is not None][:EMOJIS_VALIDOS_MAX]
 
 
+def _hashtags_social_main(value: Any, fallback: List[str]) -> List[str]:
+    """Limpia y limita los hashtags de una plataforma."""
+    values = value if isinstance(value, list) else []
+    hashtags = ["#" + re.sub(r"[^\w]", "", str(tag or "").lstrip("#"), flags=re.UNICODE)[:29] for tag in values[:5]]
+    hashtags = [tag for tag in hashtags if tag != "#"]
+    return hashtags or fallback
+
+
+def _social_copy_main(title: Any, raw: Any) -> Dict:
+    """Normaliza social_copy o construye copy determinístico de respaldo."""
+    data = raw if isinstance(raw, dict) else {}
+    title_text = str(title or "Mirá este momento").strip()[:100] or "Mirá este momento"
+    hashtags = data.get("hashtags") if isinstance(data.get("hashtags"), dict) else {}
+    return {
+        "tiktok_caption": str(data.get("tiktok_caption") or title_text).strip()[:500],
+        "reels_caption": str(data.get("reels_caption") or title_text).strip()[:500],
+        "shorts_title": str(data.get("shorts_title") or title_text).strip()[:100],
+        "hashtags": {
+            "tiktok": _hashtags_social_main(hashtags.get("tiktok"), ["#parati", "#viral", "#clipsai"]),
+            "reels": _hashtags_social_main(hashtags.get("reels"), ["#reels", "#viral", "#clipsai"]),
+            "shorts": _hashtags_social_main(hashtags.get("shorts"), ["#shorts", "#viral", "#clipsai"]),
+        },
+    }
+
+
 def _clip_valido(i: int, clip: Dict) -> Optional[Dict]:
     """Normaliza un clip de IA a formato final. None si no pasa la validación."""
     segs = _campos_ts_de_clip(i, clip)
@@ -1123,6 +1155,7 @@ def _clip_valido(i: int, clip: Dict) -> Optional[Dict]:
         "primer_segundo": clip.get("primer_segundo", ""),
         "motivo": clip.get("motivo", ""),
         "tipo_contenido": clip.get("tipo_contenido", "otro"),
+        "social_copy": _social_copy_main(titulo, clip.get("social_copy")),
         "emojis": _emojis_validos(clip.get("emojis")),
     }
 
