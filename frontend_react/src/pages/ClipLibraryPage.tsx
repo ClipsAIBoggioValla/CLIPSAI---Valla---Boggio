@@ -2,7 +2,6 @@ import { useEffect, useState, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { clipService } from '@/services/api'
 import type { ClipListItem, ClipListResponse, ClipSortBy, PublishPlatform } from '@/types/api'
-import { ApiError } from '@/types/api'
 import { usePublishSSE } from '@/hooks/usePublishSSE'
 import FilterBar from '@/components/clip-library/FilterBar'
 import ClipResults from '@/components/clip-library/ClipResults'
@@ -19,6 +18,17 @@ const API_BASE_URL = (RAW_BASE || 'https://clipsai-backend.onrender.com').replac
 
 function computeHasFilters(q: string, minScore: string, sortBy: ClipSortBy, jobId: string | undefined): boolean {
   return q !== '' || minScore !== '' || sortBy !== 'created_at_desc' || !!jobId
+}
+
+const FRIENDLY_TOASTS: Record<string, string> = {
+  'Error al publicar — FAILED': 'No se pudo publicar tu clip.',
+  'Re-render encolado — procesando clip...': 'Actualizando tu clip...',
+  'Error en re-render': 'No se pudo actualizar tu clip.',
+}
+
+function displayToast(message: string): string {
+  if (message.startsWith('Publicación en ')) return 'Preparando la publicación de tu clip…'
+  return FRIENDLY_TOASTS[message] ?? message
 }
 
 export default function ClipLibraryPage() {
@@ -57,10 +67,8 @@ export default function ClipLibraryPage() {
       const res = await clipService.getClips({ q: debouncedQ || undefined, min_score: minScore ? Number(minScore) : undefined, sort_by: sortBy, page, limit, job_id: jobId })
       const sortedItems = [...res.items].sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
       setData({ ...res, items: sortedItems })
-    } catch (err: unknown) {
-      if (err instanceof ApiError) setError(err.detail)
-      else if (err instanceof Error) setError(err.message)
-      else setError('Error al cargar clips')
+    } catch {
+      setError('No pudimos cargar tus clips. Intenta actualizar la página.')
     } finally { setLoading(false) }
   }, [debouncedQ, minScore, sortBy, page, limit, jobId])
 
@@ -111,9 +119,9 @@ export default function ClipLibraryPage() {
       setPublishClip(null)
       setData((prev) => prev ? { ...prev, items: prev.items.map((c) => c.id === clipId ? { ...c, status: 'PUBLISHING', published_platform: plat } : c) } : prev)
       setTimeout(() => setToast(null), 4000)
-    } catch (e: unknown) {
-      const msg = e instanceof ApiError ? e.detail : e instanceof Error ? e.message : 'Error al publicar'
-      setToast(msg); setPublishing(null); setActivePublishId(null)
+    } catch {
+      setToast('No pudimos publicar tu clip. Inténtalo de nuevo.')
+      setPublishing(null); setActivePublishId(null)
       setTimeout(() => setToast(null), 4000)
     }
   }
@@ -125,9 +133,9 @@ export default function ClipLibraryPage() {
       setToast('Re-render encolado — procesando clip...')
       setTimeout(() => fetchClips(), 1200)
       setTimeout(() => setToast(null), 4000)
-    } catch (e: unknown) {
-      const msg = e instanceof ApiError ? e.detail : e instanceof Error ? e.message : 'Error en re-render'
-      setToast(msg); setTimeout(() => setToast(null), 4000)
+    } catch {
+      setToast('No pudimos actualizar tu clip. Inténtalo de nuevo.')
+      setTimeout(() => setToast(null), 4000)
     } finally { setRerendering(null) }
   }
 
@@ -135,7 +143,7 @@ export default function ClipLibraryPage() {
 
   return (
     <div className="max-w-6xl mx-auto">
-      {toast && <div className="fixed top-4 right-4 z-[9999] bg-[#121824] border border-[#B4F105]/30 text-[#F1F5F9] px-4 py-3 rounded-xl shadow-xl text-sm font-semibold">{toast}</div>}
+      {toast && <div className="card-spark fixed top-4 right-4 z-[9999] !p-3 text-sm font-semibold text-[var(--text-primary)] shadow-[var(--brand-lime-glow)]">{displayToast(toast)}</div>}
       <ClipLibraryHeader total={data?.total ?? 0} jobId={jobId} />
 
       <FilterBar q={q} setQ={setQ} minScore={minScore} setMinScore={setMinScore} sortBy={sortBy} setSortBy={setSortBy} viewMode={viewMode} setViewMode={setViewMode} hasFilters={hasFilters} resetFilters={resetFilters} />

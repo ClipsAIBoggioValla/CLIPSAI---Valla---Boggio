@@ -1,7 +1,7 @@
 import { useRef, useState, type KeyboardEvent } from 'react'
 import { LANDING_STEPS } from './landingData'
 
-/** "Cómo funciona": 3 pasos (cargar video → análisis IA → publicación) navegables con mouse y teclado. */
+/** Tres pasos interactivos, navegables con mouse y teclado. */
 export default function LandingHowItWorks() {
   const [active, setActive] = useState(0)
   const tabsRef = useRef<Array<HTMLButtonElement | null>>([])
@@ -28,10 +28,10 @@ export default function LandingHowItWorks() {
             <i className="bi bi-signpost-split" aria-hidden="true" /> Cómo funciona
           </span>
           <h2 id="como-funciona-title" className="landing-heading">
-            Tres pasos, <span className="landing-accent">un solo trabajo pendiente</span>
+            Tres pasos. <span className="landing-accent">Todo listo para publicar.</span>
           </h2>
           <p className="landing-lead">
-            El mismo pipeline que corre en producción, paso a paso. Elegí un paso para ver qué pasa por debajo.
+            De tu video a tus redes, sin editar a mano.
           </p>
         </div>
 

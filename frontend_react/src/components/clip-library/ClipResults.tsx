@@ -1,4 +1,4 @@
-import { formatScore, formatDuration, formatTimeRange, scoreBadgeClass, publishBadge } from './helpers'
+import { formatScore, formatDuration, formatTimeRange, scoreBadgeClass, publishBadge, publishStatusLabel } from './helpers'
 import ClipCard from './ClipCard'
 import type { ClipListItem, ClipListResponse } from '@/types/api'
 
@@ -82,10 +82,10 @@ export default function ClipResults(props: ClipResultsProps) {
       <div className={viewMode === 'grid' ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4' : 'space-y-2'}>
         {Array.from({ length: 6 }).map((_, i) => (
           <div key={i} className="card-spark animate-pulse">
-            <div className="h-4 bg-[rgba(255,255,255,0.06)] rounded w-3/4 mb-3" />
-            <div className="h-3 bg-[rgba(255,255,255,0.04)] rounded w-1/2 mb-4" />
-            <div className="h-10 bg-[rgba(255,255,255,0.04)] rounded mb-3" />
-            <div className="h-3 bg-[rgba(255,255,255,0.04)] rounded w-1/3" />
+            <div className="h-4 bg-white/5 rounded w-3/4 mb-3" />
+            <div className="h-3 bg-white/5 rounded w-1/2 mb-4" />
+            <div className="h-10 bg-white/5 rounded mb-3" />
+            <div className="h-3 bg-white/5 rounded w-1/3" />
           </div>
         ))}
       </div>
@@ -104,10 +104,10 @@ export default function ClipResults(props: ClipResultsProps) {
 
   if (!loading && !error && data && data.items.length === 0) {
     return (
-      <div className="card-spark text-center" style={{ borderStyle: 'dashed', padding: '2.5rem', borderColor: 'rgba(180,241,5,0.18)' }}>
-        <div className="h-12 w-12 rounded-full flex items-center justify-center text-xl mx-auto bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.06)]">🎬</div>
-        <p className="text-sm font-bold mt-4" style={{ color: '#F1F5F9' }}>No hay clips que coincidan</p>
-        <p className="text-xs mt-1" style={{ color: '#94A3B8' }}>Prueba ajustando la búsqueda, el filtro de score o el ordenamiento.</p>
+      <div className="card-spark text-center" style={{ borderStyle: 'dashed', padding: '2.5rem', borderColor: 'var(--border-subtle)' }}>
+        <div className="h-12 w-12 rounded-full flex items-center justify-center text-xl mx-auto bg-white/5 border border-[var(--border-subtle)]">🎬</div>
+        <p className="text-sm font-bold mt-4 text-[var(--text-primary)]">No hay clips que coincidan</p>
+        <p className="text-xs mt-1 text-[var(--text-secondary)]">Prueba ajustando la búsqueda, el potencial viral o el orden.</p>
         {hasFilters && (<button onClick={onResetFilters} className="btn-custom btn-custom-primary mt-5">Limpiar filtros</button>)}
       </div>
     )
@@ -131,7 +131,7 @@ export default function ClipResults(props: ClipResultsProps) {
             <div className="table-responsive" style={{ overflowX: 'auto' }}>
               <table className="table-custom">
                 <thead>
-                  <tr><th>Título</th><th>Viral Score</th><th>Duración</th><th>ASS / Hook</th><th>Estado</th><th>Acción</th></tr>
+                  <tr><th>Título</th><th>Potencial viral</th><th>Duración</th><th>Subtítulos / Gancho</th><th>Estado</th><th>Acción</th></tr>
                 </thead>
                 <tbody>
                   {data.items.map((clip) => {
@@ -144,25 +144,25 @@ export default function ClipResults(props: ClipResultsProps) {
                     return (
                       <tr key={clip.id} className={isRerendering ? 'opacity-60' : ''}>
                         <td>
-                          <p className="font-bold line-clamp-1 cursor-pointer hover:text-[#B4F105]" style={{ color: 'var(--text-main)' }} onClick={() => setPreviewClip(clip)}>{clip.title || 'Sin título'}</p>
-                          {clip.transcript && <p className="text-xs line-clamp-1 mt-1" style={{ color: 'var(--text-muted-green)' }}>{clip.transcript}</p>}
+                          <p className="font-bold line-clamp-1 cursor-pointer text-[var(--text-primary)] hover:text-[var(--brand-lime)]" onClick={() => setPreviewClip(clip)}>{clip.title || 'Sin título'}</p>
+                          {clip.transcript && <p className="text-xs line-clamp-1 mt-1 text-[var(--text-secondary)]">{clip.transcript}</p>}
                         </td>
-                        <td><span className={scoreBadgeClass(clip.score)}>Viral Score: {formatScore(clip.score)}/100</span></td>
-                        <td className="font-mono text-xs" style={{ color: 'var(--text-muted-green)' }}>{formatDuration(clip)}<br /><span className="text-[11px] text-[#64748B]">{formatTimeRange(clip)}</span></td>
+                        <td><span className={scoreBadgeClass(clip.score)}>Potencial viral: {formatScore(clip.score)}/100</span></td>
+                        <td className="font-mono text-xs text-[var(--text-secondary)]">{formatDuration(clip)}<br /><span className="text-[11px]">{formatTimeRange(clip)}</span></td>
                         <td>
                           <div className="flex items-center gap-2">
-                            <label className="flex items-center gap-1 text-[11px]"><input type="checkbox" checked={!!clip.has_ass} disabled={!!isBusy} onChange={(e) => handleToggle(clip, e.target.checked, !!clip.has_hook)} className="accent-[#B4F105] disabled:opacity-50" /> ASS</label>
-                            <label className="flex items-center gap-1 text-[11px]"><input type="checkbox" checked={!!clip.has_hook} disabled={!!isBusy} onChange={(e) => handleToggle(clip, !!clip.has_ass, e.target.checked)} className="accent-[#B4F105] disabled:opacity-50" /> Hook</label>
-                            {isRerendering && <span className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-[#B4F105]" />}
+                            <label className="flex items-center gap-1 text-[11px]"><input type="checkbox" checked={!!clip.has_ass} disabled={!!isBusy} onChange={(e) => handleToggle(clip, e.target.checked, !!clip.has_hook)} className="accent-[var(--brand-lime)] disabled:opacity-50" /> Subtítulos</label>
+                            <label className="flex items-center gap-1 text-[11px]"><input type="checkbox" checked={!!clip.has_hook} disabled={!!isBusy} onChange={(e) => handleToggle(clip, !!clip.has_ass, e.target.checked)} className="accent-[var(--brand-lime)] disabled:opacity-50" /> Gancho</label>
+                            {isRerendering && <span className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-[var(--brand-lime)]" />}
                           </div>
                         </td>
                         <td>
-                          {isPublishing ? <span className="inline-flex px-2 py-1 rounded-full text-[11px] font-bold border bg-amber-500/20 text-amber-400 border-amber-500/30 animate-pulse">Publicando...</span> : isPublished ? <span className="inline-flex px-2 py-1 rounded-full text-[11px] font-bold border bg-emerald-500/20 text-emerald-400 border-emerald-500/30">Publicado ✅</span> : pb ? <span className={`inline-flex px-2 py-1 rounded-full text-[11px] font-bold border ${pb.cls}`}>{pb.label}</span> : <span className="text-xs text-[#94A3B8]">ready</span>}
-                          {(clip.social_post_url || (isPublished && sseUrl)) && <a href={(clip.social_post_url || sseUrl) || '#'} target="_blank" rel="noopener noreferrer" className="ml-2 text-xs text-[#B4F105] hover:underline">Ver</a>}
+                          {isPublishing ? <span className="inline-flex px-2 py-1 rounded-full text-[11px] font-bold border bg-amber-500/20 text-amber-400 border-amber-500/30 animate-pulse">Publicando...</span> : isPublished ? <span className="inline-flex px-2 py-1 rounded-full text-[11px] font-bold border bg-emerald-500/20 text-emerald-400 border-emerald-500/30">Publicado ✅</span> : pb ? <span className={`inline-flex px-2 py-1 rounded-full text-[11px] font-bold border ${pb.cls}`}>{publishStatusLabel(pb.label)}</span> : <span className="text-xs text-[var(--text-secondary)]">Listo</span>}
+                          {(clip.social_post_url || (isPublished && sseUrl)) && <a href={(clip.social_post_url || sseUrl) || '#'} target="_blank" rel="noopener noreferrer" className="ml-2 text-xs text-[var(--brand-lime)] hover:underline">Ver</a>}
                         </td>
                         <td>
                           <div className="flex items-center gap-1">
-                            <button type="button" onClick={() => setPreviewClip(clip)} className="btn-custom btn-custom-light btn-custom-sm !text-xs" title="Vista previa 9:16"><i className="bi bi-eye" /></button>
+                            <button type="button" onClick={() => setPreviewClip(clip)} className="btn-custom btn-custom-light btn-custom-sm !text-xs" title="Vista previa vertical"><i className="bi bi-eye" /></button>
                             <button type="button" onClick={() => handleDownload(clip)} className="btn-custom btn-custom-light btn-custom-sm !text-xs" title="Descargar MP4"><i className="bi bi-download" /></button>
                             <button type="button" onClick={() => openPublish(clip)} disabled={!!isBusy} className="btn-custom btn-custom-primary btn-custom-sm !text-xs disabled:opacity-50">{isPublishing ? 'Publicando...' : isPublished ? 'Publicado ✅' : 'Publicar'}</button>
                           </div>

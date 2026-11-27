@@ -1,7 +1,7 @@
 /**
  * Contenido editorial de la landing pública (Issue 32).
  *
- * Un único lugar para el copy de hero, pasos, motor, features y footer.
+ * Un único lugar para los textos de la landing y el footer.
  * Consumido por frontend_react vía shim (single source of truth).
  * El frontend Vue legacy se archivó en archive/frontend_vue/ (Issue #110).
  */
@@ -9,9 +9,9 @@
 export const LANDING_SITE_URL = 'https://clipsai.xyz'
 
 export const LANDING_SEO = {
-  title: 'ClipsAI — Convertí tus videos en clips virales con IA | 9:16 automático',
+  title: 'ClipsAI — Publicá más, editá menos',
   description:
-    'ClipsAI analiza el audio de tu video con IA, encuentra los momentos más virales, corta en 9:16 con subtítulos dinámicos y publica en YouTube, Instagram y TikTok. Probalo gratis.',
+    'Convertí tus videos en clips verticales con subtítulos y compartilos en YouTube, Instagram y TikTok. Probá ClipsAI gratis.',
   locale: 'es_AR',
   ogImage: `${LANDING_SITE_URL}/og-clipsai.png`,
 } as const
@@ -24,8 +24,8 @@ export interface LandingNavLink {
 /** Enlaces internos (anclas reales: Lighthouse "crawlable anchors" los exige con destino). */
 export const LANDING_NAV_LINKS: LandingNavLink[] = [
   { href: '#como-funciona', label: 'Cómo funciona' },
-  { href: '#sobre-nosotros', label: 'Sobre nosotros' },
-  { href: '#features', label: 'Features' },
+  { href: '#sobre-nosotros', label: 'Beneficios' },
+  { href: '#features', label: 'Funciones' },
 ]
 
 export interface LandingStat {
@@ -34,9 +34,9 @@ export interface LandingStat {
 }
 
 export const HERO_STATS: LandingStat[] = [
-  { value: '10 clips', label: 'por video, ordenados por score' },
-  { value: '30–90 s', label: 'duración Sweet Spot' },
-  { value: '1080×1920', label: 'vertical 9:16 quemado' },
+  { value: '10 clips', label: 'listos por video' },
+  { value: '30–90 s', label: 'momentos que enganchan' },
+  { value: 'Vertical 9:16', label: 'listo para publicar' },
   { value: '3 redes', label: 'YouTube · Instagram · TikTok' },
 ]
 
@@ -64,54 +64,42 @@ export const LANDING_STEPS: LandingStep[] = [
   {
     id: 'cargar',
     icon: 'bi-cloud-arrow-up',
-    title: 'Cargá tu video',
-    hint: 'Un mp4 y listo',
-    summary:
-      'Subís el video y el motor se encarga del resto: valida el archivo, extrae el audio con FFmpeg y arma la cola de trabajo con progreso en vivo.',
-    bullets: [
-      'Aceptamos mp4, mov y avi; también podés pegar la transcripción si ya la tenés.',
-      'POST /videos devuelve 201 y POST /videos/{id}/jobs devuelve 202: el job corre en background.',
-      'JobStatus muestra progreso 0 → 100 % con badges PENDING, PROCESSING y COMPLETED.',
-    ],
-    monitorTitle: 'Ingesta del video',
+    title: 'Subís tu video',
+    hint: 'Un clic y arrancamos',
+    summary: 'Subilo una vez. Nosotros hacemos el resto.',
+    bullets: ['Elegí tu video y empezá.', 'Seguí el progreso mientras preparamos tus clips.'],
+    monitorTitle: 'Tu video',
     rows: [
-      { label: 'episodio-42.mp4', meta: '1.24 GB · 1920×1080 · 58 min', badge: 'VIDEO 201', tone: 'slate' },
-      { label: 'audio.mp3', meta: 'FFmpeg · -q:a 0 · 44.1 kHz', badge: 'ANALIZADO', tone: 'lime' },
-      { label: 'transcripcion.txt', meta: 'faster-whisper · VAD · 612 palabras', badge: 'LISTO', tone: 'lime' },
-      { label: 'Job #a1f3 · progreso', meta: 'workers en background', badge: '72 %', tone: 'amber', progress: 72 },
+      { label: 'Video listo', meta: 'Ya podés crear tus clips', badge: 'Listo', tone: 'lime' },
+      { label: 'Un clic', meta: 'Y nos ponemos en marcha', badge: 'Fácil', tone: 'slate' },
     ],
   },
   {
     id: 'analizar',
     icon: 'bi-cpu',
-    title: 'Análisis IA',
-    hint: 'Audio + LLM + scoring',
-    summary:
-      'El audio se mide de verdad y el LLM puntúa cada momento con criterios ponderados. El resultado es un ranking de clips con score de viralidad, título y hook.',
-    bullets: [
-      'RMS, onsets y KMeans (10 clusters) detectan gritos, silencios y cambios bruscos → top 50 momentos.',
-      'LLM con prioridad Anthropic → OpenRouter → OpenAI → DeepSeek, reintentos y fallback determinístico.',
-      'Se filtran clips de 30–90 s con score ≥ 5 y se quedan los 10 mejores.',
-    ],
-    monitorTitle: 'Ranking de viralidad',
+    title: 'Elegimos lo mejor',
+    hint: 'Momentos que enganchan',
+    summary: 'Encontramos los momentos que tu audiencia va a querer ver.',
+    bullets: ['Detectamos los mejores fragmentos.', 'Elegimos tus 10 clips destacados.'],
+    monitorTitle: 'Tus mejores momentos',
     rows: [
       {
-        label: 'Clip 3 · 0:42 → 1:28',
-        meta: '46 s · hook: "¿Por qué nadie te dice esto?" · revelación',
+        label: 'Clip destacado',
+        meta: 'Un momento que atrapa desde el inicio',
         badge: '9.1',
         tone: 'lime',
         progress: 91,
       },
       {
-        label: 'Clip 7 · 12:05 → 12:47',
-        meta: '42 s · criterio: dato + bonus audio > 7',
+        label: 'Clip para compartir',
+        meta: 'Una idea que vale la pena compartir',
         badge: '8.4',
         tone: 'lime',
         progress: 84,
       },
       {
-        label: 'Clip 1 · 3:10 → 3:51',
-        meta: '41 s · criterio: controversia',
+        label: 'Otro gran momento',
+        meta: 'Más contenido listo para publicar',
         badge: '7.6',
         tone: 'amber',
         progress: 76,
@@ -121,21 +109,15 @@ export const LANDING_STEPS: LandingStep[] = [
   {
     id: 'publicar',
     icon: 'bi-send-check',
-    title: 'Publicación',
-    hint: 'Un clic, tres redes',
-    summary:
-      'Cada clip se renderiza en vertical con subtítulos quemados y teaser de hook, y después se publica solo en las redes que tengas conectadas por OAuth.',
-    bullets: [
-      'Corte 9:16 + subtítulos ASS word-level con PlayRes 1080×1920 y teaser de hook de 3 a 6 s.',
-      'YouTube Data API, Instagram Graph API y TikTok Content Posting API vía OAuth.',
-      'Si el render degrada, el clip se guarda igual con tags["_render_error"] y el job termina COMPLETED.',
-    ],
-    monitorTitle: 'Estado de publicación',
+    title: 'Se publica solo',
+    hint: 'En tus redes, sin esfuerzo',
+    summary: 'Clips verticales con subtítulos, listos para tus redes.',
+    bullets: ['Subtítulos y gancho inicial incluidos.', 'Compartí en YouTube, Instagram y TikTok.'],
+    monitorTitle: 'Tus redes',
     rows: [
-      { label: 'YouTube Shorts', meta: 'youtube.com/shorts/… · social_post_url guardado', badge: 'PUBLISHED', tone: 'lime' },
-      { label: 'Instagram Reels', meta: 'container → poll FINISHED → publish', badge: 'PUBLISHED', tone: 'lime' },
-      { label: 'TikTok', meta: 'Content Posting API · FILE_UPLOAD + PKCE', badge: 'PUBLISHED', tone: 'lime' },
-      { label: 'Webhook de respaldo', meta: 'PUBLISH_WEBHOOK_URL · red propia', badge: '200 OK', tone: 'slate' },
+      { label: 'YouTube Shorts', meta: 'Tu clip está listo para compartir', badge: 'Listo', tone: 'lime' },
+      { label: 'Instagram Reels', meta: 'Tu clip está listo para compartir', badge: 'Listo', tone: 'lime' },
+      { label: 'TikTok', meta: 'Tu clip está listo para compartir', badge: 'Listo', tone: 'lime' },
     ],
   },
 ]
@@ -144,39 +126,25 @@ export interface LandingAboutPillar {
   icon: string
   title: string
   text: string
-  code: string
 }
 
-/** "Sobre nosotros": motor IA, análisis de audio y scoring de viralidad. */
+/** Beneficios que hacen más fácil compartir videos. */
 export const LANDING_ABOUT: LandingAboutPillar[] = [
   {
-    icon: 'bi-cpu',
-    title: 'Motor IA propio',
-    text: 'El pipeline vive en nuestro repositorio, no en una caja negra. engine.py orquesta validación, extracción de audio, armado del prompt, render y validación de clips. Si el proveedor de LLM falla, el fallback determinístico mantiene el job en COMPLETED en lugar de romperlo.',
-    code: 'engine.py → procesar_video() · CLIPSAI_PROVEEDOR_LLM=auto',
+    icon: 'bi-stars',
+    title: 'Detección automática',
+    text: 'Encontramos los momentos que vale la pena compartir.',
   },
   {
     icon: 'bi-soundwave',
-    title: 'Análisis de audio real',
-    text: 'No es decorativo: calculamos la energía RMS frame a frame, detectamos gritos, silencios y cambios bruscos, normalizamos a escala 0–10 y agrupamos con KMeans. De ahí salen los momentos más Intensivos del video, que son los candidatos reales que después puntúa el LLM.',
-    code: 'audio_analyzer.py → audio.json + momentos_virales.json (top 50)',
+    title: 'Ritmo y voz',
+    text: 'Cada clip conserva la energía y tu forma de contar.',
   },
   {
     icon: 'bi-speedometer2',
-    title: 'Scoring de viralidad',
-    text: 'Seis criterios ponderados —revelación 10, controversia 9, dato 8, emocional 7, técnico 6 y predicción 5— más un bonus cuando la intensidad de audio supera 7. Traducido: no publicás ruido, publicás el material que la audiencia va a mirar hasta el final.',
-    code: 'score ≥ 5 · duración 30–90 s · top 10 por score',
+    title: 'Puntaje de clips',
+    text: 'Encontrá tus favoritos y elegí qué publicar primero.',
   },
-]
-
-export const LANDING_STACK = [
-  'Python',
-  'FFmpeg',
-  'faster-whisper',
-  'scikit-learn',
-  'FastAPI',
-  'React',
-  'PostgreSQL',
 ]
 
 export interface LandingFeature {
@@ -190,39 +158,39 @@ export interface LandingFeature {
 export const LANDING_FEATURES: LandingFeature[] = [
   {
     icon: 'bi-aspect-ratio',
-    title: 'Corte vertical 9:16',
-    text: '1080×1920 a 30 fps con recorte automático al rostro y loudnorm a −16 LUFS, para que el clip se vea y suene igual en cada red sin que toques un slider.',
-    chip: '1080×1920',
+    title: 'Formato vertical',
+    text: 'Tus videos, listos para verse en el celular.',
+    chip: '9:16',
   },
   {
     icon: 'bi-badge-cc',
-    title: 'Subtítulos dinámicos',
-    text: 'ASS word-level quemados sobre el video con PlayRes 1080×1920, estilo por criterio de viralidad y un teaser de hook de 3 a 6 segundos que engancha antes del resto.',
-    chip: 'Word-level ASS',
+    title: 'Subtítulos animados',
+    text: 'Fáciles de seguir y sincronizados con cada palabra.',
+    chip: 'Listos para ver',
   },
   {
     icon: 'bi-cloud-arrow-up',
-    title: 'Autopublicación',
-    text: 'OAuth directo a YouTube, Instagram y TikTok. El clip pasa de PUBLISHING a PUBLISHED solo, con el enlace del post guardado en tu biblioteca y un webhook como plan B.',
-    chip: 'OAuth 2.0',
+    title: 'Publicación automática',
+    text: 'Compartí tus clips en tus redes sin subirlos uno por uno.',
+    chip: '3 redes',
   },
   {
     icon: 'bi-speedometer2',
-    title: 'Scoring de viralidad',
-    text: 'Cada clip vuelve con score 0–10, criterio principal, título sugerido y texto de hook, para que sepas por qué ese fragmento vale más que otro.',
-    chip: 'Score 0–10',
+    title: 'Puntaje de clips',
+    text: 'Descubrí de un vistazo qué momentos destacan.',
+    chip: 'Elegí tus favoritos',
   },
   {
     icon: 'bi-collection-play',
-    title: 'Biblioteca con búsqueda',
-    text: 'Filtros por score mínimo y plataforma, orden por fecha o score, vista en grilla o lista y exportación a CSV o JSON para seguir editando fuera.',
-    chip: 'CSV · JSON',
+    title: 'Tu biblioteca',
+    text: 'Todos tus clips, ordenados y listos para volver a compartir.',
+    chip: 'Todo en un lugar',
   },
   {
     icon: 'bi-graph-up-arrow',
-    title: 'Panel de métricas',
-    text: 'KPIs de jobs, clips, horas ahorradas y score promedio, más la distribución por plataforma y la actividad reciente para saber qué contenido rinde.',
-    chip: 'KPIs + trends',
+    title: 'Métricas claras',
+    text: 'Mirá cómo crece tu contenido y qué clips funcionan mejor.',
+    chip: 'Tu progreso',
   },
 ]
 
@@ -262,16 +230,16 @@ export const LANDING_FOOTER_COLUMNS: LandingFooterColumn[] = [
       { label: 'Probar gratis', href: '/auth' },
       { label: 'Panel', href: '/dashboard' },
       { label: 'Biblioteca de clips', href: '/clips' },
-      { label: 'Integraciones', href: '/dashboard/integrations' },
+      { label: 'Conectá tus redes', href: '/dashboard/integrations' },
     ],
   },
   {
     title: 'Cómo funciona',
     links: [
-      { label: 'Cargar video', href: '#como-funciona' },
-      { label: 'Análisis IA', href: '#como-funciona' },
-      { label: 'Publicación', href: '#como-funciona' },
-      { label: 'Features', href: '#features' },
+      { label: 'Subí tu video', href: '#como-funciona' },
+      { label: 'Elegimos lo mejor', href: '#como-funciona' },
+      { label: 'Se publica solo', href: '#como-funciona' },
+      { label: 'Funciones', href: '#features' },
     ],
   },
   {
@@ -286,4 +254,4 @@ export const LANDING_CONTACT = {
 }
 
 /** Etiqueta de copyright del footer. */
-export const LANDING_COPYRIGHT = `© ${new Date().getFullYear()} ClipsAI. Motor de viralidad automatizado.`
+export const LANDING_COPYRIGHT = `© ${new Date().getFullYear()} ClipsAI. Publicá más, editá menos.`

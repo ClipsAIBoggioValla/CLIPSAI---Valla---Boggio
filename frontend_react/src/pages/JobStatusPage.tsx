@@ -59,7 +59,7 @@ function clipsPorScoreDesc(items: ClipListItem[]): ClipListItem[] {
 function clipsErrorMessage(e: unknown): string {
   if (e instanceof ApiError) return e.detail
   if (e instanceof Error) return e.message
-  return 'Error al cargar clips físicos'
+  return 'Error al cargar clips'
 }
 
 function showInitialSpinner(isInitialLoading: boolean, job: JobResponse | null, pollingStatus: PollingStatus, error: string | null): boolean {
@@ -74,8 +74,8 @@ function showNotFoundState(isInitialLoading: boolean, job: JobResponse | null, p
 function renderLoadingState(isInitialLoading: boolean) {
   return (
     <div className="mt-8 flex flex-col items-center gap-3 py-8">
-      <span className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--brand-forest-medium)]/30 border-t-[var(--brand-forest-medium)]" />
-      <p className="text-sm" style={{ color: 'var(--text-muted-green)' }}>{isInitialLoading ? 'Cargando...' : 'Consultando estado...'}</p>
+      <span className="h-8 w-8 animate-spin rounded-full border-2 border-white/10 border-t-[var(--brand-lime)]" />
+      <p className="text-sm text-[var(--text-secondary)]">{isInitialLoading ? 'Cargando...' : 'Actualizando el progreso...'}</p>
     </div>
   )
 }
@@ -83,17 +83,17 @@ function renderLoadingState(isInitialLoading: boolean) {
 function renderNotFoundState() {
   return (
     <div className="mt-8 flex flex-col items-center gap-3 py-8">
-      <p className="text-sm" style={{ color: 'var(--text-muted-green)' }}>No se pudo cargar el job. Es posible que haya expirado.</p>
+      <p className="text-sm text-[var(--text-secondary)]">No encontramos el progreso de este video. Puede que ya no esté disponible.</p>
       <Link to="/upload" className="btn-custom btn-custom-primary">Ir a subir video</Link>
     </div>
   )
 }
 
-function renderErrorAlert(error: string) {
+function renderErrorAlert() {
   return (
     <div role="alert" className="alert-custom alert-custom-danger mt-6">
       <i className="bi bi-exclamation-triangle-fill alert-custom-icon" />
-      <div className="alert-custom-content">{error}</div>
+      <div className="alert-custom-content">No pudimos actualizar el progreso. Vuelve a intentarlo en unos minutos.</div>
     </div>
   )
 }
@@ -109,7 +109,7 @@ function renderFailedAlert(job: JobResponse) {
     <div role="alert" className="alert-custom alert-custom-danger flex-col items-start">
       <div className="flex gap-3 w-full">
         <i className="bi bi-x-circle-fill alert-custom-icon" />
-        <div className="alert-custom-content"><strong>Error en el procesamiento</strong><p className="mt-1 break-words opacity-80">{job.error_message || 'El job falló sin mensaje detallado. Intenta subir el video nuevamente.'}</p></div>
+        <div className="alert-custom-content"><strong>No pudimos terminar tus clips</strong><p className="mt-1 break-words opacity-80">Hubo un problema al preparar tus clips. Intenta subir el video nuevamente.</p></div>
       </div>
       <Link to="/upload" className="btn-custom btn-custom-light mt-3"><i className="bi bi-arrow-repeat" /> Intentar de nuevo</Link>
     </div>
@@ -168,10 +168,10 @@ export default function JobStatusPage() {
 
   if (!jobId) {
     return (
-      <div className="flex items-center justify-center p-4" style={{ minHeight: '60vh' }}>
+      <div className="flex min-h-[60vh] items-center justify-center p-4">
         <div className="alert-custom alert-custom-danger">
           <i className="bi bi-exclamation-triangle-fill alert-custom-icon" />
-          <div className="alert-custom-content">Falta el identificador del job.</div>
+          <div className="alert-custom-content">No encontramos esta carga. Vuelve a subir tu video.</div>
         </div>
       </div>
     )
@@ -181,28 +181,27 @@ export default function JobStatusPage() {
     <div className="max-w-2xl mx-auto">
       <Link to="/upload" className="btn-custom btn-custom-light mb-6"><i className="bi bi-arrow-left" /> Volver a subir</Link>
       <div className="card-spark">
-        <h1 className="card-title">Estado del procesamiento</h1>
-        <p className="text-sm font-mono break-all" style={{ color: 'var(--text-muted-green)' }}>Job ID: {jobId}</p>
-        {error && renderErrorAlert(error)}
+        <h1 className="card-title">Progreso de tus clips</h1>
+        {error && renderErrorAlert()}
         {showInitialSpinner(isInitialLoading, job, pollingStatus, error) && renderLoadingState(isInitialLoading)}
         {showNotFoundState(isInitialLoading, job, pollingStatus, error) && renderNotFoundState()}
         {job && (
           <div className="mt-6 space-y-6">
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl px-4 py-4 border" style={{ backgroundColor: 'var(--bs-body-bg)', borderColor: 'var(--border-light)' }}>
-              <span className="text-sm font-bold" style={{ color: 'var(--text-muted-green)' }}>Estado</span>
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl px-4 py-4 border border-[var(--border-subtle)] bg-[var(--bg-app)]">
+              <span className="text-sm font-bold text-[var(--text-secondary)]">Estado</span>
               <StatusBadge status={job.status} />
             </div>
             <JobProgress job={job} />
             {renderCompletedSection(job, jobId, realClips, clipsError)}
             {renderFailedAlert(job)}
-            <div className="pt-2 border-t grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs" style={{ borderColor: 'var(--border-light)', color: 'var(--text-muted-green)' }}>
+            <div className="pt-2 border-t border-[var(--border-subtle)] grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-[var(--text-secondary)]">
               <span>Creado: {new Date(job.created_at).toLocaleString()}</span>
               <span>Actualizado: {new Date(job.updated_at).toLocaleString()}</span>
             </div>
           </div>
         )}
       </div>
-      <p className="text-center text-xs mt-6" style={{ color: 'var(--text-muted-green)' }}>Se actualiza cada 2 segundos sin recargar la página</p>
+      <p className="text-center text-xs mt-6 text-[var(--text-secondary)]">Se actualiza cada 2 segundos sin recargar la página</p>
     </div>
   )
 }

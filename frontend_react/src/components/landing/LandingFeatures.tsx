@@ -1,19 +1,19 @@
 import { LANDING_FEATURES } from './landingData'
 
-/** Features grid: corte 9:16, subtítulos dinámicos y autopublicación, más el resto del flujo. */
+/** Funciones listas para crear y compartir clips. */
 export default function LandingFeatures() {
   return (
     <section id="features" className="landing-section" aria-labelledby="features-title">
       <div className="landing-container">
         <div className="landing-section-head landing-section-head-center">
           <span className="landing-eyebrow">
-            <i className="bi bi-grid-3x3-gap" aria-hidden="true" /> Features
+            <i className="bi bi-grid-3x3-gap" aria-hidden="true" /> Funciones
           </span>
           <h2 id="features-title" className="landing-heading">
-            Todo lo que hace falta <span className="landing-accent">para publicar</span>
+            Todo listo para <span className="landing-accent">publicar sin fricción.</span>
           </h2>
           <p className="landing-lead">
-            Del video crudo al post publicado: formato, subtítulos, publicación y métricas en el mismo lugar.
+            Creá, encontrá y compartí tus clips desde un solo lugar.
           </p>
         </div>
 
