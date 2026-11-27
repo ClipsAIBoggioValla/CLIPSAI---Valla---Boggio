@@ -12,7 +12,7 @@
 #    scenedetect[opencv]              → issue #118 (podcast_split / gameplay_split + face-tracking #128)
 #  - yt-dlp / curl-cffi                → issue #119 (ingesta por URL desde el worker)
 #  - instructor / litellm              → capa LLM estructurada (copy por plataforma #129)
-#  - HF cache apunta a Network Volume  → issue #122 (HF_HOME=/runpod-volume/huggingface)
+#  - HF cache apunta a Network Volume  → issue #122 (/runpod-volume/hf_cache)
 # ============================================================================
 
 # --- Worker RunPod + storage R2 ---

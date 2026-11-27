@@ -133,17 +133,20 @@ def test_hook_helpers() -> None:
 
 
 def test_watermark_path(tmp_path: Path) -> None:
+    assert RenderConfig().watermark is False
     assert retrim_service._watermark_path(RenderConfig()) is None
     with pytest.raises(HTTPException):
         retrim_service._watermark_path(RenderConfig(watermark_path="/no/existe.png"))
     logo = tmp_path / "logo.png"
     logo.write_bytes(b"png")
     assert retrim_service._watermark_path(RenderConfig(watermark_path=str(logo))) == logo
+    assert retrim_service._watermark_path(RenderConfig(watermark=False, watermark_path=str(logo))) is None
 
 
 def test_filtros_de_escala_y_overlay() -> None:
     assert "scale=1080:1920" in retrim_service._scale_filter(1080, 1920, 30)
     assert "[outv]" in retrim_service._overlay_filter(1080, 1920, 30)
+    assert "colorchannelmixer=aa=0.6" in retrim_service._overlay_filter(1080, 1920, 30)
 
 
 def test_run_finalize_ok_y_error(tmp_path: Path, monkeypatch) -> None:

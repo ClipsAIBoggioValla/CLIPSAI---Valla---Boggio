@@ -5,8 +5,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    HF_HOME=/tmp/cache/huggingface \
-    HUGGINGFACE_HUB_CACHE=/tmp/cache/huggingface/hub \
+    HF_HOME=/runpod-volume/hf_cache \
+    HUGGINGFACE_HUB_CACHE=/runpod-volume/hf_cache/hub \
     TORCH_HOME=/tmp/cache/torch
 
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
@@ -149,9 +149,8 @@ RUN useradd --create-home --shell /bin/bash appuser \
 
 USER appuser
 
-# Caches de modelos: SIEMPRE en /tmp (grabable por appuser). /runpod-volume se
-# activa en runtime solo si el Network Volume está montado y escribible — ver
-# _directorio_cache_hf() en whisper_transcriber.py (fallback automático).
+# Cache HF preferida en el Network Volume. whisper_transcriber.py valida el mount
+# en runtime y reconfigura HF_HOME/HUGGINGFACE_HUB_CACHE a /tmp si no es escribible.
 RUN mkdir -p /tmp/cache/huggingface /tmp/cache/torch \
     /tmp/huggingface_cache \
     && chmod -R a+rwX /tmp/cache /tmp/huggingface_cache

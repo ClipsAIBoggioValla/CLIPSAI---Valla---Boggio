@@ -16,8 +16,11 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError, PendingRollbackError
+
+from backend.core.schemas import RenderConfig
 
 from ..database import SessionLocal
 from ..deps import CurrentUser, DbSession
@@ -54,6 +57,12 @@ except Exception:
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["jobs"])
+
+
+class CreateJobRequest(BaseModel):
+    """Opciones opcionales de render para el pipeline local."""
+
+    render_config: RenderConfig | None = None
 
 # Modo 100% real — ASS/Hook siempre activo, sin flag de simulación (auditoría 2026-09-21)
 ENABLE_ASS_HOOK = True
@@ -733,6 +742,7 @@ def _render_clip_with_ass_and_hook(
     enable_hook_teaser: bool = True,
     sfx_mood: str = "transition",
     emojis: list[dict] | None = None,
+    render_config: RenderConfig | None = None,
 ) -> tuple[str, dict]:
     """Construye cada clip en orden: recorte → crop 9:16 → subtítulos ASS.
 
@@ -774,6 +784,7 @@ def _render_clip_with_ass_and_hook(
             # b) Reencuadrar explícitamente a 9:16. Un error aborta el render, nunca usa 16:9.
             _exigir_trimmed_valido(trimmed_path)
             _reframar_y_quemar(trimmed_path, reframed_path, ass_path_obj, final_path, hook_sel, hook_mode, meta)
+            _aplicar_watermark_local(final_path, render_config, meta)
             return str(final_path), meta
     finally:
         _limpiar_ass_temporal(ass_path_obj)
@@ -1545,6 +1556,40 @@ def _titulo_recortado(title: Any) -> str | None:
     return str(title)[:255] if title else None
 
 
+def _render_config_de_job(job: Any) -> RenderConfig:
+    """Lee config persistida en metadata; sin plan/Brand Kit usa defaults sin marca."""
+    metadata = getattr(job, "result_metadata", None)
+    raw = metadata.get("render_config") if isinstance(metadata, dict) else None
+    if not isinstance(raw, dict):
+        return RenderConfig()
+    try:
+        return RenderConfig.model_validate(raw)
+    except Exception:
+        logger.warning("[jobs] render_config inválido; se renderiza sin opciones de marca")
+        return RenderConfig()
+
+
+def _validar_fuente_watermark_local(config: RenderConfig | None) -> None:
+    """Limita paths locales a la carpeta de assets configurada, nunca paths arbitrarios."""
+    if not config or not config.watermark or not config.watermark_path:
+        return
+    allowed_root = os.getenv("CLIPSAI_BRAND_ASSETS_DIR", "").strip()
+    candidate = Path(config.watermark_path).resolve()
+    if not allowed_root or not candidate.is_relative_to(Path(allowed_root).resolve()) or not candidate.is_file():
+        raise HTTPException(status_code=422, detail="watermark_path debe ser un asset local habilitado.")
+
+
+def _aplicar_watermark_local(final_path: Path, config: RenderConfig | None, meta: dict) -> None:
+    """Aplica solo una marca habilitada y local; la ausencia de Brand Kit es no-op."""
+    watermark = config.watermark_path if config and config.watermark else None
+    if not watermark or not Path(watermark).is_file():
+        return
+    from ..services.editor import overlay_watermark
+
+    overlay_watermark(final_path, watermark)
+    meta["watermark_applied"] = True
+
+
 def _salida_render_valida(final_storage: str, idx: int) -> None:
     """Validación física obligatoria: el archivo recortado debe existir en storage."""
     if not final_storage or not Path(final_storage).is_file() or Path(final_storage).stat().st_size == 0:
@@ -1579,6 +1624,7 @@ def _renderar_clip_item(
         final_path, render_meta = _render_clip_with_ass_and_hook(
             video.filepath, float(datos["start"]), float(datos["end"]), segments, hook_sel, job.id, idx,
             _titulo_recortado(datos["title"]), emojis=datos.get("emojis"),
+            render_config=_render_config_de_job(job),
         )
         final_storage = final_path
         tipo_render = render_meta.get("render", "fallback")
@@ -1972,9 +2018,14 @@ def _persistir_fallo_wrapper(db2: Any, job_ref: Any, e: Exception, error_trace: 
     _flush_stdout()
 
 
-def create_job_for_video(db: Any, video_id: uuid.UUID, background_tasks: Any) -> Job:
+def create_job_for_video(
+    db: Any, video_id: uuid.UUID, background_tasks: Any,
+    render_config: RenderConfig | None = None,
+) -> Job:
     """Crea el job y agenda el pipeline compartido con la subida directa."""
-    job = Job(video_id=video_id, status=JobStatus.PENDING.value, progress=0)
+    _validar_fuente_watermark_local(render_config)
+    metadata = {"render_config": render_config.model_dump(exclude_none=True)} if render_config else None
+    job = Job(video_id=video_id, status=JobStatus.PENDING.value, progress=0, result_metadata=metadata)
     db.add(job)
     db.commit()
     db.refresh(job)
@@ -1996,6 +2047,7 @@ def create_job(
     db: DbSession,
     current_user: CurrentUser,
     background_tasks: BackgroundTasks,
+    payload: CreateJobRequest | None = None,
 ) -> Job:
     video: Video | None = db.get(Video, video_id)
     if video is None:
@@ -2003,7 +2055,8 @@ def create_job(
     if video.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado para este video")
 
-    return create_job_for_video(db, video.id, background_tasks)
+    config = payload.render_config if payload else None
+    return create_job_for_video(db, video.id, background_tasks, config)
 
 
 @router.get(

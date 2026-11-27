@@ -436,3 +436,30 @@ def reframe_video(
     probe = _sondear_salida(output)
     _validar_dimensiones_salida(output, probe)
     return str(output)
+
+
+def _overlay_graph() -> str:
+    """Filtergraph de watermark discreto con transparencia del 60%."""
+    return "[1:v]scale=220:-1,format=rgba,colorchannelmixer=aa=0.6[wm];[0:v][wm]overlay=W-w-24:H-h-24:shortest=1[outv]"
+
+
+def overlay_watermark(video_path: str | Path, watermark_path: str | Path | None) -> str:
+    """Aplica watermark local; ausencia de marca conserva el render original."""
+    source = Path(video_path)
+    watermark = Path(watermark_path) if watermark_path else None
+    if watermark is None or not watermark.is_file():
+        return str(source)
+    temp_output = source.with_name(f".{source.stem}.watermark{source.suffix}")
+    command = [
+        "ffmpeg", "-y", "-i", str(source), "-loop", "1", "-i", str(watermark),
+        "-filter_complex", _overlay_graph(), "-map", "[outv]", "-map", "0:a?",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "20", "-c:a", "copy",
+        "-movflags", "+faststart", str(temp_output),
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=300)
+    if result.returncode != 0 or not temp_output.is_file() or temp_output.stat().st_size == 0:
+        temp_output.unlink(missing_ok=True)
+        detail = (result.stderr or "").strip()[-1000:]
+        raise RuntimeError(f"No se pudo aplicar el watermark: {detail}")
+    os.replace(temp_output, source)
+    return str(source)
