@@ -14,7 +14,7 @@ from typing import Any
 
 from .config import get_settings
 from .database import Base, engine
-from .routers import auth, clips, export, jobs, metrics, publish, sample, social_auth, stats, stream as publish_stream, subtitles, users, videos, webhooks
+from .routers import auth, clips, export, jobs, metrics, publish, retrim, sample, social_auth, stats, stream as publish_stream, subtitles, users, videos, webhooks
 
 logger = logging.getLogger(__name__)
 
@@ -313,6 +313,7 @@ app.include_router(webhooks.router)
 app.include_router(export.router)
 app.include_router(metrics.router)
 app.include_router(clips.router)
+app.include_router(retrim.router)
 app.include_router(stats.router)
 app.include_router(subtitles.router)
 # Montar antes de publish.router: este router implementa el SSE compatible con EventSource (?token=).

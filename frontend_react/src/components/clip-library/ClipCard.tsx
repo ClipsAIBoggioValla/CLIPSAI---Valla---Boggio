@@ -12,10 +12,11 @@ interface ClipCardProps {
   onDownload: (clip: ClipListItem) => void
   onToggle: (clip: ClipListItem, ass: boolean, hook: boolean) => void
   onOpenPublish: (clip: ClipListItem) => void
+  onEdit: (clip: ClipListItem) => void
 }
 
 export default function ClipCard(props: ClipCardProps) {
-  const { clip, isRerendering, isPublishing, isBusy, isPublished, sseUrl, onPreview, onDownload, onToggle, onOpenPublish } = props
+  const { clip, isRerendering, isPublishing, isBusy, isPublished, sseUrl, onPreview, onDownload, onToggle, onOpenPublish, onEdit } = props
   const pb = publishBadge(clip.status)
   return (
     <div key={clip.id} className="clip-card relative overflow-hidden group mb-0">
@@ -80,12 +81,15 @@ export default function ClipCard(props: ClipCardProps) {
           </a>
         )}
       </div>
-      <div className="grid grid-cols-3 gap-2 mt-2">
+      <div className="grid grid-cols-4 gap-2 mt-2">
         <button type="button" onClick={() => onPreview(clip)} className="btn-custom btn-custom-light !py-2 text-xs font-bold flex items-center justify-center gap-1">
           <i className="bi bi-eye" /> Ver
         </button>
         <button type="button" onClick={() => onDownload(clip)} className="btn-custom btn-custom-light !py-2 text-xs font-bold flex items-center justify-center gap-1">
-          <i className="bi bi-download" /> Descargar MP4
+          <i className="bi bi-download" /> MP4
+        </button>
+        <button type="button" onClick={() => onEdit(clip)} disabled={!!isBusy} className="btn-custom btn-custom-light !py-2 text-xs font-bold disabled:opacity-50 flex items-center justify-center gap-1" title="Editar clip">
+          <i className="bi bi-pencil-square" /> Editar
         </button>
         <button type="button" onClick={() => onOpenPublish(clip)} disabled={!!isBusy} className="btn-custom btn-custom-primary !py-2 text-xs font-bold disabled:opacity-50 flex items-center justify-center gap-1">
           {isPublishing ? <><span className="h-3 w-3 animate-spin rounded-full border border-[var(--bg-sidebar)]/30 border-t-[var(--bg-sidebar)]" /> Publicando...</> : isPublished ? 'Publicado ✅' : 'Publicar'}
