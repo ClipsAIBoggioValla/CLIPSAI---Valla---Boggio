@@ -4,7 +4,7 @@ on:
   workflow_dispatch: # Permite ejecutarlo manualmente desde la pestaña Actions de GitHub
   push:
     branches:
-      - dev   # Se ejecuta automáticamente al hacer push a dev (rama activa)
+      - main # Se ejecuta automáticamente al hacer push a dev (rama activa)
 
 jobs:
   build-and-push:
