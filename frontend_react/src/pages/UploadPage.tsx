@@ -8,6 +8,7 @@ import DirectUploadPanel from '@/components/upload/DirectUploadPanel'
 type UploadState = 'idle' | 'uploading' | 'creating_job'
 type DirectUploadState = 'idle' | 'uploading' | 'processing' | 'success' | 'error'
 type SampleState = 'idle' | 'loading' | 'success' | 'error'
+type UploadTab = 'file' | 'url'
 
 function fileErrorMessage(err: unknown): string {
   if (err instanceof ApiError) return err.detail
@@ -87,6 +88,9 @@ export default function UploadPage() {
   const [directUploadResult, setDirectUploadResult] = useState<RunPodProcessResponse | null>(null)
   const [sampleState, setSampleState] = useState<SampleState>('idle')
   const [sampleError, setSampleError] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<UploadTab>('file')
+  const [sourceUrl, setSourceUrl] = useState('')
+  const [urlBusy, setUrlBusy] = useState(false)
 
   useEffect(() => {
     try { const id = localStorage.getItem('clipsai_active_job_id'); if (id) setActiveJobId(id) } catch {}
@@ -147,6 +151,21 @@ export default function UploadPage() {
     }
   }
 
+  async function handleUrlSubmit(e: FormEvent) {
+    e.preventDefault()
+    if (!sourceUrl.trim()) { setError('Pega un enlace de YouTube o Twitch.'); return }
+    setError(null); setUrlBusy(true)
+    try {
+      const result = await videoService.createFromUrl(sourceUrl.trim())
+      persistActiveJobId(result.job_id)
+      navigate(`/jobs/${result.job_id}`, { replace: false })
+    } catch (err: unknown) {
+      setError(fileErrorMessage(err))
+    } finally {
+      setUrlBusy(false)
+    }
+  }
+
   return (
     <div className="max-w-3xl mx-auto">
       {renderActiveJobBanner(activeJobId)}
@@ -163,7 +182,20 @@ export default function UploadPage() {
 
       {renderErrorAlert(error)}
 
-      <form onSubmit={handleSubmit} className="card-spark space-y-6">
+      <div role="tablist" aria-label="Método de carga" className="mb-4 flex gap-2">
+        <button type="button" role="tab" aria-selected={activeTab === 'file'} onClick={() => { setActiveTab('file'); setError(null) }} className={`btn-custom ${activeTab === 'file' ? 'btn-custom-primary' : 'btn-custom-secondary'}`}>Subir archivo</button>
+        <button type="button" role="tab" aria-selected={activeTab === 'url'} onClick={() => { setActiveTab('url'); setError(null) }} className={`btn-custom ${activeTab === 'url' ? 'btn-custom-primary' : 'btn-custom-secondary'}`}>Pegar enlace</button>
+      </div>
+
+      <form onSubmit={activeTab === 'url' ? handleUrlSubmit : handleSubmit} className="card-spark space-y-6">
+        {activeTab === 'url' ? (
+          <div>
+            <label htmlFor="video-source-url" className="form-label-custom">Enlace público de YouTube o Twitch</label>
+            <input id="video-source-url" type="url" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} placeholder="https://www.youtube.com/watch?v=…" className="w-full rounded-xl border border-slate-600 bg-slate-900 px-4 py-3 text-slate-100 focus:border-lime-400 focus:outline-none" autoComplete="url" disabled={urlBusy} />
+            <p className="mt-2 text-xs" style={{ color: '#94A3B8' }}>El video debe ser público y estar disponible en la región del servidor.</p>
+          </div>
+        ) : (
+          <>
         <div>
           <label className="form-label-custom">Archivo de Video <span className="text-[#B4F105]">*</span></label>
           <Dropzone videoFile={videoFile} onVideoChange={onVideoChange} sampleState={sampleState} sampleError={sampleError} isUploading={isUploading} isDirectUploadBusy={isDirectUploadBusy} isSampleBusy={isSampleBusy} onSampleJob={handleSampleJob} />
@@ -181,12 +213,14 @@ export default function UploadPage() {
         </div>
 
         <DirectUploadPanel videoFile={videoFile} directUploadState={directUploadState} directUploadError={directUploadError} directUploadKey={directUploadKey} directUploadResult={directUploadResult} isUploading={isUploading} onUpload={handleFileUpload} />
+          </>
+        )}
 
-        <button type="submit" disabled={submitDisabled(isUploading, isDirectUploadBusy, !!videoFile)} className="btn-custom btn-custom-primary w-full justify-center btn-custom-lg shadow-[0_0_28px_rgba(180,241,5,0.35)]">
-          {submitButtonContent(isUploading, status)}
+        <button type="submit" disabled={activeTab === 'url' ? urlBusy || !sourceUrl.trim() : submitDisabled(isUploading, isDirectUploadBusy, !!videoFile)} className="btn-custom btn-custom-primary w-full justify-center btn-custom-lg shadow-[0_0_28px_rgba(180,241,5,0.35)]">
+          {activeTab === 'url' ? (urlBusy ? 'Descargando e iniciando procesamiento…' : 'Descargar y procesar') : submitButtonContent(isUploading, status)}
         </button>
 
-        {isUploading && (
+        {activeTab === 'file' && isUploading && (
           <div className="space-y-2">
             <div className="progress"><div className="progress-bar w-full animate-pulse" style={{ height: '10px', borderRadius: '50rem' }} /></div>
             <p className="text-xs text-center" style={{ color: '#94A3B8' }}><i className="bi bi-shield-lock mr-1" /> No cierres esta ventana</p>

@@ -18,3 +18,8 @@ class VideoResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class VideoFromUrlResponse(VideoResponse):
+    job_id: uuid.UUID
+    status: str

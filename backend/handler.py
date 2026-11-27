@@ -251,6 +251,30 @@ def _video_url_de(input_data: dict[str, Any]) -> tuple:
     return video_url, video_extension
 
 
+def _source_url_de(input_data: dict[str, Any]) -> str | None:
+    """source_url opcional, exclusivo con video_url."""
+    source_url = input_data.get("source_url")
+    if source_url is None:
+        return None
+    if not isinstance(source_url, str) or not source_url.strip():
+        raise ValueError("input.source_url debe ser una URL no vacía")
+    if input_data.get("video_url"):
+        raise ValueError("Envía source_url o video_url, no ambos")
+    return source_url.strip()
+
+
+def _ingest_source_url(source_url: str, upload_dir: Path) -> Path:
+    """Descarga vía yt-dlp dentro del directorio del job y devuelve el archivo."""
+    import asyncio
+    from backend.services.ingestion.service import ingest_ytdlp
+
+    video_id = asyncio.run(ingest_ytdlp(source_url, upload_dir=str(upload_dir)))
+    candidates = [path for path in upload_dir.glob(f"{video_id}.*") if path.is_file()]
+    if not candidates:
+        raise RuntimeError("yt-dlp no produjo un archivo de video")
+    return candidates[0]
+
+
 def _url_transcripcion_invalida(transcript_url: Any) -> bool:
     """True si transcription_url viene y no es una URL no vacía."""
     return transcript_url is not None and (not isinstance(transcript_url, str) or not transcript_url.strip())
@@ -516,7 +540,11 @@ def process_video_job(job: dict[str, Any]) -> dict[str, Any]:
 
     input_data = _validar_input(job)
 
-    video_url, video_extension = _video_url_de(input_data)
+    source_url = _source_url_de(input_data)
+    video_url = ""
+    video_extension = ".mp4"
+    if source_url is None:
+        video_url, video_extension = _video_url_de(input_data)
 
     # Extraer transcription_url o transcription_text
     transcript_url = _validar_transcript_url(input_data)
@@ -525,16 +553,18 @@ def process_video_job(job: dict[str, Any]) -> dict[str, Any]:
 
     video_id = str(input_data.get("video_id") or uuid.uuid4())
 
-    logger.info("video_id=%s | video_url=%s...", video_id, video_url[:80])
+    logger.info("video_id=%s | source=%s", video_id, "yt-dlp" if source_url else "storage URL")
 
     with tempfile.TemporaryDirectory(prefix="clipsai_runpod_") as work_dir:
         work_path = Path(work_dir)
-        video_path = work_path / f"video{video_extension}"
+        video_path = _ingest_source_url(source_url, work_path) if source_url else work_path / f"video{video_extension}"
         transcript_path = work_path / f"transcription{transcript_extension}"
 
-        # Descargar video
-        logger.info("Descargando video a %s...", video_path)
-        _download_file(video_url, video_path, MAX_VIDEO_BYTES)
+        if source_url:
+            logger.info("Descarga yt-dlp completada: %s", video_path.suffix)
+        else:
+            logger.info("Descargando video a %s...", video_path)
+            _download_file(video_url, video_path, MAX_VIDEO_BYTES)
         logger.info("Video descargado: %s bytes", video_path.stat().st_size)
 
         _descargar_transcripcion(transcript_url, transcript_text, transcript_path)

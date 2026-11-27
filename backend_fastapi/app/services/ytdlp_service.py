@@ -24,6 +24,10 @@ class DownloadTooLarge(Exception):
 class VideoDownloadFailed(Exception):
     """yt-dlp no pudo producir un archivo de video válido."""
 
+    def __init__(self, message: str, reason: str = "") -> None:
+        super().__init__(message)
+        self.reason = reason.lower()
+
 
 @dataclass(frozen=True)
 class DownloadedVideo:
@@ -135,7 +139,7 @@ def _extract_info(url: str, options: dict, exceeded: list[bool]) -> dict:
     except Exception as exc:
         if exceeded[0]:
             raise DownloadTooLarge("El video supera el tamaño máximo permitido") from exc
-        raise VideoDownloadFailed("yt-dlp no pudo descargar el video") from exc
+        raise VideoDownloadFailed("yt-dlp no pudo descargar el video", str(exc)) from exc
     if not isinstance(info, dict):
         raise VideoDownloadFailed("yt-dlp no devolvió metadatos del video")
     return info

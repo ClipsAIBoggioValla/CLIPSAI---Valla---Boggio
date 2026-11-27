@@ -4,7 +4,7 @@ from .metrics import MetricsResponse, RecentActivityItem
 from .stats import RecentJobSummary, ScoreDistributionItem, StatsSummaryResponse
 from .token import Token, TokenPayload
 from .usuario import UsuarioCreate, UsuarioLogin, UsuarioRead
-from .video import VideoFromUrlRequest, VideoResponse
+from .video import VideoFromUrlRequest, VideoFromUrlResponse, VideoResponse
 
 __all__ = [
     "ClipBase",
@@ -26,5 +26,6 @@ __all__ = [
     "UsuarioLogin",
     "UsuarioRead",
     "VideoFromUrlRequest",
+    "VideoFromUrlResponse",
     "VideoResponse",
 ]

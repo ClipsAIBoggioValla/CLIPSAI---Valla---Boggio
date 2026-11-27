@@ -56,6 +56,9 @@ export const videoService = {
     const raw = await http.post<VideoUploadResponse>('/videos', fd, { timeout: 0 })
     return normalizeVideo(raw as VideoUploadResponse & { filename?: string; title?: string })
   },
+  createFromUrl(url: string): Promise<{ id: string; filename: string; job_id: string; status: string }> {
+    return http.postJson('/api/videos/from-url', { url }, { timeout: 0 })
+  },
   async list(): Promise<VideoUploadResponse[]> {
     const raws = await http.get<(VideoUploadResponse & { filename?: string; title?: string })[]>('/videos')
     return raws.map(normalizeVideo)

@@ -8,13 +8,15 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, UploadFile, File, status
+from urllib.parse import urlsplit
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, UploadFile, File, status
 from pydantic import BaseModel, model_validator
 from sqlalchemy import select
 
 from ..deps import CurrentUser, DbSession
 from ..models import Video
-from ..schemas import VideoFromUrlRequest, VideoResponse
+from ..schemas import VideoFromUrlRequest, VideoFromUrlResponse, VideoResponse
 from ..services.r2_service import get_r2_client
 from ..services.ytdlp_service import (
     DownloadTooLarge,
@@ -23,8 +25,23 @@ from ..services.ytdlp_service import (
     download_video_from_url,
 )
 from ..core.security.rate_limiter import RateLimitExceeded, RateLimiter
+from backend.core.security.ssrf_guard import SSRFError, validate_url
 
 logger = logging.getLogger(__name__)
+
+_ACTIONABLE_DOWNLOAD_ERRORS = (
+    "private", "members-only", "members only", "age-restricted", "age restricted",
+    "confirm your age", "geo-restricted", "not available in your country",
+    "country restriction", "duration", "too long", "longer than", "unavailable",
+    "login required",
+)
+_DOWNLOAD_ERROR_MESSAGES = (
+    (("private", "members-only", "members only"), "El video es privado o exclusivo para miembros. Hazlo público o pega un enlace accesible sin iniciar sesión."),
+    (("age-restricted", "age restricted", "confirm your age"), "El video tiene restricción por edad. Usa un video público sin restricción de edad."),
+    (("geo-restricted", "not available in your country", "country restriction"), "El video está geobloqueado en la región del servidor. Usa un enlace disponible globalmente."),
+    (("duration", "too long", "longer than"), "El video supera el límite de duración de tu plan. Elige uno más corto o actualiza tu plan."),
+    (("unavailable", "login required"), "El video no está disponible públicamente. Revisa el enlace y los permisos de acceso."),
+)
 
 router = APIRouter(prefix="/videos", tags=["videos"])
 upload_url_router = APIRouter(prefix="/api/videos", tags=["videos"])
@@ -145,7 +162,7 @@ def _descargar_video_desde_url(payload: VideoFromUrlRequest):
     try:
         return download_video_from_url(payload.url, _get_upload_dir(), MAX_FILE_SIZE)
     except InvalidVideoUrl as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     except DownloadTooLarge as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -153,14 +170,54 @@ def _descargar_video_desde_url(payload: VideoFromUrlRequest):
         ) from exc
     except VideoDownloadFailed as exc:
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="No se pudo descargar el video desde la URL indicada",
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY if _es_error_descarga_accionable(exc.reason) else status.HTTP_502_BAD_GATEWAY,
+            detail=_mensaje_error_descarga(exc),
         ) from exc
+
+
+def _hosts_de_descarga_permitidos() -> tuple[str, ...]:
+    """Dominios de video y host R2 público configurado, nunca endpoint privado."""
+    r2_public_url = os.getenv("R2_PUBLIC_URL", "").strip()
+    if not r2_public_url:
+        return ("youtube.com", "youtu.be", "twitch.tv")
+    parsed = urlsplit(r2_public_url if "://" in r2_public_url else f"https://{r2_public_url}")
+    return ("youtube.com", "youtu.be", "twitch.tv", parsed.hostname or "")
+
+
+def _url_permitida(url: str) -> bool:
+    """True si el hostname coincide con un dominio permitido o uno de sus subdominios."""
+    hostname = (urlsplit(url).hostname or "").lower().rstrip(".")
+    return any(hostname == domain or hostname.endswith(f".{domain}") for domain in _hosts_de_descarga_permitidos() if domain)
+
+
+def _validar_url_origen(url: str) -> None:
+    """Aplica whitelist antes de resolver y luego SSRF guard a la URL pública."""
+    try:
+        if not _url_permitida(url):
+            raise HTTPException(status_code=422, detail="Dominio no permitido. Usa YouTube, Twitch o el dominio público de R2 configurado.")
+        validate_url(url)
+    except SSRFError as exc:
+        raise HTTPException(status_code=403, detail="URL bloqueada por seguridad: el host no es público o no se puede validar.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="La URL indicada no es válida.") from exc
+
+
+def _es_error_descarga_accionable(reason: str) -> bool:
+    """True si yt-dlp reportó una causa corregible por el usuario."""
+    return any(term in reason for term in _ACTIONABLE_DOWNLOAD_ERRORS)
+
+
+def _mensaje_error_descarga(exc: VideoDownloadFailed) -> str:
+    """Traduce errores conocidos de yt-dlp a pasos concretos sin devolver datos de la URL."""
+    return next(
+        (message for terms, message in _DOWNLOAD_ERROR_MESSAGES if any(term in exc.reason for term in terms)),
+        "No se pudo descargar el video. Verifica que el enlace sea público y vuelve a intentarlo.",
+    )
 
 
 @upload_url_router.post(
     "/from-url",
-    response_model=VideoResponse,
+    response_model=VideoFromUrlResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Descargar y registrar un video desde una URL pública",
 )
@@ -168,7 +225,9 @@ def import_video_from_url(
     payload: VideoFromUrlRequest,
     db: DbSession,
     current_user: CurrentUser,
-) -> Video:
+    background_tasks: BackgroundTasks,
+) -> VideoFromUrlResponse:
+    _validar_url_origen(payload.url)
     downloaded = _descargar_video_desde_url(payload)
     entity = Video(
         user_id=current_user.id,
@@ -187,7 +246,23 @@ def import_video_from_url(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="No se pudo guardar el video",
         ) from exc
-    return entity
+    from .jobs import create_job_for_video
+
+    try:
+        job = create_job_for_video(db, entity.id, background_tasks)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="El video se descargó, pero no se pudo iniciar su procesamiento. Intenta crear el job nuevamente.",
+        ) from exc
+    return VideoFromUrlResponse(
+        id=entity.id,
+        filename=entity.filename,
+        created_at=entity.created_at,
+        job_id=job.id,
+        status=job.status,
+    )
 
 ALLOWED_VIDEO_EXTS = {".mp4", ".mov", ".avi"}
 ALLOWED_TRANSCRIPT_EXTS = {".txt", ".srt"}
