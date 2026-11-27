@@ -5,7 +5,7 @@ const WAVE_BARS = Array.from({ length: 26 }, (_, i) => i)
 
 const PREVIEW_STEPS = [
   { icon: 'bi-soundwave', label: 'Mejores momentos' },
-  { icon: 'bi-stars', label: '10 clips destacados' },
+  { icon: 'bi-stars', label: 'Los mejores clips' },
   { icon: 'bi-phone', label: 'Vertical y subtitulado' },
   { icon: 'bi-send-check', label: 'Listo para tus redes' },
 ]
@@ -43,6 +43,18 @@ export default function LandingHero() {
           <div className="landing-hero-badge">
             <i className="bi bi-graph-up-arrow" /> +38 % retención
           </div>
+          <div className="landing-clip-card landing-clip-card-featured">
+            <span className="landing-clip-card-kicker"><i className="bi bi-stars" /> Clip destacado</span>
+            <div className="landing-clip-card-preview">
+              <span className="landing-clip-card-hook">Gancho inicial</span>
+              <p>“Esto cambia todo”</p>
+              <span className="landing-clip-card-subtitle">Subtítulos animados</span>
+            </div>
+            <div className="landing-clip-card-meta">
+              <strong>Puntaje 9.1</strong>
+              <span>Vertical 9:16</span>
+            </div>
+          </div>
           <div className="landing-phone">
             <div className="landing-phone-top">
               <span className="landing-chip">Score 9.1</span>
@@ -55,7 +67,7 @@ export default function LandingHero() {
                 ))}
               </div>
               <p className="landing-phone-sub">
-                nadie te dice <em>esto</em>
+                lo que nadie <em>te cuenta</em>
               </p>
             </div>
             <div>
@@ -70,6 +82,12 @@ export default function LandingHero() {
                 ))}
               </div>
             </div>
+          </div>
+          <div className="landing-clip-card landing-clip-card-social">
+            <span className="landing-clip-card-kicker"><i className="bi bi-send-check" /> Listo para publicar</span>
+            <div className="landing-social-row"><i className="bi bi-youtube" /><span>YouTube Shorts</span><b>Listo</b></div>
+            <div className="landing-social-row"><i className="bi bi-instagram" /><span>Instagram Reels</span><b>Listo</b></div>
+            <div className="landing-social-row"><i className="bi bi-tiktok" /><span>TikTok</span><b>Listo</b></div>
           </div>
         </div>
       </div>

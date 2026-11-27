@@ -34,7 +34,7 @@ export interface LandingStat {
 }
 
 export const HERO_STATS: LandingStat[] = [
-  { value: '10 clips', label: 'listos por video' },
+  { value: 'Los mejores clips', label: 'según la duración de tu video' },
   { value: '30–90 s', label: 'momentos que enganchan' },
   { value: 'Vertical 9:16', label: 'listo para publicar' },
   { value: '3 redes', label: 'YouTube · Instagram · TikTok' },
@@ -80,7 +80,7 @@ export const LANDING_STEPS: LandingStep[] = [
     title: 'Elegimos lo mejor',
     hint: 'Momentos que enganchan',
     summary: 'Encontramos los momentos que tu audiencia va a querer ver.',
-    bullets: ['Detectamos los mejores fragmentos.', 'Elegimos tus 10 clips destacados.'],
+    bullets: ['Detectamos los mejores fragmentos.', 'Encontrá lo mejor de cada grabación.'],
     monitorTitle: 'Tus mejores momentos',
     rows: [
       {
