@@ -50,6 +50,7 @@ async function parseError(res: Response): Promise<ApiError> {
 function shouldRedirectOn401(path: string): boolean {
   if (path.includes('/jobs/')) return false
   if (/(^|\/)(users\/)?me\/?$/.test(path)) return false
+  if (path.includes('/auth/me')) return false
   return true
 }
 
