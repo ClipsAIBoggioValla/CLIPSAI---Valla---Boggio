@@ -97,9 +97,12 @@ class TestAuth:
             json={"email": "nueva@example.com", "password": PASSWORD, "full_name": "Nueva"},
         )
         _aux_assert_registro_201(res, db)
-        assert len(db.added) == 1
+        assert len(db.added) == 2
         # sql-injection de seguridad: el hash no es la contraseña
         assert db.added[0].hashed_password != PASSWORD
+        assert db.added[0].credits_balance == 15
+        assert db.added[1].transaction_type == "free_trial"
+        assert db.added[1].amount == 15
 
     def test_registro_409_si_email_tomado(self, client, db) -> None:
         db.push_result(FakeResult(rows=[("id-existente",)]))  # el SELECT previo encuentra el email
@@ -785,12 +788,13 @@ class TestSample:
         muestra.write_bytes(b"mp4")
         monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
         monkeypatch.setattr(sample_router, "_get_sample_video_path", lambda: muestra)
+        monkeypatch.setattr("backend_fastapi.app.services.ffmpeg_service.probe_duration", lambda _path: 90.0)
         monkeypatch.setattr(jobs_router, "run_job_safely", Mock(), raising=False)
 
         res = client.post("/videos/sample")
         assert res.status_code == 202, res.text
-        # se crean Video + Job
-        assert len(db.added) == 2
+        # se crean Video + Job + transacción de uso
+        assert len(db.added) == 3
 
 
 # ---------------------------------------------------------------- stream SSE

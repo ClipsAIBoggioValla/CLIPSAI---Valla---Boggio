@@ -27,6 +27,7 @@ from ..deps import CurrentUser, DbSession
 from ..models import Job, JobStatus, Video
 from ..schemas import JobResponse
 from ..services.transcript_utils import parse_transcript_text_to_segments
+from ..services.credits_service import debit_job_credits, refund_job_credits, resolve_video_duration
 
 # Logging inmediato (Unbuffered Output) — flush automático a sys.stdout
 try:
@@ -1018,6 +1019,7 @@ def _marcar_failed_por_claude(db: Any, job_id: uuid.UUID, exc: Exception) -> Non
             except Exception:
                 pass
             db.commit()
+            refund_job_credits(db, job_id)
             logger.info(f"[jobs] Job {job_id} marcado como failed por error de Claude (timeout/API key)")
     except Exception as db_e:
         logger.error(f"[jobs] No se pudo marcar job {job_id} como failed tras error Claude: {db_e}")
@@ -1773,6 +1775,7 @@ def _marcar_failed_spec(db: Any, job_id: uuid.UUID, exc: Exception, error_trace:
             except Exception:
                 pass
             db.commit()
+            refund_job_credits(db, job_id)
             _flush_stdout()
             logger.info(f"[JOB {job_id}] Guardado en BD estado failed tras error crítico")
     except Exception as _spec_db_e:
@@ -1876,6 +1879,7 @@ def _marcar_failed_descriptivo(db: Any, job_id: uuid.UUID, exc: Exception, descr
         if failed2 is not None:
             _aplicar_mensaje_failed(db, failed2, job_id, exc, descriptive, tb_full, error_trace)
             _persistir_metadata_fallo(db, failed2, exc, descriptive, tb_full)
+            refund_job_credits(db, job_id)
             logger.info("[jobs] job %s marcado FAILED con mensaje descriptivo (%s chars)", job_id, len(descriptive))
     except Exception as db_exc:
         logger.exception("[jobs] error al marcar FAILED job=%s: %s", job_id, db_exc)
@@ -2015,20 +2019,38 @@ def _persistir_fallo_wrapper(db2: Any, job_ref: Any, e: Exception, error_trace: 
     except Exception:
         pass
     db2.commit()
+    refund_job_credits(db2, job_ref)
     _flush_stdout()
+
+
+def _guardar_job_con_debito(db: Any, job: Job, user_id: uuid.UUID, duration: float, is_admin: bool) -> None:
+    """Confirma juntos Job, débito y ledger; rollback completo ante cualquier fallo."""
+    try:
+        db.flush()
+        debit_job_credits(db, user_id, job.id, duration, is_admin)
+        db.commit()
+        db.refresh(job)
+    except Exception:
+        db.rollback()
+        raise
 
 
 def create_job_for_video(
     db: Any, video_id: uuid.UUID, background_tasks: Any,
     render_config: RenderConfig | None = None,
+    video: Video | None = None,
+    is_admin: bool = False,
 ) -> Job:
     """Crea el job y agenda el pipeline compartido con la subida directa."""
     _validar_fuente_watermark_local(render_config)
+    video = video or db.get(Video, video_id)
+    if video is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video no encontrado")
+    duration = resolve_video_duration(video)
     metadata = {"render_config": render_config.model_dump(exclude_none=True)} if render_config else None
-    job = Job(video_id=video_id, status=JobStatus.PENDING.value, progress=0, result_metadata=metadata)
+    job = Job(id=uuid.uuid4(), video_id=video_id, status=JobStatus.PENDING.value, progress=0, result_metadata=metadata)
     db.add(job)
-    db.commit()
-    db.refresh(job)
+    _guardar_job_con_debito(db, job, video.user_id, duration, is_admin)
     try:
         background_tasks.add_task(run_job_safely, str(job.id))
     except Exception:
@@ -2056,7 +2078,7 @@ def create_job(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado para este video")
 
     config = payload.render_config if payload else None
-    return create_job_for_video(db, video.id, background_tasks, config)
+    return create_job_for_video(db, video.id, background_tasks, config, video=video, is_admin=current_user.is_admin)
 
 
 @router.get(

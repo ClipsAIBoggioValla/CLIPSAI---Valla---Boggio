@@ -14,6 +14,7 @@ from ..config import get_settings
 from ..deps import DbSession
 from ..models import Job, JobStatus, Video
 from ..services.runpod_service import RunPodError, _normalize_transcription_segments, _raise_for_job_failure
+from ..services.credits_service import refund_job_credits
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
@@ -76,6 +77,7 @@ def _marcar_fallo(db: Any, job: Any, payload: dict[str, Any]) -> bool:
         job.status = JobStatus.FAILED.value
         job.error_message = str(exc)
         db.commit()
+        refund_job_credits(db, job.id)
         return True
     return False
 

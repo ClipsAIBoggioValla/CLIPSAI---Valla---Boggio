@@ -1100,7 +1100,7 @@ class TestEndpointsJobsDirectos:
         from backend_fastapi.app.routers.jobs import create_job
 
         video = make_video(user.id)
-        db.seed(video)
+        db.seed(video, user)
         bg = Mock()
         bg.add_task = Mock(side_effect=[RuntimeError("bg roto"), None])
 
@@ -1120,7 +1120,7 @@ class TestEndpointsJobsDirectos:
         logo.write_bytes(b"logo")
         monkeypatch.setenv("CLIPSAI_BRAND_ASSETS_DIR", str(asset_dir))
         video = make_video(user.id)
-        db.seed(video)
+        db.seed(video, user)
         config = RenderConfig(watermark=True, watermark_path=str(logo))
         created = create_job(video.id, db, user, Mock(), CreateJobRequest(render_config=config))
         assert created.result_metadata["render_config"]["watermark"] is True

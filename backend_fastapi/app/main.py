@@ -14,11 +14,11 @@ from typing import Any
 
 from .config import get_settings
 from .database import Base, engine
-from .routers import auth, clips, export, jobs, metrics, publish, retrim, sample, social_auth, stats, stream as publish_stream, subtitles, users, videos, webhooks
+from .routers import auth, billing, clips, export, jobs, metrics, publish, retrim, sample, social_auth, stats, stream as publish_stream, subtitles, users, videos, webhooks
 
 logger = logging.getLogger(__name__)
 
-from .models import Clip, Job, SocialAccount, Usuario, Video  # noqa: F401 — registra modelos para create_all
+from .models import Clip, CreditTransaction, Job, SocialAccount, Usuario, Video  # noqa: F401 — registra modelos para create_all
 
 _settings = get_settings()
 
@@ -109,6 +109,12 @@ def _agregar_columnas(conn: Any) -> None:
     """Columnas faltantes en videos, jobs, clips, usuarios y social_accounts."""
     from sqlalchemy import text
 
+    if conn.dialect.name == "sqlite":
+        _migrar_creditos(conn)
+        _migrar_admins(conn)
+        conn.commit()
+        return
+
     conn.execute(text("ALTER TABLE videos ADD COLUMN IF NOT EXISTS transcription_filepath VARCHAR;"))
     conn.execute(text("ALTER TABLE videos ADD COLUMN IF NOT EXISTS transcript TEXT;"))
     conn.execute(text("ALTER TABLE videos ADD COLUMN IF NOT EXISTS duration_seconds DOUBLE PRECISION;"))
@@ -129,12 +135,17 @@ def _agregar_columnas(conn: Any) -> None:
     conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ;"))
     conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(500);"))
     conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS theme_preference VARCHAR(20) DEFAULT 'dark';"))
+    _migrar_creditos(conn)
+    _migrar_admins(conn)
     conn.execute(text("ALTER TABLE social_accounts ADD COLUMN IF NOT EXISTS account_name VARCHAR(255);"))
 
 
 def _preparar_restricciones(conn: Any) -> None:
     """Recrea los CHECK de jobs y clips (drop best-effort + create)."""
     from sqlalchemy import text
+
+    if conn.dialect.name == "sqlite":
+        return
 
     _ejecutar_con_error(conn, "ALTER TABLE jobs DROP CONSTRAINT IF EXISTS chk_jobs_status;")
     _ejecutar_con_error(conn, "ALTER TABLE jobs DROP CONSTRAINT IF EXISTS chk_jobs_stats;")
@@ -201,6 +212,10 @@ def _marcar_jobs_huerfanos() -> None:
                 job.status = "failed"
                 job.error_message = "Proceso interrumpido por reinicio del servidor."
             db.commit()
+            from .services.credits_service import refund_job_credits
+
+            for job in interrupted_jobs:
+                refund_job_credits(db, job.id)
             logger.info("Se marcaron %s trabajos huérfanos como 'failed'.", len(interrupted_jobs))
         else:
             logger.info("No hay trabajos huérfanos en 'processing'.")
@@ -229,6 +244,25 @@ def _migrar_esquema() -> None:
         _marcar_jobs_huerfanos()
     except Exception as e:
         logger.error("Error al limpiar jobs huérfanos: %s", e)
+
+
+def _migrar_creditos(conn: Any) -> None:
+    """Añade el balance legacy y crea el ledger idempotentemente en cada dialecto."""
+    from sqlalchemy import inspect, text
+
+    columns = {column["name"] for column in inspect(conn).get_columns("usuarios")}
+    if "credits_balance" not in columns:
+        conn.execute(text("ALTER TABLE usuarios ADD COLUMN credits_balance INTEGER NOT NULL DEFAULT 0"))
+    CreditTransaction.__table__.create(bind=conn, checkfirst=True)
+
+
+def _migrar_admins(conn: Any) -> None:
+    """Agrega el indicador de privilegios sin promover cuentas por email."""
+    from sqlalchemy import inspect, text
+
+    columns = {column["name"] for column in inspect(conn).get_columns("usuarios")}
+    if "is_admin" not in columns:
+        conn.execute(text("ALTER TABLE usuarios ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT FALSE"))
 
 
 def _limpiar_storage_inicio() -> None:
@@ -281,6 +315,7 @@ async def handle_options_preflight(request, call_next):  # type: ignore[no-untyp
     return await call_next(request)
 
 app.include_router(auth.router)
+app.include_router(billing.router)
 # Alias compat: si frontend dispara /login sin prefijo /auth (evita 404 preflight)
 from fastapi import APIRouter as _CompatAPIRouter, Depends as _DependsCompat
 
