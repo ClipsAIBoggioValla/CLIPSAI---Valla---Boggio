@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: clipsai-backend-fastapi
+    name: clipsai-backend
     runtime: docker
     rootDir: .
     dockerContext: .
