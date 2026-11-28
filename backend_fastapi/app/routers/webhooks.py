@@ -48,6 +48,7 @@ def _exigir_autenticidad(request: Request, raw: bytes) -> None:
         logger.warning("RUNPOD_WEBHOOK_SECRET vacío: se acepta callback sin firma fuera de producción")
         return
     if not _firma_valida(raw, _firma_recibida(request), secret):
+        logger.warning("webhook.firma_invalida path=%s", request.url.path)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Firma de webhook inválida")
 
 
@@ -103,11 +104,21 @@ def _es_completado(payload: dict[str, Any]) -> bool:
     return str(payload.get("status", "")).upper() in {"COMPLETED", "SUCCEEDED"}
 
 
+def _callback_ya_aplicado(job: Any, payload: dict[str, Any]) -> bool:
+    """Evita reprocesar callbacks duplicados (idempotencia básica)."""
+    estado = str(getattr(job, "status", "") or "").lower()
+    if _es_completado(payload):
+        return estado == "completed"
+    return estado in {"completed", "failed"}
+
+
 def _aplicar_callback(db: Any, payload: dict[str, Any]) -> dict[str, bool]:
     """Persiste estados terminales y clips R2 luego de autenticar el callback."""
     from .jobs import _persistir_clips_r2
 
     job, job_id = _obtener_job(db, payload)
+    if _callback_ya_aplicado(job, payload):
+        return {"received": True}
     if _marcar_fallo(db, job, payload):
         return {"received": True}
     if _es_completado(payload):

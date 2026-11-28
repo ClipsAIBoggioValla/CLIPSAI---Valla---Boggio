@@ -13,6 +13,8 @@ class ClipBase(BaseModel):
     title: str | None = None
     tags: list[str] | None = None
 
+    model_config = ConfigDict(extra="forbid")
+
 
 class ClipUpdate(ClipBase):
     pass
@@ -51,6 +53,8 @@ class PublishClipRequest(BaseModel):
     platform: str = Field(description="tiktok|instagram|youtube|webhook")
     caption: str | None = Field(default=None, max_length=500)
     webhook_override_url: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class PublishClipResponse(BaseModel):

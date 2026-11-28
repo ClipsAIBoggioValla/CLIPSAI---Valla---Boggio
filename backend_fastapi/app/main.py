@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 import logging
 import os
@@ -13,74 +16,27 @@ import re
 from typing import Any
 
 from .config import get_settings
-from .database import Base, engine
+from .core.logging_security import install_redaction_filter, redact_detail
+from .core.security_middleware import allowed_hosts, security_middleware
+from .database import Base, engine, migration_engine
 from .routers import auth, billing, clips, export, jobs, metrics, publish, retrim, sample, social_auth, stats, stream as publish_stream, subtitles, users, videos, webhooks
 
 logger = logging.getLogger(__name__)
+install_redaction_filter()
 
 from .models import Clip, CreditTransaction, Job, SocialAccount, Usuario, Video  # noqa: F401 — registra modelos para create_all
 
 _settings = get_settings()
 
 
-# CORS (Issue 47 — despliegue en la nube): base local + FRONTEND_URL /
-# FRONTEND_REDIRECT_URL / CORS_EXTRA_ORIGINS desde el entorno, y regex para
-# produccion (*.vercel.app, *.ngrok-free.dev, *.clipsai.xyz).
-_CORS_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
-_CORS_HEADERS = [
-    "Authorization",
-    "Content-Type",
-    "ngrok-skip-browser-warning",
-    "X-Requested-With",
-    "Accept",
-    "Origin",
-]
-_CORS_ORIGIN_REGEX = r"https://.*\.(ngrok-free\.dev|clipsai\.xyz|vercel\.app)"
-
-
-def _extras_de_entorno() -> list[str]:
-    """Valores extra de CORS desde settings y CORS_EXTRA_ORIGINS (sin normalizar)."""
-    extras: list[str] = []
-    for value in (
-        _settings.frontend_url,
-        _settings.frontend_redirect_url,
-        os.getenv("CORS_EXTRA_ORIGINS", ""),
-    ):
-        if value:
-            extras.extend(str(value).split(","))
-    return extras
-
-
-def _normalizar_origen(extra: str) -> str:
-    """Origen normalizado (strip y sin barra final)."""
-    return extra.strip().rstrip("/")
-
-
-def _build_cors_origins() -> list[str]:
-    """Orígenes CORS: base local + FRONTEND_URL/REDIRECT/CORS_EXTRA_ORIGINS."""
-    origins = [
-        "https://api.clipsai.xyz",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:3001",
-        "http://127.0.0.1:3001",
-    ]
-    for extra in _extras_de_entorno():
-        origin = _normalizar_origen(extra)
-        if origin and origin not in origins:
-            origins.append(origin)
-    return origins
-
-
-_CORS_ORIGINS = _build_cors_origins()
-
-
-def _origin_is_allowed(origin: str) -> bool:
-    if not origin:
-        return False
-    return origin in _CORS_ORIGINS or re.match(_CORS_ORIGIN_REGEX, origin) is not None
+from .core.cors import (  # noqa: E402
+    CORS_HEADERS as _CORS_HEADERS,
+    CORS_METHODS as _CORS_METHODS,
+    CORS_ORIGIN_REGEX as _CORS_ORIGIN_REGEX,
+    CORS_ORIGINS as _CORS_ORIGINS,
+    build_cors_origins as _build_cors_origins,
+    origin_is_allowed as _origin_is_allowed,
+)
 
 
 @asynccontextmanager
@@ -135,6 +91,7 @@ def _agregar_columnas(conn: Any) -> None:
     conn.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ;"))
     conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(500);"))
     conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS theme_preference VARCHAR(20) DEFAULT 'dark';"))
+    conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS token_version INTEGER DEFAULT 0;"))
     _migrar_creditos(conn)
     _migrar_admins(conn)
     conn.execute(text("ALTER TABLE social_accounts ADD COLUMN IF NOT EXISTS account_name VARCHAR(255);"))
@@ -227,16 +184,21 @@ def _marcar_jobs_huerfanos() -> None:
 
 
 def _migrar_esquema() -> None:
-    """Migraciones idempotentes y limpieza de huérfanos si hay base de datos."""
-    from .database import DB_AVAILABLE, engine
+    """Migraciones idempotentes y limpieza de huérfanos si hay base de datos.
 
-    if not (DB_AVAILABLE and engine):
+    Usa el engine owner (migration_engine) para DDL; el runtime usa el rol
+    limitado (engine) cuando APP_DATABASE_URL está configurado.
+    """
+    from .database import DB_AVAILABLE, engine, migration_engine
+
+    ddl_engine = migration_engine or engine
+    if not (DB_AVAILABLE and ddl_engine):
         logger.warning("Database not available. Skipping migrations and running in API-only mode.")
         return
 
-    Base.metadata.create_all(bind=engine)
+    Base.metadata.create_all(bind=ddl_engine)
 
-    with engine.connect() as conn:
+    with ddl_engine.connect() as conn:
         _agregar_columnas(conn)
         _preparar_restricciones(conn)
     # --- Limpieza automática de Jobs huérfanos al iniciar (evita processing infinito tras reinicio) ---
@@ -313,7 +275,10 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=_CORS_METHODS,
     allow_headers=_CORS_HEADERS,
+    expose_headers=["X-Request-ID"],
 )
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts())
+app.middleware("http")(security_middleware)
 
 
 @app.middleware("http")
@@ -328,7 +293,7 @@ async def handle_options_preflight(request, call_next):  # type: ignore[no-untyp
             response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Access-Control-Allow-Methods"] = ", ".join(_CORS_METHODS)
         response.headers["Access-Control-Allow-Headers"] = ", ".join(_CORS_HEADERS)
-        response.headers["Access-Control-Expose-Headers"] = "*"
+        response.headers["Access-Control-Expose-Headers"] = "X-Request-ID"
         response.headers["Vary"] = "Origin"
         return response
     return await call_next(request)
@@ -344,11 +309,11 @@ from .schemas import Token as _TokenCompat, UsuarioCreate as _UsuarioCreateCompa
 _compat_auth = _CompatAPIRouter(tags=["auth-compat"])
 
 @_compat_auth.post("/login", response_model=_TokenCompat, include_in_schema=False)
-def _login_alias(payload: _UsuarioLoginCompat, request: Request, db=_DependsCompat(_get_db_compat)):  # type: ignore
+def _login_alias(payload: _UsuarioLoginCompat, request: Request, response: Response, db=_DependsCompat(_get_db_compat)):  # type: ignore
     from .routers.auth import login as _auth_login, _verificar_rate_limit_auth
 
     _verificar_rate_limit_auth(request)
-    return _auth_login(payload, db, request)
+    return _auth_login(payload, db, request, response)
 
 @_compat_auth.post("/registro", response_model=_UsuarioReadCompat, status_code=201, include_in_schema=False)
 def _registro_alias(payload: _UsuarioCreateCompat, request: Request, db=_DependsCompat(_get_db_compat)):  # type: ignore
@@ -384,6 +349,24 @@ publish.router.routes[:] = [
 app.include_router(publish.router)
 app.include_router(users.router)
 app.include_router(users.router, prefix="/api")
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_exception_redactado(request: Request, exc: StarletteHTTPException):
+    """Redacta tokens/URLs sensibles en cualquier HTTPException."""
+    headers = dict(exc.headers or {})
+    request_id = getattr(request.state, "request_id", "")
+    if request_id:
+        headers.setdefault("X-Request-ID", request_id)
+    return JSONResponse(status_code=exc.status_code, content={"detail": redact_detail(exc.detail)}, headers=headers)
+
+
+@app.exception_handler(Exception)
+async def _error_interno(request: Request, exc: Exception):
+    """No expone stack traces ni rutas internas en producción."""
+    request_id = getattr(request.state, "request_id", "")
+    logger.error("unhandled method=%s path=%s request_id=%s tipo=%s", request.method, request.url.path, request_id, type(exc).__name__)
+    return JSONResponse(status_code=500, content={"detail": "Error interno"}, headers={"X-Request-ID": request_id})
 
 
 @app.on_event("startup")

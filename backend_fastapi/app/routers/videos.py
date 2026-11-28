@@ -277,6 +277,33 @@ def import_video_from_url(
 ALLOWED_VIDEO_EXTS = {".mp4", ".mov", ".avi"}
 ALLOWED_TRANSCRIPT_EXTS = {".txt", ".srt"}
 MAX_FILE_SIZE = 500 * 1024 * 1024
+_VIDEO_BOXES = {b"ftyp", b"moov", b"mdat", b"styp", b"free", b"wide"}
+
+
+def _texto_valido(primer_bloque: bytes, label: str) -> None:
+    """Rechaza contenido binario/NUL en transcripciones de texto."""
+    if b"\x00" in primer_bloque:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{label}: contenido binario no permitido")
+
+
+def _video_valido(primer_bloque: bytes, ext: str, label: str) -> None:
+    """Valida magic bytes mínimos; no confía en extensión ni Content-Type."""
+    if ext == ".avi":
+        if len(primer_bloque) < 12 or primer_bloque[:4] != b"RIFF" or primer_bloque[8:12] != b"AVI ":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{label}: magic bytes de AVI inválidos")
+        return
+    if len(primer_bloque) < 8 or primer_bloque[4:8] not in _VIDEO_BOXES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{label}: magic bytes de video inválidos")
+
+
+def _validate_magic(primer_bloque: bytes, ext: str, label: str) -> None:
+    """Valida el contenido real del archivo antes de escribirlo a disco."""
+    if not primer_bloque:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{label}: archivo vacío")
+    if ext in ALLOWED_TRANSCRIPT_EXTS:
+        _texto_valido(primer_bloque, label)
+        return
+    _video_valido(primer_bloque, ext, label)
 
 
 def _get_upload_dir() -> Path:
@@ -302,9 +329,14 @@ def _validate_extension(filename: str | None, allowed: set[str], label: str) -> 
     return ext
 
 
-async def _save_upload_file(upload: UploadFile, dest: Path) -> None:
+async def _save_upload_file(upload: UploadFile, dest: Path, label: str) -> None:
+    """Guarda el archivo validando magic bytes y tamaño máximo."""
     size = 0
     with dest.open("wb") as out:
+        first = await upload.read(1024 * 1024)
+        _validate_magic(first, dest.suffix.lower(), label)
+        out.write(first)
+        size = len(first)
         while True:
             chunk = await upload.read(1024 * 1024)
             if not chunk:
@@ -359,9 +391,9 @@ async def _cerrar_uploads(video, transcription) -> None:
 
 async def _guardar_sin_limpieza(video: UploadFile, video_dest: Path, transcription: UploadFile | None, transcript_dest: Path | None) -> None:
     """Guarda video y transcripción en disco (lanza si falla)."""
-    await _save_upload_file(video, video_dest)
+    await _save_upload_file(video, video_dest, "video")
     if transcription is not None and transcript_dest is not None:
-        await _save_upload_file(transcription, transcript_dest)
+        await _save_upload_file(transcription, transcript_dest, "transcription")
 
 
 async def _guardar_archivos(video: UploadFile, video_dest: Path, transcription: UploadFile | None, transcript_dest: Path | None) -> None:

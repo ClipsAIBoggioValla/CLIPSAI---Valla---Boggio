@@ -17,7 +17,7 @@ def hash_password(plain_password: str) -> str:
     el ValueError de bcrypt 4.x cuando la contrasenia es mas larga.
     """
     pwd_bytes = plain_password.encode("utf-8")[:72]
-    salt = bcrypt.gensalt()
+    salt = bcrypt.gensalt(rounds=12)
     return bcrypt.hashpw(pwd_bytes, salt).decode("utf-8")
 
 

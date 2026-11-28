@@ -146,7 +146,7 @@ def _nombre_desde_me(access_token: str) -> str | None:
         url = f"https://graph.facebook.com/v18.0/me?fields=id,name&access_token={access_token}"
         logger.info("[META API CALL] Requesting %s", url.replace(access_token, "HIDDEN_TOKEN"))
         res = requests.get(url, timeout=10)
-        logger.info("[META /me STATUS]: %s | [BODY]: %s", res.status_code, res.text)
+        logger.info("[META /me] status=%s", res.status_code)
         return _nombre_de_respuesta_me(res)
     except Exception as e:
         logger.error("[META /me EXCEPTION]: %s", str(e), exc_info=True)
@@ -181,7 +181,7 @@ def _username_del_detalle_ig(ig_id, access_token: str, display_name: str | None)
     r2_url = f"https://graph.facebook.com/v18.0/{ig_id}?fields=id,username,name&access_token={access_token}"
     logger.info("[META API CALL] Requesting %s", r2_url.replace(access_token, "HIDDEN_TOKEN"))
     r2 = requests.get(r2_url, timeout=10)
-    logger.info("[META /me STATUS]: %s | [BODY]: %s", r2.status_code, r2.text)
+    logger.info("[META /me] status=%s", r2.status_code)
     return _username_de_respuesta_ig(r2, display_name)
 
 
@@ -222,12 +222,12 @@ def _username_desde_accounts(access_token: str, display_name: str | None) -> tup
         acc_url = f"https://graph.facebook.com/v18.0/me/accounts?fields=id,name,access_token,instagram_business_account{{id,username,name}}&access_token={access_token}"
         logger.info("[META API CALL] Requesting %s", acc_url.replace(access_token, "HIDDEN_TOKEN"))
         res_acc = requests.get(acc_url, timeout=10)
-        logger.info("[META /me/accounts STATUS]: %s | [BODY]: %s", res_acc.status_code, res_acc.text)
+        logger.info("[META /me/accounts] status=%s", res_acc.status_code)
         if res_acc.status_code != 200:
             _logear_raw_json(res_acc, "[META /me/accounts RAW JSON]")
             return None, display_name
         data = _json_seguro(res_acc)
-        logger.info("[META /me/accounts RAW JSON]: %s", data)
+        logger.info("[META /me/accounts] paginas=%s", len(data.get("data", [])) if isinstance(data, dict) else 0)
         return _username_de_paginas(data, access_token, display_name)
     except Exception as e:
         logger.error("[META /me/accounts EXCEPTION]: %s", str(e), exc_info=True)
@@ -318,7 +318,7 @@ def _pedir_debug_token(access_token: str, app_token: str):
     """Respuesta de debug_token de Meta (con log de status)."""
     dbg_url = f"https://graph.facebook.com/debug_token?input_token={access_token}&access_token={app_token}"
     dbg_resp = requests.get(dbg_url, timeout=10)
-    logger.info("[IG DEBUG] debug_token status=%s body=%s", dbg_resp.status_code, dbg_resp.text)
+    logger.info("[IG DEBUG] debug_token status=%s", dbg_resp.status_code)
     return dbg_resp
 
 

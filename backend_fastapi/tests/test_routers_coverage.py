@@ -312,7 +312,7 @@ class TestVideos:
     def test_post_videos_201_y_guarda_archivos(self, client, db, user, monkeypatch, tmp_path) -> None:
         monkeypatch.setenv("UPLOAD_DIR", str(tmp_path))
         video = tmp_path / "toma.mp4"
-        video.write_bytes(b"video-bytes")
+        video.write_bytes(b"\x00\x00\x00\x18ftypmp42")
         transcript = tmp_path / "toma.txt"
         transcript.write_text("00:00:00 - Hola", encoding="utf-8")
 
@@ -324,6 +324,15 @@ class TestVideos:
         assert res.status_code == 201, res.text
         assert db.commits >= 1
         assert any(path.suffix == ".mp4" for path in tmp_path.iterdir())
+
+    def test_post_videos_400_magic_bytes_invalidos(self, client, monkeypatch, tmp_path) -> None:
+        monkeypatch.setenv("UPLOAD_DIR", str(tmp_path))
+        falso = tmp_path / "toma.mp4"
+        falso.write_bytes(b"no-es-un-video")
+
+        with open(falso, "rb") as fv:
+            res = client.post("/videos", files={"video": ("toma.mp4", fv, "video/mp4")})
+        assert res.status_code == 400
 
     def test_post_videos_400_extension_invalida(self, client, monkeypatch, tmp_path) -> None:
         monkeypatch.setenv("UPLOAD_DIR", str(tmp_path))
@@ -804,17 +813,21 @@ class TestPublishStream:
     def _endpoint(self, user_id: Any) -> str:
         return f"/clips/{_fixtures.uuid.uuid4()}/publish-stream"
 
-    def test_401_invalid_token(self, client) -> None:
-        res = client.get(self._endpoint("x"), params={"token": "token-inventado"})
-        assert res.status_code == 401
-        assert res.json()["detail"]["error"] == "invalid_token"
+    def test_401_token_invalido(self, db) -> None:
+        no_auth_client = build_client(db, use_real_auth=True)
+        try:
+            res = no_auth_client.get(self._endpoint("x"), headers={"Authorization": "Bearer token-inventado"})
+            assert res.status_code == 401
+            assert "Token invalido" in str(res.json()["detail"])
+        finally:
+            no_auth_client.close()
 
     def test_401_token_expirado(self, db, user) -> None:
         expired = create_access_token(user.id, expires_delta=timedelta(seconds=-1))
-        no_auth_client = build_client(db)
+        no_auth_client = build_client(db, use_real_auth=True)
         try:
-            res = no_auth_client.get(self._endpoint(user.id), params={"token": expired})
+            res = no_auth_client.get(self._endpoint(user.id), headers={"Authorization": f"Bearer {expired}"})
             assert res.status_code == 401
-            assert res.json()["detail"]["error"] == "token_expired"
+            assert "Token expirado" in str(res.json()["detail"])
         finally:
             no_auth_client.close()

@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
     email               VARCHAR(255)                NOT NULL UNIQUE,
     hashed_password     VARCHAR(255)                NOT NULL,   -- bcrypt (Issue 3)
     full_name           VARCHAR(100),
+    token_version       INTEGER                     NOT NULL DEFAULT 0,
     credits_balance     INTEGER                     NOT NULL DEFAULT 0 CHECK (credits_balance >= 0),
     credits_exempt      BOOLEAN                     NOT NULL DEFAULT FALSE,
     is_admin            BOOLEAN                     NOT NULL DEFAULT FALSE,

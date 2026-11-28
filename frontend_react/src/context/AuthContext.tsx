@@ -8,7 +8,6 @@ import type { ApiError, AuthUser, UserLogin, UserRegister } from '@/types/api'
 
 interface AuthState {
   user: AuthUser | null
-  token: string | null
   isAuthenticated: boolean
   isLoading: boolean
 }

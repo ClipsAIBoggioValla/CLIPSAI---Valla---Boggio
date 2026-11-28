@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { TOKEN_KEY } from '@/lib/apiClient'
 
 export type PublishSSEStatus = 'PUBLISHING' | 'PUBLISHED' | 'FAILED' | string
 
@@ -21,14 +20,6 @@ export interface UsePublishSSEResult {
 const RAW_BASE: string =
   ((import.meta as unknown as { env?: Record<string, string> })?.env?.VITE_API_URL ?? '').trim()
 const API_BASE_URL = (RAW_BASE || 'https://clipsai-backend.onrender.com').replace(/\/$/, '')
-
-function getToken(): string | null {
-  try {
-    return localStorage.getItem(TOKEN_KEY)
-  } catch {
-    return null
-  }
-}
 
 function isTerminalPublishStatus(status: string): boolean {
   return status === 'PUBLISHED' || status === 'FAILED'
@@ -84,21 +75,13 @@ export function usePublishSSE(clipId: string | null): UsePublishSSEResult {
       return
     }
 
-    const token = getToken()
-    if (!token) {
-      setStatus(null)
-      setError('No se encontró un token de sesión válido')
-      return
-    }
-
     setStatus('PUBLISHING')
     setSocialPostUrl(null)
     setErrorLog(null)
     setError(null)
 
     const url = new URL(`${API_BASE_URL}/clips/${encodeURIComponent(clipId)}/publish-stream`)
-    url.searchParams.set('token', token)
-    const eventSource = new EventSource(url.toString())
+    const eventSource = new EventSource(url.toString(), { withCredentials: true })
     eventSourceRef.current = eventSource
 
     const closeConnection = () => {

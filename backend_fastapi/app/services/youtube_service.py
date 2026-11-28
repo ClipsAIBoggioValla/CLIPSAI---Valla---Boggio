@@ -88,7 +88,7 @@ def _data_youtube(resp) -> Any:
     """JSON de la respuesta y log crudo; {} si falla o no es 200."""
     try:
         data = resp.json() if resp.status_code == 200 else {}
-        logger.info("[YOUTUBE API RAW RESPONSE] Channels: %s", data)
+        logger.info("[YOUTUBE API] channels=%s", len(data.get("items", [])) if isinstance(data, dict) else 0)
     except Exception:
         data = {}
     return data

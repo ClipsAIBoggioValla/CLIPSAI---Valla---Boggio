@@ -496,13 +496,15 @@ def _aux_assert_options_origen_lista(tc) -> None:
 
 
 def _aux_assert_options_regex_y_malo(tc) -> None:
-    # OPTIONS con origen permitido por regex
-    r2 = tc.options("/health", headers={"Origin": "https://mi-app.vercel.app"})
-    assert r2.headers["access-control-allow-origin"] == "https://mi-app.vercel.app"
-    # OPTIONS con origen NO permitido → 200 sin ACAO
-    r3 = tc.options("/health", headers={"Origin": "https://malo.example.com"})
+    # OPTIONS con origen permitido por regex (solo subdominios de clipsai.xyz)
+    r2 = tc.options("/health", headers={"Origin": "https://mi-app.clipsai.xyz"})
+    assert r2.headers["access-control-allow-origin"] == "https://mi-app.clipsai.xyz"
+    # Previews de Vercel y orígenes ajenos ya no están permitidos por defecto
+    r3 = tc.options("/health", headers={"Origin": "https://mi-app.vercel.app"})
     assert r3.status_code == 200
     assert "access-control-allow-origin" not in r3.headers
+    r4 = tc.options("/health", headers={"Origin": "https://malo.example.com"})
+    assert "access-control-allow-origin" not in r4.headers
 
 
 def _aux_assert_get_health(tc) -> None:
@@ -545,7 +547,8 @@ class TestMainApp:
 
         assert main_mod._origin_is_allowed("") is False
         assert main_mod._origin_is_allowed("http://localhost:3000") is True
-        assert main_mod._origin_is_allowed("https://algo.ngrok-free.dev") is True
+        assert main_mod._origin_is_allowed("https://algo.ngrok-free.dev") is False
+        assert main_mod._origin_is_allowed("https://algo.clipsai.xyz") is True
         assert main_mod._origin_is_allowed("https://nope.example.com") is False
 
     def test_health_route(self, client) -> None:
