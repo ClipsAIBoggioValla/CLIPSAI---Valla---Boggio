@@ -1,4 +1,4 @@
-"""Emision y validacion de JSON Web Tokens (JWT) con python-jose."""
+"""Emision y validacion de JSON Web Tokens (JWT) con PyJWT."""
 
 from __future__ import annotations
 
@@ -6,7 +6,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from jose import ExpiredSignatureError, JWTError, jwt
+import jwt as pyjwt
+from jwt import ExpiredSignatureError, InvalidTokenError
 
 from ..config import get_settings
 
@@ -48,7 +49,7 @@ def create_access_token(
     if extra_claims:
         to_encode.update(extra_claims)
 
-    return jwt.encode(
+    return pyjwt.encode(
         to_encode,
         _settings.jwt_secret,
         algorithm=_settings.jwt_algorithm,
@@ -63,14 +64,14 @@ def decode_access_token(token: str) -> dict[str, Any]:
         TokenDecodeError: si el token esta mal formado o firma invalida.
     """
     try:
-        payload = jwt.decode(
+        payload = pyjwt.decode(
             token,
             _settings.jwt_secret,
             algorithms=[_settings.jwt_algorithm],
         )
     except ExpiredSignatureError as exc:
         raise TokenExpiredError("Token expirado") from exc
-    except JWTError as exc:
+    except InvalidTokenError as exc:
         raise TokenDecodeError("Token invalido") from exc
 
     if "sub" not in payload:
