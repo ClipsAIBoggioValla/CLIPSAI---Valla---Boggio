@@ -44,7 +44,7 @@ function renderErrorAlert(error: string | null) {
       <div className="alert-custom-content">
         {error}
         {error === INSUFFICIENT_CREDITS_MESSAGE && (
-          <div className="mt-2"><Link to="/credits" className="font-bold underline">Consultar saldo e historial de créditos</Link></div>
+          <div className="mt-2"><Link to="/billing" className="font-bold underline">Consultar saldo e historial de créditos</Link></div>
         )}
       </div>
     </div>

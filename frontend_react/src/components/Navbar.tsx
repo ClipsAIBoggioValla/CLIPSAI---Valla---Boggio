@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
+import { useAuth } from '@/context/AuthContext'
+import CreditBalanceBadge from '@/components/billing/CreditBalanceBadge'
 import QuickCreateDropdown from './navbar/QuickCreateDropdown'
 
 interface NavbarProps {
@@ -8,6 +10,7 @@ interface NavbarProps {
 }
 
 export default function Navbar({ onToggleDesktop, onToggleMobile }: NavbarProps) {
+  const { user } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [search, setSearch] = useState('')
@@ -100,6 +103,7 @@ export default function Navbar({ onToggleDesktop, onToggleMobile }: NavbarProps)
       </div>
 
       <div className="navbar-actions">
+        <CreditBalanceBadge userId={user?.id ?? null} />
         <button className="navbar-action-btn" aria-label="Pantalla completa" type="button" onClick={toggleFullscreen}>
           <i className="bi bi-arrows-fullscreen" />
         </button>

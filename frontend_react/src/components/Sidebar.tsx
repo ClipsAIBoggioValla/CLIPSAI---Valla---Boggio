@@ -63,9 +63,9 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
                 </NavLink>
               </li>
               <li className="sidebar-menu-item">
-                <NavLink to="/credits" className={linkCls} onClick={onClose}>
+                <NavLink to="/billing" className={linkCls} onClick={onClose}>
                   <i className="bi bi-coin" />
-                  <span>Créditos</span>
+                  <span>Billing</span>
                 </NavLink>
               </li>
             </ul>
