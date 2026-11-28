@@ -250,19 +250,27 @@ def _migrar_creditos(conn: Any) -> None:
     """Añade el balance legacy y crea el ledger idempotentemente en cada dialecto."""
     from sqlalchemy import inspect, text
 
-    columns = {column["name"] for column in inspect(conn).get_columns("usuarios")}
-    if "credits_balance" not in columns:
-        conn.execute(text("ALTER TABLE usuarios ADD COLUMN credits_balance INTEGER NOT NULL DEFAULT 0"))
-    CreditTransaction.__table__.create(bind=conn, checkfirst=True)
+    if conn.dialect.name == "sqlite":
+        columns = {column["name"] for column in inspect(conn).get_columns("usuarios")}
+        if "credits_balance" not in columns:
+            conn.execute(text("ALTER TABLE usuarios ADD COLUMN credits_balance INTEGER NOT NULL DEFAULT 0"))
+        CreditTransaction.__table__.create(bind=conn, checkfirst=True)
+        return
+    conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS credits_balance INTEGER NOT NULL DEFAULT 0"))
+    if conn.dialect.name == "postgresql":
+        CreditTransaction.__table__.create(bind=conn, checkfirst=True)
 
 
 def _migrar_admins(conn: Any) -> None:
     """Agrega el indicador de privilegios sin promover cuentas por email."""
     from sqlalchemy import inspect, text
 
-    columns = {column["name"] for column in inspect(conn).get_columns("usuarios")}
-    if "is_admin" not in columns:
-        conn.execute(text("ALTER TABLE usuarios ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT FALSE"))
+    if conn.dialect.name == "sqlite":
+        columns = {column["name"] for column in inspect(conn).get_columns("usuarios")}
+        if "is_admin" not in columns:
+            conn.execute(text("ALTER TABLE usuarios ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT FALSE"))
+        return
+    conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE"))
 
 
 def _limpiar_storage_inicio() -> None:
