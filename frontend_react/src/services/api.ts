@@ -90,6 +90,12 @@ export const statsService = {
   },
 }
 
+export const creditService = {
+  getCredits(page = 1, pageSize = 20): Promise<import('@/types/api').CreditsPage> {
+    return http.get<import('@/types/api').CreditsPage>(`/billing/credits?page=${page}&page_size=${pageSize}`)
+  },
+}
+
 export const metricsService = {
   getMetrics(): Promise<import('@/types/api').MetricsResponse> {
     return http.get<import('@/types/api').MetricsResponse>('/metrics')
@@ -118,6 +124,12 @@ export const clipService = {
   },
   reRenderClip(clipId: string, options: import('@/types/api').ReRenderRequest): Promise<import('@/types/api').ReRenderResponse> {
     return http.postJson<import('@/types/api').ReRenderResponse>(`/clips/${clipId}/re-render`, options)
+  },
+  retrimClip(clipId: string, data: import('@/types/api').RetrimRequest): Promise<import('@/types/api').RetrimResponse> {
+    return http.postJson<import('@/types/api').RetrimResponse>(`/clips/${clipId}/retrim`, data, { timeout: 0 })
+  },
+  getRetrimOptions(clipId: string): Promise<import('@/types/api').RetrimOptions> {
+    return http.get<import('@/types/api').RetrimOptions>(`/clips/${clipId}/retrim/options`)
   },
 
   list(params?: { video_id?: string; status?: string }): Promise<ClipResponse[]> {

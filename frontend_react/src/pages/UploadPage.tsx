@@ -9,8 +9,10 @@ type UploadState = 'idle' | 'uploading' | 'creating_job'
 type DirectUploadState = 'idle' | 'uploading' | 'processing' | 'success' | 'error'
 type SampleState = 'idle' | 'loading' | 'success' | 'error'
 type UploadTab = 'file' | 'url'
+const INSUFFICIENT_CREDITS_MESSAGE = 'No tenés créditos suficientes para procesar este video.'
 
 function fileErrorMessage(err: unknown): string {
+  if (err instanceof ApiError && err.status === 402) return INSUFFICIENT_CREDITS_MESSAGE
   if (err instanceof ApiError) return err.detail
   if (err instanceof Error) return err.message
   return 'Error inesperado. Intenta nuevamente.'
@@ -39,7 +41,12 @@ function renderErrorAlert(error: string | null) {
   return (
     <div role="alert" className="alert-custom alert-custom-danger">
       <i className="bi bi-exclamation-triangle-fill alert-custom-icon" />
-      <div className="alert-custom-content">{error}</div>
+      <div className="alert-custom-content">
+        {error}
+        {error === INSUFFICIENT_CREDITS_MESSAGE && (
+          <div className="mt-2"><Link to="/billing" className="font-bold underline">Consultar saldo e historial de créditos</Link></div>
+        )}
+      </div>
     </div>
   )
 }
@@ -109,7 +116,7 @@ export default function UploadPage() {
   }
 
   async function handleFileUpload(file: File) {
-    setDirectUploadState('uploading'); setDirectUploadError(null); setDirectUploadKey(null); setDirectUploadResult(null)
+    setError(null); setDirectUploadState('uploading'); setDirectUploadError(null); setDirectUploadKey(null); setDirectUploadResult(null)
     try {
       const result = await videoService.uploadDirectToStorage(file)
       setDirectUploadKey(result.file_key)
@@ -118,19 +125,21 @@ export default function UploadPage() {
       setDirectUploadResult(processResult)
       setDirectUploadState('success')
     } catch (err: unknown) {
-      setDirectUploadError(fileErrorMessage(err)); setDirectUploadState('error')
+      const message = fileErrorMessage(err)
+      setDirectUploadError(message); setError(message); setDirectUploadState('error')
     }
   }
 
   async function handleSampleJob() {
-    setSampleState('loading'); setSampleError(null)
+    setError(null); setSampleState('loading'); setSampleError(null)
     try {
       const job = await videoService.createSampleJob()
       const jobId = resolveJobId(job)
       persistActiveJobId(jobId)
       navigate(`/jobs/${jobId}`, { replace: false })
     } catch (err: unknown) {
-      setSampleError(fileErrorMessage(err)); setSampleState('error')
+      const message = fileErrorMessage(err)
+      setSampleError(message); setError(message); setSampleState('error')
     }
   }
 

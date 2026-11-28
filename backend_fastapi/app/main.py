@@ -19,12 +19,12 @@ from .config import get_settings
 from .core.logging_security import install_redaction_filter, redact_detail
 from .core.security_middleware import allowed_hosts, security_middleware
 from .database import Base, engine, migration_engine
-from .routers import auth, clips, export, jobs, metrics, publish, sample, social_auth, stats, stream as publish_stream, subtitles, users, videos, webhooks
+from .routers import auth, billing, clips, export, jobs, metrics, publish, retrim, sample, social_auth, stats, stream as publish_stream, subtitles, users, videos, webhooks
 
 logger = logging.getLogger(__name__)
 install_redaction_filter()
 
-from .models import Clip, Job, SocialAccount, Usuario, Video  # noqa: F401 — registra modelos para create_all
+from .models import Clip, CreditTransaction, Job, SocialAccount, Usuario, Video  # noqa: F401 — registra modelos para create_all
 
 _settings = get_settings()
 
@@ -65,6 +65,12 @@ def _agregar_columnas(conn: Any) -> None:
     """Columnas faltantes en videos, jobs, clips, usuarios y social_accounts."""
     from sqlalchemy import text
 
+    if conn.dialect.name == "sqlite":
+        _migrar_creditos(conn)
+        _migrar_admins(conn)
+        conn.commit()
+        return
+
     conn.execute(text("ALTER TABLE videos ADD COLUMN IF NOT EXISTS transcription_filepath VARCHAR;"))
     conn.execute(text("ALTER TABLE videos ADD COLUMN IF NOT EXISTS transcript TEXT;"))
     conn.execute(text("ALTER TABLE videos ADD COLUMN IF NOT EXISTS duration_seconds DOUBLE PRECISION;"))
@@ -86,12 +92,17 @@ def _agregar_columnas(conn: Any) -> None:
     conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(500);"))
     conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS theme_preference VARCHAR(20) DEFAULT 'dark';"))
     conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS token_version INTEGER DEFAULT 0;"))
+    _migrar_creditos(conn)
+    _migrar_admins(conn)
     conn.execute(text("ALTER TABLE social_accounts ADD COLUMN IF NOT EXISTS account_name VARCHAR(255);"))
 
 
 def _preparar_restricciones(conn: Any) -> None:
     """Recrea los CHECK de jobs y clips (drop best-effort + create)."""
     from sqlalchemy import text
+
+    if conn.dialect.name == "sqlite":
+        return
 
     _ejecutar_con_error(conn, "ALTER TABLE jobs DROP CONSTRAINT IF EXISTS chk_jobs_status;")
     _ejecutar_con_error(conn, "ALTER TABLE jobs DROP CONSTRAINT IF EXISTS chk_jobs_stats;")
@@ -158,6 +169,10 @@ def _marcar_jobs_huerfanos() -> None:
                 job.status = "failed"
                 job.error_message = "Proceso interrumpido por reinicio del servidor."
             db.commit()
+            from .services.credits_service import refund_job_credits
+
+            for job in interrupted_jobs:
+                refund_job_credits(db, job.id)
             logger.info("Se marcaron %s trabajos huérfanos como 'failed'.", len(interrupted_jobs))
         else:
             logger.info("No hay trabajos huérfanos en 'processing'.")
@@ -191,6 +206,44 @@ def _migrar_esquema() -> None:
         _marcar_jobs_huerfanos()
     except Exception as e:
         logger.error("Error al limpiar jobs huérfanos: %s", e)
+
+
+def _migrar_creditos(conn: Any) -> None:
+    """Migra balance, exenciones aprobadas y ledger idempotentemente."""
+    from sqlalchemy import func, inspect, text, update
+    from .services.credits_policy import CREDITS_EXEMPT_EMAILS
+
+    def _marcar_cuentas_exentas() -> None:
+        conn.execute(update(Usuario).where(
+            func.lower(func.trim(Usuario.email)).in_(CREDITS_EXEMPT_EMAILS)
+        ).values(credits_exempt=True))
+
+    if conn.dialect.name == "sqlite":
+        columns = {column["name"] for column in inspect(conn).get_columns("usuarios")}
+        if "credits_balance" not in columns:
+            conn.execute(text("ALTER TABLE usuarios ADD COLUMN credits_balance INTEGER NOT NULL DEFAULT 0"))
+        if "credits_exempt" not in columns:
+            conn.execute(text("ALTER TABLE usuarios ADD COLUMN credits_exempt BOOLEAN NOT NULL DEFAULT FALSE"))
+        _marcar_cuentas_exentas()
+        CreditTransaction.__table__.create(bind=conn, checkfirst=True)
+        return
+    conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS credits_balance INTEGER NOT NULL DEFAULT 0"))
+    conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS credits_exempt BOOLEAN NOT NULL DEFAULT FALSE"))
+    _marcar_cuentas_exentas()
+    if conn.dialect.name == "postgresql":
+        CreditTransaction.__table__.create(bind=conn, checkfirst=True)
+
+
+def _migrar_admins(conn: Any) -> None:
+    """Agrega el indicador de privilegios sin promover cuentas por email."""
+    from sqlalchemy import inspect, text
+
+    if conn.dialect.name == "sqlite":
+        columns = {column["name"] for column in inspect(conn).get_columns("usuarios")}
+        if "is_admin" not in columns:
+            conn.execute(text("ALTER TABLE usuarios ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT FALSE"))
+        return
+    conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE"))
 
 
 def _limpiar_storage_inicio() -> None:
@@ -246,6 +299,7 @@ async def handle_options_preflight(request, call_next):  # type: ignore[no-untyp
     return await call_next(request)
 
 app.include_router(auth.router)
+app.include_router(billing.router)
 # Alias compat: si frontend dispara /login sin prefijo /auth (evita 404 preflight)
 from fastapi import APIRouter as _CompatAPIRouter, Depends as _DependsCompat
 
@@ -278,6 +332,7 @@ app.include_router(webhooks.router)
 app.include_router(export.router)
 app.include_router(metrics.router)
 app.include_router(clips.router)
+app.include_router(retrim.router)
 app.include_router(stats.router)
 app.include_router(subtitles.router)
 # Montar antes de publish.router: este router implementa el SSE compatible con EventSource (?token=).

@@ -31,10 +31,11 @@ def now_utc() -> datetime:
 class FakeResult:
     """Resultado falsificado de `Session.execute()` con el protocolo con los routers usan."""
 
-    def __init__(self, rows: list[Any] | None = None, scalar: Any = None, one: Any = None):
+    def __init__(self, rows: list[Any] | None = None, scalar: Any = None, one: Any = None, rowcount: int = 0):
         self._rows = list(rows or [])
         self._scalar = scalar
         self._one = one
+        self.rowcount = rowcount
 
     def scalar_one_or_none(self) -> Any:
         return self._scalar
@@ -114,7 +115,20 @@ class FakeSession:
         return self.store.get((model.__name__, pk))
 
     def execute(self, stmt: Any, *args: Any, **kwargs: Any) -> FakeResult:  # noqa: ARG002
+        if getattr(stmt, "is_update", False):
+            return self._execute_update(stmt)
         return self.results.pop(0) if self.results else self.default_result
+
+    def _execute_update(self, stmt: Any) -> FakeResult:
+        """Simula el compare-and-update del balance en las pruebas con sesión falsa."""
+        target_id = next((c.right.value for c in stmt._where_criteria if getattr(c.left, "name", "") == "id"), None)
+        minimum = next((c.right.value for c in stmt._where_criteria if getattr(c.left, "name", "") == "credits_balance"), None)
+        usuario = self.store.get(("Usuario", target_id))
+        if usuario is None or (minimum is not None and usuario.credits_balance < minimum):
+            return FakeResult(scalar=None)
+        expression = next(iter(stmt._values.values()))
+        usuario.credits_balance += expression.right.value
+        return FakeResult(scalar=usuario.credits_balance, rowcount=1)
 
     def scalar(self, stmt: Any) -> Any:  # noqa: ARG002
         return self.scalar_results.pop(0) if self.scalar_results else self.scalar_value
@@ -124,6 +138,12 @@ class FakeSession:
 
     def add(self, obj: Any) -> None:
         self.added.append(obj)
+
+    def flush(self) -> None:
+        return None
+
+    def scalars(self, stmt: Any) -> FakeResult:
+        return self.execute(stmt).scalars()
 
     def commit(self) -> None:
         if self.commit_error is not None:
@@ -173,6 +193,8 @@ def make_usuario(**overrides: Any) -> Any:
         full_name="Usuaria de Prueba",
         avatar_url=None,
         theme_preference="dark",
+        credits_balance=60,
+        is_admin=False,
         created_at=now_utc(),
         updated_at=now_utc(),
     )
@@ -274,6 +296,8 @@ def build_client(
     from fastapi.testclient import TestClient
 
     app.dependency_overrides[get_db] = lambda: db
+    if user is not None:
+        db.seed(user)
     if use_real_auth:
         app.dependency_overrides.pop(get_current_user, None)
         app.dependency_overrides.pop(get_current_user_optional, None)

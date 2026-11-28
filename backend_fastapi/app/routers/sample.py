@@ -13,12 +13,11 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
-from sqlalchemy import select
 
-from ..database import SessionLocal
 from ..deps import CurrentUser, DbSession
-from ..models import Job, JobStatus, Video
+from ..models import Job, Video
 from ..schemas import JobResponse
+from ..services.credits_policy import is_credits_exempt
 
 router = APIRouter(prefix="/videos", tags=["videos"])
 
@@ -115,24 +114,9 @@ def create_sample_job(
     db.commit()
     db.refresh(entity)
 
-    # Crear job
-    job = Job(
-        video_id=entity.id,
-        status=JobStatus.PENDING.value,
-        progress=0,
+    from .jobs import create_job_for_video
+
+    return create_job_for_video(
+        db, entity.id, background_tasks, video=entity, is_admin=current_user.is_admin,
+        credits_exempt=is_credits_exempt(current_user),
     )
-    db.add(job)
-    db.commit()
-    db.refresh(job)
-
-    # Ejecutar en background
-    try:
-        from .jobs import run_job_safely
-
-        background_tasks.add_task(run_job_safely, str(job.id))
-    except Exception:
-        from .jobs import _run_job
-
-        background_tasks.add_task(_run_job, job.id)
-
-    return job

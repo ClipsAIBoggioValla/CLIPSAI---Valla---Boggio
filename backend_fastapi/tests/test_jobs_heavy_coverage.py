@@ -211,12 +211,12 @@ class TestHelpersJobs:
         valido = {
             "mode": "teaser",
             "start_time": 12.0,
-            "end_time": 15.0,
+            "end_time": 17.0,
             "curiosity_score": 9,
             "makes_sense_standalone": True,
         }
         hs, he, meta = jobs_router._select_hook_for_clip(10.0, 30.0, valido)
-        assert (hs, he) == (12.0, 15.0)
+        assert (hs, he) == (12.0, 17.0)
         assert meta["mode"] == "teaser"
 
     def test_select_hook_teaser_rechazado_por_score_bajo(self) -> None:
@@ -231,12 +231,12 @@ class TestHelpersJobs:
         fuera = {
             "mode": "teaser",
             "start_time": 1.0,
-            "end_time": 4.0,
+            "end_time": 6.0,
             "curiosity_score": 9,
             "makes_sense_standalone": True,
         }
         hs, he, meta = jobs_router._select_hook_for_clip(10.0, 30.0, fuera)
-        assert (hs, he) == (1.0, 4.0)
+        assert (hs, he) == (1.0, 6.0)
         assert meta["mode"] == "teaser"
 
     def test_render_args_validan_hook_in_clip(self, tmp_path, capsys) -> None:
@@ -244,7 +244,7 @@ class TestHelpersJobs:
         archivo.write_bytes(b"x")
         with pytest.raises(ValueError, match="fuera del cuerpo"):
             jobs_router._render_clip_with_ass_and_hook(
-                str(archivo), 10.0, 30.0, [], (1.0, 4.0, {"mode": "in_clip"}), uuid_lib.uuid4(), 0, None
+                str(archivo), 10.0, 30.0, [], (1.0, 6.0, {"mode": "in_clip"}), uuid_lib.uuid4(), 0, None
             )
 
 

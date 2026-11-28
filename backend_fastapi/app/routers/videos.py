@@ -15,9 +15,11 @@ from pydantic import BaseModel, model_validator
 from sqlalchemy import select
 
 from ..deps import CurrentUser, DbSession
+from backend.core.schemas import RenderConfig
 from ..models import Video
 from ..schemas import VideoFromUrlRequest, VideoFromUrlResponse, VideoResponse
 from ..services.r2_service import get_r2_client
+from ..services.credits_policy import is_credits_exempt
 from ..services.ytdlp_service import (
     DownloadTooLarge,
     InvalidVideoUrl,
@@ -64,6 +66,7 @@ class ProcessVideoRequest(BaseModel):
     transcription_url: str | None = None
     transcription_text: str | None = None
     video_id: str | None = None
+    render_config: RenderConfig | None = None
 
     @model_validator(mode="after")
     def validate_source(self) -> "ProcessVideoRequest":
@@ -136,12 +139,14 @@ def _procesar_via_runpod(payload: ProcessVideoRequest, video_url: str) -> dict[s
     from ..services.runpod_service import RunPodError, process_video_via_runpod
 
     try:
-        return process_video_via_runpod(
-            video_url,
-            transcription_url=payload.transcription_url,
-            transcription_text=payload.transcription_text,
-            video_id=payload.video_id,
-        )
+        options = {
+            "transcription_url": payload.transcription_url,
+            "transcription_text": payload.transcription_text,
+            "video_id": payload.video_id,
+        }
+        if payload.render_config is not None:
+            options["render_config"] = payload.render_config
+        return process_video_via_runpod(video_url, **options)
     except RunPodError as exc:
         message = str(exc)
         status_code = 504 if "timeout" in message.lower() or "no terminó" in message.lower() else 502
@@ -249,7 +254,12 @@ def import_video_from_url(
     from .jobs import create_job_for_video
 
     try:
-        job = create_job_for_video(db, entity.id, background_tasks)
+        job = create_job_for_video(
+            db, entity.id, background_tasks, video=entity, is_admin=current_user.is_admin,
+            credits_exempt=is_credits_exempt(current_user),
+        )
+    except HTTPException:
+        raise
     except Exception as exc:
         db.rollback()
         raise HTTPException(

@@ -24,6 +24,26 @@ ASS_STYLE_VERTICAL = (
     "1,0,0,0,100,100,0,0,1,4,2,2,40,40,280,1"
 )
 
+# Plantillas de subtítulos soportadas por RenderConfig.caption_style (Issue #121).
+# El valor es la fila completa de estilo ASS (V4+ Styles).
+ASS_STYLE_PRESETS = {
+    "karaoke_yellow": ASS_STYLE_VERTICAL,
+    "neon_green": (
+        "Arial,70,&H0000FF00,&H00000000,&H00000000,&H80000000,"
+        "1,0,0,0,100,100,0,0,1,4,2,2,40,40,280,1"
+    ),
+    "minimal_white": (
+        "Arial,58,&H00FFFFFF,&H00000000,&H00000000,&H80000000,"
+        "0,0,0,0,100,100,0,0,1,2,0,2,48,48,240,1"
+    ),
+}
+CAPTION_STYLES = tuple(ASS_STYLE_PRESETS)
+
+
+def ass_style_for(caption_style: str | None) -> str:
+    """Fila ASS de la plantilla pedida; cae en la vertical por defecto."""
+    return ASS_STYLE_PRESETS.get(caption_style or "", ASS_STYLE_VERTICAL)
+
 
 ASS_HEADER_TEMPLATE = (
     "[Script Info]\n"
@@ -343,11 +363,12 @@ def generate_hooked_ass(
     hook_end: float,
     output_path: str | Path,
     title: str = "clipsai",
+    style: str | None = None,
 ) -> str:
     hook_start, hook_end = _normalizar_ventana(hook_start, hook_end, clip_start, clip_end)
     hook_segs, clip_segs = _generate_hooked_segments(segments, clip_start, clip_end, hook_start, hook_end)
     all_shifted = sorted(hook_segs + clip_segs, key=lambda x: x["start"])
-    return write_ass_file(all_shifted, output_path, title=title)
+    return write_ass_file(all_shifted, output_path, title=title, style=style)
 
 
 def build_hooked_ass_content(
@@ -357,8 +378,9 @@ def build_hooked_ass_content(
     hook_start: float,
     hook_end: float,
     title: str = "clipsai",
+    style: str | None = None,
 ) -> str:
     hook_start, hook_end = _normalizar_ventana(hook_start, hook_end, clip_start, clip_end)
     hook_segs, clip_segs = _generate_hooked_segments(segments, clip_start, clip_end, hook_start, hook_end)
     all_shifted = sorted(hook_segs + clip_segs, key=lambda x: x["start"])
-    return generate_ass_content(all_shifted, title=title)
+    return generate_ass_content(all_shifted, title=title, style=style)

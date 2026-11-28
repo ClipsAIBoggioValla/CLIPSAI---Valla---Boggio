@@ -16,14 +16,19 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError, PendingRollbackError
+
+from backend.core.schemas import RenderConfig
 
 from ..database import SessionLocal
 from ..deps import CurrentUser, DbSession
 from ..models import Job, JobStatus, Video
 from ..schemas import JobResponse
 from ..services.transcript_utils import parse_transcript_text_to_segments
+from ..services.credits_service import debit_job_credits, refund_job_credits, resolve_video_duration
+from ..services.credits_policy import is_credits_exempt
 
 # Logging inmediato (Unbuffered Output) — flush automático a sys.stdout
 try:
@@ -54,6 +59,12 @@ except Exception:
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["jobs"])
+
+
+class CreateJobRequest(BaseModel):
+    """Opciones opcionales de render para el pipeline local."""
+
+    render_config: RenderConfig | None = None
 
 # Modo 100% real — ASS/Hook siempre activo, sin flag de simulación (auditoría 2026-09-21)
 ENABLE_ASS_HOOK = True
@@ -733,6 +744,7 @@ def _render_clip_with_ass_and_hook(
     enable_hook_teaser: bool = True,
     sfx_mood: str = "transition",
     emojis: list[dict] | None = None,
+    render_config: RenderConfig | None = None,
 ) -> tuple[str, dict]:
     """Construye cada clip en orden: recorte → crop 9:16 → subtítulos ASS.
 
@@ -774,6 +786,7 @@ def _render_clip_with_ass_and_hook(
             # b) Reencuadrar explícitamente a 9:16. Un error aborta el render, nunca usa 16:9.
             _exigir_trimmed_valido(trimmed_path)
             _reframar_y_quemar(trimmed_path, reframed_path, ass_path_obj, final_path, hook_sel, hook_mode, meta)
+            _aplicar_watermark_local(final_path, render_config, meta)
             return str(final_path), meta
     finally:
         _limpiar_ass_temporal(ass_path_obj)
@@ -1007,6 +1020,7 @@ def _marcar_failed_por_claude(db: Any, job_id: uuid.UUID, exc: Exception) -> Non
             except Exception:
                 pass
             db.commit()
+            refund_job_credits(db, job_id)
             logger.info(f"[jobs] Job {job_id} marcado como failed por error de Claude (timeout/API key)")
     except Exception as db_e:
         logger.error(f"[jobs] No se pudo marcar job {job_id} como failed tras error Claude: {db_e}")
@@ -1354,9 +1368,9 @@ def _score_del_item(item: dict) -> float | None:
 
 
 def _tags_del_item(item: dict) -> Any:
-    """Tags crudos del item, normalizados a lista si vienen como otro tipo."""
+    """Tags crudos del item; conserva dicts y listas, encapsula escalares legacy."""
     tags = item.get("tags")
-    if tags is not None and not isinstance(tags, list):
+    if tags is not None and not isinstance(tags, (list, dict)):
         tags = [str(tags)]
     return tags
 
@@ -1376,16 +1390,32 @@ def _emojis_del_item(item: dict) -> list:
     return emojis if isinstance(emojis, list) else []
 
 
+def _social_copy_del_item(item: dict, title: str) -> dict:
+    """Copy de redes normalizado, con alternativa determinística para datos viejos."""
+    from ..services.claude_service import normalize_social_copy
+
+    raw = item.get("social_copy")
+    if not isinstance(raw, dict) and isinstance(item.get("tags"), dict):
+        raw = item["tags"].get("social_copy")
+    raw = dict(raw) if isinstance(raw, dict) else {}
+    for key in ("tiktok_caption", "reels_caption", "shorts_title", "hashtags"):
+        if key not in raw and key in item:
+            raw[key] = item[key]
+    return normalize_social_copy(title, raw)
+
+
 def _parsear_clip_item(item: dict, idx: int) -> dict:
     """Normaliza un item del payload del engine: title, start/end (con clamp), score y tags."""
     start, end = _tiempos_del_item(item, idx)
+    title = _titulo_del_item(item)
     return {
-        "title": _titulo_del_item(item),
+        "title": title,
         "start": start,
         "end": end,
         "score_val": _score_del_item(item),
         "tags": _tags_del_item(item),
         "emojis": _emojis_del_item(item),
+        "social_copy": _social_copy_del_item(item, str(title)),
     }
 
 
@@ -1529,6 +1559,40 @@ def _titulo_recortado(title: Any) -> str | None:
     return str(title)[:255] if title else None
 
 
+def _render_config_de_job(job: Any) -> RenderConfig:
+    """Lee config persistida en metadata; sin plan/Brand Kit usa defaults sin marca."""
+    metadata = getattr(job, "result_metadata", None)
+    raw = metadata.get("render_config") if isinstance(metadata, dict) else None
+    if not isinstance(raw, dict):
+        return RenderConfig()
+    try:
+        return RenderConfig.model_validate(raw)
+    except Exception:
+        logger.warning("[jobs] render_config inválido; se renderiza sin opciones de marca")
+        return RenderConfig()
+
+
+def _validar_fuente_watermark_local(config: RenderConfig | None) -> None:
+    """Limita paths locales a la carpeta de assets configurada, nunca paths arbitrarios."""
+    if not config or not config.watermark or not config.watermark_path:
+        return
+    allowed_root = os.getenv("CLIPSAI_BRAND_ASSETS_DIR", "").strip()
+    candidate = Path(config.watermark_path).resolve()
+    if not allowed_root or not candidate.is_relative_to(Path(allowed_root).resolve()) or not candidate.is_file():
+        raise HTTPException(status_code=422, detail="watermark_path debe ser un asset local habilitado.")
+
+
+def _aplicar_watermark_local(final_path: Path, config: RenderConfig | None, meta: dict) -> None:
+    """Aplica solo una marca habilitada y local; la ausencia de Brand Kit es no-op."""
+    watermark = config.watermark_path if config and config.watermark else None
+    if not watermark or not Path(watermark).is_file():
+        return
+    from ..services.editor import overlay_watermark
+
+    overlay_watermark(final_path, watermark)
+    meta["watermark_applied"] = True
+
+
 def _salida_render_valida(final_storage: str, idx: int) -> None:
     """Validación física obligatoria: el archivo recortado debe existir en storage."""
     if not final_storage or not Path(final_storage).is_file() or Path(final_storage).stat().st_size == 0:
@@ -1563,6 +1627,7 @@ def _renderar_clip_item(
         final_path, render_meta = _render_clip_with_ass_and_hook(
             video.filepath, float(datos["start"]), float(datos["end"]), segments, hook_sel, job.id, idx,
             _titulo_recortado(datos["title"]), emojis=datos.get("emojis"),
+            render_config=_render_config_de_job(job),
         )
         final_storage = final_path
         tipo_render = render_meta.get("render", "fallback")
@@ -1600,11 +1665,13 @@ def _crear_clip_persistible(video: Any, job: Any, datos: dict, base_tags: dict, 
     )
 
 
-def _base_tags_de(tags: Any) -> dict:
-    """Base tags del clip: _raw_tags si el item traía una lista."""
-    base_tags: dict = {}
+def _base_tags_de(tags: Any, social_copy: dict | None = None) -> dict:
+    """Tags del clip: metadata social normalizada y _raw_tags si corresponde."""
+    base_tags: dict = dict(tags) if isinstance(tags, dict) else {}
     if isinstance(tags, list) and tags:
         base_tags["_raw_tags"] = tags
+    if social_copy is not None:
+        base_tags["social_copy"] = social_copy
     return base_tags
 
 
@@ -1629,7 +1696,7 @@ def _renderizar_clips(
         _log_ventana_clip(idx, datos, segments, hook_sel)
 
         tags = datos["tags"]
-        base_tags = _base_tags_de(tags)
+        base_tags = _base_tags_de(tags, datos["social_copy"])
         final_storage = _renderar_clip_item(db, video, job, job_id, idx, item, datos, segments, hook_sel, len(clips_payload), render_stats, base_tags)
         clips_to_create.append(_crear_clip_persistible(video, job, datos, base_tags, tags, final_storage))
 
@@ -1709,6 +1776,7 @@ def _marcar_failed_spec(db: Any, job_id: uuid.UUID, exc: Exception, error_trace:
             except Exception:
                 pass
             db.commit()
+            refund_job_credits(db, job_id)
             _flush_stdout()
             logger.info(f"[JOB {job_id}] Guardado en BD estado failed tras error crítico")
     except Exception as _spec_db_e:
@@ -1812,6 +1880,7 @@ def _marcar_failed_descriptivo(db: Any, job_id: uuid.UUID, exc: Exception, descr
         if failed2 is not None:
             _aplicar_mensaje_failed(db, failed2, job_id, exc, descriptive, tb_full, error_trace)
             _persistir_metadata_fallo(db, failed2, exc, descriptive, tb_full)
+            refund_job_credits(db, job_id)
             logger.info("[jobs] job %s marcado FAILED con mensaje descriptivo (%s chars)", job_id, len(descriptive))
     except Exception as db_exc:
         logger.exception("[jobs] error al marcar FAILED job=%s: %s", job_id, db_exc)
@@ -1951,15 +2020,41 @@ def _persistir_fallo_wrapper(db2: Any, job_ref: Any, e: Exception, error_trace: 
     except Exception:
         pass
     db2.commit()
+    refund_job_credits(db2, job_ref)
     _flush_stdout()
 
 
-def create_job_for_video(db: Any, video_id: uuid.UUID, background_tasks: Any) -> Job:
+def _guardar_job_con_debito(
+    db: Any, job: Job, user_id: uuid.UUID, duration: float, is_admin: bool, credits_exempt: bool,
+) -> None:
+    """Confirma juntos Job, débito y ledger; rollback completo ante cualquier fallo."""
+    try:
+        db.flush()
+        debit_job_credits(db, user_id, job.id, duration, is_admin, credits_exempt)
+        db.commit()
+        db.refresh(job)
+    except Exception:
+        db.rollback()
+        raise
+
+
+def create_job_for_video(
+    db: Any, video_id: uuid.UUID, background_tasks: Any,
+    render_config: RenderConfig | None = None,
+    video: Video | None = None,
+    is_admin: bool = False,
+    credits_exempt: bool = False,
+) -> Job:
     """Crea el job y agenda el pipeline compartido con la subida directa."""
-    job = Job(video_id=video_id, status=JobStatus.PENDING.value, progress=0)
+    _validar_fuente_watermark_local(render_config)
+    video = video or db.get(Video, video_id)
+    if video is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video no encontrado")
+    duration = resolve_video_duration(video)
+    metadata = {"render_config": render_config.model_dump(exclude_none=True)} if render_config else None
+    job = Job(id=uuid.uuid4(), video_id=video_id, status=JobStatus.PENDING.value, progress=0, result_metadata=metadata)
     db.add(job)
-    db.commit()
-    db.refresh(job)
+    _guardar_job_con_debito(db, job, video.user_id, duration, is_admin, credits_exempt)
     try:
         background_tasks.add_task(run_job_safely, str(job.id))
     except Exception:
@@ -1978,6 +2073,7 @@ def create_job(
     db: DbSession,
     current_user: CurrentUser,
     background_tasks: BackgroundTasks,
+    payload: CreateJobRequest | None = None,
 ) -> Job:
     video: Video | None = db.get(Video, video_id)
     if video is None:
@@ -1985,7 +2081,11 @@ def create_job(
     if video.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado para este video")
 
-    return create_job_for_video(db, video.id, background_tasks)
+    config = payload.render_config if payload else None
+    return create_job_for_video(
+        db, video.id, background_tasks, config, video=video,
+        is_admin=current_user.is_admin, credits_exempt=is_credits_exempt(current_user),
+    )
 
 
 @router.get(

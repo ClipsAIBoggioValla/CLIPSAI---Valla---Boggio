@@ -43,7 +43,10 @@ def _filtro_marca(watermark: str | None, outro: str | None) -> str | None:
     """Filtergraph de overlay de marca. None si no hay marca aplicable."""
     parts: list[str] = []
     if _ruta_valida(watermark):
-        parts.append(f"movie={watermark}[wm];[in][wm]overlay=W-w-24:H-h-24:shortest=1")
+        parts.append(
+            f"movie={watermark}:loop=0,format=rgba,colorchannelmixer=aa=0.6[wm];"
+            "[in][wm]overlay=W-w-24:H-h-24:shortest=1"
+        )
     if _ruta_valida(outro):
         parts.append(f"movie={outro}[out]")
     if not parts:
@@ -84,7 +87,8 @@ def _agregar_subs(vf_parts: list[str], transcript: TranscriptData | None, config
 
 def _agregar_brand(vf_parts: list[str], config: RenderConfig) -> None:
     """Agrega el filtergraph de marca (watermark/outro) si aplica."""
-    brand = _brand_filter(config.watermark_path, config.outro_path)
+    watermark = config.watermark_path if config.watermark else None
+    brand = _brand_filter(watermark, config.outro_path)
     if brand:
         vf_parts.append(brand)
 

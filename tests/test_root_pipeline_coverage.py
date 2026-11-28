@@ -24,8 +24,12 @@ import whisper_transcriber as wt_mod  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
-def _reset_nvenc_cache():
+def _reset_nvenc_cache(monkeypatch):
     """Aísla el cache del sondeo NVENC entre tests (sin estado global cruzado)."""
+    import os
+
+    for key in ("HF_HOME", "HUGGINGFACE_HUB_CACHE"):
+        monkeypatch.setenv(key, os.environ.get(key, ""))
     vp_mod._probe_nvenc_cache = None
     yield
     vp_mod._probe_nvenc_cache = None
@@ -542,38 +546,46 @@ class TestCacheWhisper:
 
     def test_sin_volumen_usa_tmp(self, monkeypatch) -> None:
         monkeypatch.setattr(wt_mod.os.path, "isdir", lambda p: False)
-        assert wt_mod._directorio_cache_hf() == wt_mod._CACHE_HF_DEFAULT
+        assert Path(wt_mod._directorio_cache_hf()).name == "hub"
 
     def test_volumen_montado_pero_no_escribible_usa_tmp(self, monkeypatch) -> None:
         monkeypatch.setattr(wt_mod.os.path, "isdir", lambda p: True)
         monkeypatch.setattr(wt_mod.os, "access", lambda p, m: False)
-        assert wt_mod._directorio_cache_hf() == wt_mod._CACHE_HF_DEFAULT
+        assert Path(wt_mod._directorio_cache_hf()).name == "hub"
 
     def test_volumen_montado_y_escribible_usa_volumen(self, monkeypatch) -> None:
         monkeypatch.setattr(wt_mod.os.path, "isdir", lambda p: True)
         monkeypatch.setattr(wt_mod.os, "access", lambda p, m: True)
         makedirs = Mock()
         monkeypatch.setattr(wt_mod.os, "makedirs", makedirs)
-        assert wt_mod._directorio_cache_hf() == wt_mod._CACHE_HF_VOLUMEN
-        makedirs.assert_not_called()  # no toca /tmp si usa el volumen
+        assert Path(wt_mod._directorio_cache_hf()).name == "hub"
+        assert wt_mod.os.environ["HF_HOME"] == wt_mod._CACHE_HF_VOLUMEN
+        assert Path(wt_mod.os.environ["HUGGINGFACE_HUB_CACHE"]).name == "hub"
+        assert Path(wt_mod.os.environ["HUGGINGFACE_HUB_CACHE"]).parent == Path(wt_mod._CACHE_HF_VOLUMEN)
+        makedirs.assert_called_once()  # crea el subdirectorio hub en el volumen
 
     def test_permiso_denegado_al_crear_tmp_no_explota(self, monkeypatch) -> None:
         monkeypatch.setattr(wt_mod.os.path, "isdir", lambda p: False)
         monkeypatch.setattr(wt_mod.os, "makedirs", Mock(side_effect=PermissionError(13, "denied")))
-        assert wt_mod._directorio_cache_hf() == wt_mod._CACHE_HF_DEFAULT
+        assert Path(wt_mod._directorio_cache_hf()).name == "hub"
 
     def test_download_root_se_pasa_a_whisper_model(self, monkeypatch, tmp_path) -> None:
         """transcribir_audio invoca WhisperModel con download_root del helper."""
         construidos = []
+        wt_mod._WHISPER_MODEL_INSTANCES.clear()
 
         class FakeWhisper:
             def __init__(self, model_id, device=None, compute_type=None, download_root=None, local_files_only=False):
-                construidos.append({"model_id": model_id, "download_root": download_root})
+                construidos.append({
+                    "model_id": model_id,
+                    "download_root": download_root,
+                    "local_files_only": local_files_only,
+                })
 
         monkeypatch.setattr(wt_mod, "_importar_faster_whisper", lambda: FakeWhisper)
         monkeypatch.setattr(wt_mod, "detectar_device", lambda force_gpu: ("cuda", "float16"))
         monkeypatch.setattr(wt_mod, "_resolver_modelo", lambda m: ("fake/model", "/no/existe"))
-        monkeypatch.setattr(wt_mod, "_log_descarga_modelo", lambda cache, mid: None)
+        monkeypatch.setattr(wt_mod, "_snapshot_cacheado", lambda model, cache: None)
         monkeypatch.setattr(wt_mod, "_transcribir_segmentos", lambda model, audio, idioma, salida: salida)
         monkeypatch.setattr(wt_mod.os.path, "isdir", lambda p: False)
         monkeypatch.setattr(wt_mod.os, "makedirs", lambda p, exist_ok=False: None)
@@ -581,8 +593,73 @@ class TestCacheWhisper:
         resultado = wt_mod.transcribir_audio(str(tmp_path / "a.wav"), str(salida))
         assert resultado == str(salida)
         assert len(construidos) == 1
-        assert construidos[0]["download_root"] == wt_mod._CACHE_HF_DEFAULT
+        assert construidos[0]["download_root"] == "/no/existe"
         assert construidos[0]["model_id"] == "fake/model"
+        assert construidos[0]["local_files_only"] is False
+        wt_mod._WHISPER_MODEL_INSTANCES.clear()
+
+    def test_modelo_se_reutiliza_en_memoria(self, monkeypatch: Any) -> None:
+        wt_mod._WHISPER_MODEL_INSTANCES.clear()
+        model = object()
+        constructor = Mock(return_value=model)
+        monkeypatch.setattr(wt_mod, "_modelo_desde_cache", lambda _model, _root: ("/snapshot", True))
+        monkeypatch.setattr(wt_mod, "_crear_modelo_whisper", constructor)
+        first = wt_mod._cargar_modelo_whisper("repo/model", "cuda", "float16", "/cache/hub")
+        second = wt_mod._cargar_modelo_whisper("repo/model", "cuda", "float16", "/cache/hub")
+        assert first is second is model
+        constructor.assert_called_once()
+        wt_mod._WHISPER_MODEL_INSTANCES.clear()
+
+    def test_snapshot_hit_carga_sin_acceso_remoto(self, monkeypatch: Any) -> None:
+        wt_mod._WHISPER_MODEL_INSTANCES.clear()
+        construidos = []
+
+        class FakeWhisper:
+            def __init__(self, model_id, **kwargs):
+                construidos.append((model_id, kwargs["local_files_only"]))
+
+        monkeypatch.setattr(wt_mod, "_importar_faster_whisper", lambda: FakeWhisper)
+        monkeypatch.setattr(wt_mod, "_snapshot_cacheado", lambda _model, _root: "/cache/snapshot")
+        wt_mod._cargar_modelo_whisper("repo/model", "cuda", "float16", "/cache/hub")
+        assert construidos == [("/cache/snapshot", True)]
+        wt_mod._WHISPER_MODEL_INSTANCES.clear()
+
+    def test_snapshot_cacheado_evita_descarga(self, tmp_path: Path) -> None:
+        repo = tmp_path / "models--deepdml--faster-whisper-large-v3-turbo-ct2"
+        snapshot = repo / "snapshots" / "abc123"
+        snapshot.mkdir(parents=True)
+        (snapshot / "model.bin").write_bytes(b"model")
+        (repo / "refs").mkdir()
+        (repo / "refs" / "main").write_text("abc123", encoding="utf-8")
+        assert wt_mod._snapshot_cacheado("deepdml/faster-whisper-large-v3-turbo-ct2", str(tmp_path)) == str(snapshot)
+
+
+class TestWatermarkWorker:
+    def test_watermark_false_no_cambia_render(self, tmp_path: Path, monkeypatch: Any) -> None:
+        salida = tmp_path / "render.mp4"
+        salida.write_bytes(b"original")
+        run = Mock(side_effect=AssertionError("no debe ejecutar FFmpeg"))
+        monkeypatch.setattr(vp_mod.subprocess, "run", run)
+        assert vp_mod._aplicar_watermark(str(salida), None) is True
+        assert salida.read_bytes() == b"original"
+
+    def test_watermark_true_overlay_inferior_con_opacidad(self, tmp_path: Path, monkeypatch: Any) -> None:
+        salida = tmp_path / "render.mp4"
+        logo = tmp_path / "logo.png"
+        salida.write_bytes(b"original")
+        logo.write_bytes(b"logo")
+
+        def _run(command, **kwargs):
+            Path(command[-1]).write_bytes(b"watermarked")
+            return SimpleNamespace(returncode=0, stderr="")
+
+        monkeypatch.setattr(vp_mod.subprocess, "run", Mock(side_effect=_run))
+        assert vp_mod._aplicar_watermark(str(salida), str(logo)) is True
+        assert salida.read_bytes() == b"watermarked"
+        command = vp_mod.subprocess.run.call_args.args[0]
+        graph = command[command.index("-filter_complex") + 1]
+        assert "colorchannelmixer=aa=0.6" in graph
+        assert "overlay=W-w-24:H-h-24" in graph
 
 
 # ------------------------------------------------------------------ llm fallback (main.py)

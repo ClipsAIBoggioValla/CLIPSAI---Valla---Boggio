@@ -37,6 +37,7 @@ class UsuarioRead(_UsuarioBase):
     id: uuid.UUID
     created_at: datetime
     updated_at: datetime
+    is_admin: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -71,6 +72,7 @@ class UserResponse(BaseModel):
     avatar_url: str | None = Field(default=None, max_length=500)
     theme_preference: ThemePreference = Field(default="dark")
     created_at: datetime
+    is_admin: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -22,6 +22,7 @@ def _to_user_response(user: Usuario) -> UserResponse:
         "name": user.full_name,
         "avatar_url": getattr(user, "avatar_url", None),
         "theme_preference": getattr(user, "theme_preference", "dark") or "dark",
+        "is_admin": bool(getattr(user, "is_admin", False)),
         "created_at": user.created_at,
     }
     return UserResponse.model_validate(data)

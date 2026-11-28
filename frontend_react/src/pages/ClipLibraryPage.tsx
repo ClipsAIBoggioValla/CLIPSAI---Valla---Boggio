@@ -6,7 +6,9 @@ import { usePublishSSE } from '@/hooks/usePublishSSE'
 import FilterBar from '@/components/clip-library/FilterBar'
 import ClipResults from '@/components/clip-library/ClipResults'
 import PublishDialog from '@/components/clip-library/PublishDialog'
+import { getPlatformCaption } from '@/components/clip-library/publishCopy'
 import PreviewModal from '@/components/clip-library/PreviewModal'
+import RetrimEditorModal from '@/components/clip-library/RetrimEditorModal'
 import ClipLibraryHeader from '@/components/clip-library/ClipLibraryHeader'
 import { getVideoSrc } from '@/components/clip-library/helpers'
 
@@ -54,6 +56,7 @@ export default function ClipLibraryPage() {
   const [toast, setToast] = useState<string | null>(null)
   const [rerendering, setRerendering] = useState<string | null>(null)
   const [previewClip, setPreviewClip] = useState<ClipListItem | null>(null)
+  const [editingClip, setEditingClip] = useState<ClipListItem | null>(null)
   const [activePublishId, setActivePublishId] = useState<string | null>(null)
   const { status: sseStatus, socialPostUrl: sseUrl, isPublishing: ssePublishing } = usePublishSSE(activePublishId)
 
@@ -104,7 +107,7 @@ export default function ClipLibraryPage() {
 
   function openPublish(clip: ClipListItem) {
     setPublishClip(clip); setPlatform('tiktok')
-    setCaption(clip.title ? `${clip.title} #viral` : '¡Increíble momento! #RiverPlate')
+    setCaption(getPlatformCaption(clip, 'tiktok'))
     setWebhookUrl('')
   }
 
@@ -141,6 +144,11 @@ export default function ClipLibraryPage() {
 
   const handleDownload = async (clip: ClipListItem) => { await clipService.downloadClip(clip) }
 
+  function handleRetrimSaved() {
+    setEditingClip(null); setToast('Clip actualizado ✅')
+    setTimeout(() => setToast(null), 4000); fetchClips()
+  }
+
   return (
     <div className="max-w-6xl mx-auto">
       {toast && <div className="card-spark fixed top-4 right-4 z-[9999] !p-3 text-sm font-semibold text-[var(--text-primary)] shadow-[var(--brand-lime-glow)]">{displayToast(toast)}</div>}
@@ -151,11 +159,12 @@ export default function ClipLibraryPage() {
       <ClipResults
         data={data} loading={loading} error={error} viewMode={viewMode} hasFilters={hasFilters} page={page} totalPages={totalPages}
         rerendering={rerendering} publishing={publishing} ssePublishing={ssePublishing} sseStatus={sseStatus} activePublishId={activePublishId} sseUrl={sseUrl}
-        onFetchClips={fetchClips} onResetFilters={resetFilters} onSetPage={setPage} setPreviewClip={setPreviewClip} handleDownload={handleDownload} handleToggle={handleToggle} openPublish={openPublish}
+        onFetchClips={fetchClips} onResetFilters={resetFilters} onSetPage={setPage} setPreviewClip={setPreviewClip} handleDownload={handleDownload} handleToggle={handleToggle} openPublish={openPublish} onEdit={setEditingClip}
       />
 
       {previewClip && <PreviewModal clip={previewClip} sseUrl={sseUrl} activePublishId={activePublishId} onClose={() => setPreviewClip(null)} onDownload={handleDownload} onOpenPublish={(c) => { setPreviewClip(null); openPublish(c) }} getVideoSrc={(c) => getVideoSrc(c, API_BASE_URL)} />}
       {publishClip && <PublishDialog clip={publishClip} platform={platform} setPlatform={setPlatform} caption={caption} setCaption={setCaption} webhookUrl={webhookUrl} setWebhookUrl={setWebhookUrl} publishing={publishing} onClose={() => setPublishClip(null)} onSubmit={submitPublish} ssePublishing={ssePublishing} activePublishId={activePublishId} />}
+      {editingClip && <RetrimEditorModal clip={editingClip} onClose={() => setEditingClip(null)} onSaved={handleRetrimSaved} />}
     </div>
   )
 }

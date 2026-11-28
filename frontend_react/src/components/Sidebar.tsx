@@ -62,6 +62,12 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
                   <span>Subir Video</span>
                 </NavLink>
               </li>
+              <li className="sidebar-menu-item">
+                <NavLink to="/billing" className={linkCls} onClick={onClose}>
+                  <i className="bi bi-coin" />
+                  <span>Billing</span>
+                </NavLink>
+              </li>
             </ul>
           </div>
 

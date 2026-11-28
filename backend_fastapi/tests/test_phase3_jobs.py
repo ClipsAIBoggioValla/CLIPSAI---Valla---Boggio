@@ -20,6 +20,7 @@ import pytest
 
 import _fixtures
 from _fixtures import FakeSession, make_job, make_usuario, make_video
+from backend.core.schemas import RenderConfig
 
 from backend_fastapi.app.routers import jobs as jobs_router
 
@@ -253,11 +254,12 @@ def _mocks_render(tmp_path: Path, *, burn_crea: bool = True) -> dict[str, Mock]:
     editor.reframe_video = Mock(
         side_effect=lambda src, dst, **kw: _crea(dst, b"reframed-9x16")
     )
+    editor.overlay_watermark = Mock(side_effect=lambda src, _watermark: str(src))
 
     ffmpeg = Mock()
     ffmpeg.cut_segment = Mock(side_effect=lambda src, s, e, out: _crea(out, b"trimmed"))
     ffmpeg.build_hook_clip = Mock(
-        side_effect=lambda src, cs, ce, hs, he, out: _crea(out, b"hook+clip")
+        side_effect=lambda src, cs, ce, hs, he, out, **kwargs: _crea(out, b"hook+clip")
     )
     if burn_crea:
         ffmpeg.burn_subtitles = Mock(side_effect=lambda inp, ass, out: _crea(out, b"final"))
@@ -288,6 +290,7 @@ class TestRenderClipConAssYHook:
         segments: list[dict] | None = None,
         hook_sel: tuple | None = None,
         probe: Mock | None = None,
+        render_config: RenderConfig | None = None,
     ) -> tuple[str, dict]:
         storage = tmp_path / "clips"
         storage.mkdir(exist_ok=True)
@@ -296,6 +299,7 @@ class TestRenderClipConAssYHook:
         patches = [
             patch.object(jobs_router, "STORAGE_CLIPS_DIR", storage),
             patch("backend_fastapi.app.services.editor.reframe_video", mock["editor"].reframe_video),
+            patch("backend_fastapi.app.services.editor.overlay_watermark", mock["editor"].overlay_watermark),
             patch("backend_fastapi.app.services.ffmpeg_service.cut_segment", mock["ffmpeg"].cut_segment),
             patch("backend_fastapi.app.services.ffmpeg_service.build_hook_clip", mock["ffmpeg"].build_hook_clip),
             patch("backend_fastapi.app.services.ffmpeg_service.burn_subtitles", mock["ffmpeg"].burn_subtitles),
@@ -314,6 +318,7 @@ class TestRenderClipConAssYHook:
                 uuid_lib.uuid4(),
                 0,
                 "Titulo",
+                render_config=render_config,
             )
 
     def test_teaser_hook_con_ass_y_probe(self, tmp_path: Path) -> None:
@@ -321,7 +326,7 @@ class TestRenderClipConAssYHook:
         salida, meta = self._correr(
             tmp_path,
             mock,
-            hook_sel=(5.0, 8.0, {"mode": "teaser", "text": "hook"}),
+            hook_sel=(10.0, 15.0, {"mode": "teaser", "text": "hook"}),
             probe=_PROBE_OK,
         )
         _aux_assert_teaser_meta(meta)
@@ -334,6 +339,18 @@ class TestRenderClipConAssYHook:
         mock["ass"].write_ass_file.assert_called_once()
         mock["ffmpeg"].cut_segment.assert_called_once()
 
+    def test_watermark_local_se_aplica_solo_si_habilitado(self, tmp_path: Path) -> None:
+        mock = _mocks_render(tmp_path)
+        logo = tmp_path / "brand.png"
+        logo.write_bytes(b"brand")
+        _, meta = self._correr(
+            tmp_path,
+            mock,
+            render_config=RenderConfig(watermark=True, watermark_path=str(logo)),
+        )
+        mock["editor"].overlay_watermark.assert_called_once()
+        assert meta["watermark_applied"] is True
+
     def test_sin_segmentos_mueve_el_reframed(self, tmp_path: Path) -> None:
         mock = _mocks_render(tmp_path)
         salida, meta = self._correr(tmp_path, mock, segments=[])
@@ -344,7 +361,7 @@ class TestRenderClipConAssYHook:
     def test_hook_in_clip_sin_teaser(self, tmp_path: Path) -> None:
         mock = _mocks_render(tmp_path)
         _, meta = self._correr(
-            tmp_path, mock, hook_sel=(12.0, 15.0, {"mode": "in_clip"})
+            tmp_path, mock, hook_sel=(12.0, 17.0, {"mode": "in_clip"})
         )
         # in_clip no usa build_hook_clip sino cut_segment + ASS simple,
         # pero al haber hook el meta queda "hook+ass"
@@ -356,7 +373,7 @@ class TestRenderClipConAssYHook:
         mock = _mocks_render(tmp_path)
         mock["ass"].generate_hooked_ass = Mock(side_effect=RuntimeError("ass roto"))
         _, meta = self._correr(
-            tmp_path, mock, hook_sel=(5.0, 8.0, {"mode": "teaser"})
+            tmp_path, mock, hook_sel=(10.0, 15.0, {"mode": "teaser"})
         )
         assert meta["render"] == "hook"
         assert meta["ass_applied"] is False
@@ -1083,7 +1100,7 @@ class TestEndpointsJobsDirectos:
         from backend_fastapi.app.routers.jobs import create_job
 
         video = make_video(user.id)
-        db.seed(video)
+        db.seed(video, user)
         bg = Mock()
         bg.add_task = Mock(side_effect=[RuntimeError("bg roto"), None])
 
@@ -1091,6 +1108,28 @@ class TestEndpointsJobsDirectos:
         assert creado.status == "pending"
         assert bg.add_task.call_count == 2
         assert bg.add_task.call_args_list[1].args[0] is jobs_router._run_job
+
+    def test_create_job_persiste_render_config_con_asset_permitido(self, db, user, tmp_path, monkeypatch) -> None:
+        from fastapi import HTTPException
+
+        from backend_fastapi.app.routers.jobs import CreateJobRequest, create_job
+
+        asset_dir = tmp_path / "brand-assets"
+        asset_dir.mkdir()
+        logo = asset_dir / "logo.png"
+        logo.write_bytes(b"logo")
+        monkeypatch.setenv("CLIPSAI_BRAND_ASSETS_DIR", str(asset_dir))
+        video = make_video(user.id)
+        db.seed(video, user)
+        config = RenderConfig(watermark=True, watermark_path=str(logo))
+        created = create_job(video.id, db, user, Mock(), CreateJobRequest(render_config=config))
+        assert created.result_metadata["render_config"]["watermark"] is True
+        assert jobs_router._render_config_de_job(created) == config
+
+        outside = RenderConfig(watermark=True, watermark_path=str(tmp_path / "outside.png"))
+        with pytest.raises(HTTPException) as exc:
+            create_job(video.id, db, user, Mock(), CreateJobRequest(render_config=outside))
+        assert exc.value.status_code == 422
 
     def test_get_job_video_de_otro_usuario_404(self, db, user) -> None:
         import pytest as _pytest

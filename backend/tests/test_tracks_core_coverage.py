@@ -590,6 +590,19 @@ class TestRenderer:
         with pytest.raises(ValueError, match="fuera de rango 5-90s"):
             asyncio.run(renderer.render_clip(None, _candidate(120.0), config))
 
+    def test_watermark_renderconfig_true_y_false(self, tmp_path) -> None:
+        from backend.services.video_editor import renderer
+
+        logo = tmp_path / "logo.png"
+        logo.write_bytes(b"logo")
+        marcado = RenderConfig(watermark=True, watermark_path=str(logo))
+        desactivado = RenderConfig(watermark=False, watermark_path=str(logo))
+        graph = renderer._vf_final(renderer._vf_parts_de(None, marcado, tmp_path / "marked.mp4"))
+        graph_off = renderer._vf_final(renderer._vf_parts_de(None, desactivado, tmp_path / "plain.mp4"))
+        assert "colorchannelmixer=aa=0.6" in graph
+        assert "overlay=W-w-24:H-h-24" in graph
+        assert "overlay=" not in graph_off
+
     def test_render_fm_fm_fails_propagan_runtime(self) -> None:
         import subprocess as subprocess_real
 

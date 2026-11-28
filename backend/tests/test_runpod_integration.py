@@ -10,6 +10,7 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, patch
 
+from backend.core.schemas import RenderConfig
 from backend.handler import process_video_job
 from backend_fastapi.app.routers.videos import (
     ProcessVideoRequest,
@@ -80,6 +81,7 @@ class RunPodHandlerTests(unittest.TestCase):
             with (
                 patch.dict(sys.modules, {"engine": engine, "video_processor": video_processor}),
                 patch("backend.handler._download_file", side_effect=fake_download),
+                patch("backend.handler._materializar_watermark", return_value="/tmp/logo.png"),
                 patch("backend.handler._upload_to_r2", return_value=url_r2) as upload,
                 patch(
                     "backend.core.security.ssrf_guard.socket.getaddrinfo",
@@ -92,6 +94,7 @@ class RunPodHandlerTests(unittest.TestCase):
                             "video_url": "https://media.example/video.mp4",
                             "transcription_text": "00:00:00 - Hola",
                             "video_id": "video-123",
+                            "render_config": {"watermark": True, "watermark_path": "https://assets.example/logo.png"},
                         }
                     }
                 )
@@ -114,7 +117,14 @@ class RunPodHandlerTests(unittest.TestCase):
 
             engine.procesar_video.assert_called_once()
             video_processor.process_clip_vertical.assert_called_once()
+            self.assertEqual(video_processor.process_clip_vertical.call_args.kwargs["watermark_path"], "/tmp/logo.png")
             upload.assert_called_once()
+
+    def test_handler_ignora_ruta_local_de_watermark_del_cliente(self) -> None:
+        from backend.handler import _materializar_watermark
+
+        config = RenderConfig(watermark=True, watermark_path="C:/private/logo.png")
+        self.assertIsNone(_materializar_watermark(config, Path("/tmp")))
 
     def test_handler_marca_failed_cuando_el_engine_no_produce_clips(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -215,6 +225,25 @@ class RunPodClientTests(unittest.TestCase):
         self.assertEqual(kwargs["headers"]["Authorization"], "Bearer test-key")
         self.assertEqual(kwargs["json"]["input"]["video_url"], "https://media.example/video.mp4")
 
+    @patch.dict(
+        os.environ,
+        {"RUNPOD_API_KEY": "test-key", "RUNPOD_ENDPOINT_ID": "endpoint-123"},
+        clear=False,
+    )
+    @patch("backend_fastapi.app.services.runpod_service.requests.post")
+    def test_client_envia_render_config_al_worker(self, post: Mock) -> None:
+        response = Mock()
+        response.json.return_value = {"status": "COMPLETED", "output": {"clips": []}}
+        response.status_code = 200
+        post.return_value = response
+        config = RenderConfig(watermark=True, watermark_path="https://assets.example/logo.png")
+
+        process_video_via_runpod("https://media.example/video.mp4", render_config=config)
+
+        payload = post.call_args.kwargs["json"]["input"]["render_config"]
+        self.assertTrue(payload["watermark"])
+        self.assertEqual(payload["watermark_path"], "https://assets.example/logo.png")
+
     @patch.dict(os.environ, {}, clear=True)
     def test_client_requires_api_key(self) -> None:
         with self.assertRaisesRegex(RunPodError, "RUNPOD_API_KEY"):
@@ -248,7 +277,10 @@ class PresignedUploadUrlTests(unittest.TestCase):
             {"boto3": boto3_module, "botocore": botocore_module, "botocore.config": config_module},
         ):
             result = asyncio.run(
-                generate_upload_url(UploadUrlRequest(file_name="video.mp4", file_type="video/mp4"))
+                generate_upload_url(
+                    UploadUrlRequest(file_name="video.mp4", file_type="video/mp4"),
+                    SimpleNamespace(client=SimpleNamespace(host="test-client")),
+                )
             )
 
         self.assertEqual(result["upload_url"], "https://s3.example.test/upload")
@@ -397,6 +429,15 @@ class RunPodOrchestrationTests(unittest.TestCase):
             transcription_text=None,
             video_id=None,
         )
+
+    @patch("backend_fastapi.app.services.runpod_service.process_video_via_runpod")
+    def test_process_route_pasa_render_config(self, runpod_call: Mock) -> None:
+        runpod_call.return_value = {"status": "COMPLETED", "clips": []}
+        config = RenderConfig(watermark=True, watermark_path="https://assets.example/logo.png")
+
+        process_video(ProcessVideoRequest(video_url="https://media.example/video.mp4", render_config=config))
+
+        self.assertIs(runpod_call.call_args.kwargs["render_config"], config)
 
     def test_process_request_requires_exactly_one_video_source(self) -> None:
         with self.assertRaisesRegex(ValueError, "exactamente uno"):

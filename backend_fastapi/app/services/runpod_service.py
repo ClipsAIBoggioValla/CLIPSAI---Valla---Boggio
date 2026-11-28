@@ -118,6 +118,7 @@ def process_local_video_via_runpod(
     *,
     transcription_path: str | Path | None = None,
     video_id: str | None = None,
+    render_config: Any = None,
 ) -> dict[str, Any]:
     """Upload a local source to S3/R2 and process it in RunPod Serverless."""
     source = Path(video_path)
@@ -138,11 +139,10 @@ def process_local_video_via_runpod(
             Params={"Bucket": bucket, "Key": key},
             ExpiresIn=min(max(total_timeout + 600, 3600), 604800),
         )
-        return process_video_via_runpod(
-            video_url,
-            transcription_text=transcript_text,
-            video_id=video_id,
-        )
+        kwargs = {"transcription_text": transcript_text, "video_id": video_id}
+        if render_config is not None:
+            kwargs["render_config"] = render_config
+        return process_video_via_runpod(video_url, **kwargs)
     except RunPodError:
         raise
     except Exception as exc:
@@ -311,6 +311,7 @@ def _worker_input(
     transcription_url: str | None,
     transcription_text: str | None,
     video_id: str | None,
+    render_config: Any = None,
 ) -> dict[str, Any]:
     """Payload de entrada para el worker RunPod."""
     worker_input: dict[str, Any] = {"video_url": video_url.strip()}
@@ -320,6 +321,10 @@ def _worker_input(
         worker_input["transcription_text"] = transcription_text
     if video_id:
         worker_input["video_id"] = video_id
+    if render_config is not None:
+        config = render_config.model_dump(exclude_none=True) if hasattr(render_config, "model_dump") else render_config
+        if isinstance(config, dict):
+            worker_input["render_config"] = config
     return worker_input
 
 
@@ -394,6 +399,7 @@ def process_video_via_runpod(
     transcription_text: str | None = None,
     video_id: str | None = None,
     endpoint_id: str | None = None,
+    render_config: Any = None,
 ) -> dict[str, Any]:
     """Call ``/runsync`` and poll the job if RunPod returns it as in-progress.
 
@@ -405,7 +411,7 @@ def process_video_via_runpod(
     api_key, resolved_endpoint_id, request_timeout, total_timeout, poll_interval, api_base = _settings(endpoint_id)
     endpoint = f"{api_base}/{quote(resolved_endpoint_id, safe='')}/runsync"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    worker_input = _worker_input(video_url, transcription_url, transcription_text, video_id)
+    worker_input = _worker_input(video_url, transcription_url, transcription_text, video_id, render_config)
 
     data = _llamada_runsync(endpoint, headers, worker_input, request_timeout)
     _raise_for_job_failure(data)

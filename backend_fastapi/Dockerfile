@@ -18,12 +18,13 @@ RUN apt-get update \
 # Verificar que ffmpeg tenga libx264 (necesario para editor.py y ffmpeg_service.py)
 RUN ffmpeg -encoders 2>/dev/null | grep libx264 || (echo "ERROR: libx264 no disponible" && exit 1)
 
-COPY requirements.txt ./
+COPY backend_fastapi/requirements.txt ./
 RUN pip install -r requirements.txt
 
 # El modelo Whisper se descarga en el primer arranque si no está cacheado
 
-COPY app ./app
+COPY backend_fastapi/app ./app
+COPY backend ./backend
 
 # Storage efímero stateless (Koyeb / Google Cloud Run): clips y uploads en /tmp.
 # Sin disco persistente — los archivos finales viven en R2 (videos.clipsai.xyz).
