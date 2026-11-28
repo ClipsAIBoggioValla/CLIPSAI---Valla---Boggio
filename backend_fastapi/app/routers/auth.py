@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
@@ -12,6 +14,7 @@ from fastapi import Depends
 
 from ..deps import CurrentUser, DbSession
 from ..models import Usuario
+from ..services.credits_service import grant_free_trial
 from ..schemas import Token, UsuarioCreate, UsuarioLogin, UsuarioRead
 from ..security import create_access_token, hash_password, verify_password
 from ..core.security.rate_limiter import RateLimitExceeded, RateLimiter
@@ -68,11 +71,14 @@ def registro(payload: UsuarioCreate, db: DbSession, request: Request) -> Usuario
         )
 
     usuario = Usuario(
+        id=uuid.uuid4(),
         email=payload.email,
         hashed_password=hash_password(payload.password),
         full_name=payload.full_name,
+        is_admin=False,
     )
     db.add(usuario)
+    grant_free_trial(db, usuario)
     try:
         db.commit()
     except IntegrityError as exc:

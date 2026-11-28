@@ -253,7 +253,11 @@ def import_video_from_url(
     from .jobs import create_job_for_video
 
     try:
-        job = create_job_for_video(db, entity.id, background_tasks)
+        job = create_job_for_video(
+            db, entity.id, background_tasks, video=entity, is_admin=current_user.is_admin,
+        )
+    except HTTPException:
+        raise
     except Exception as exc:
         db.rollback()
         raise HTTPException(

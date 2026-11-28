@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS usuarios (
     email               VARCHAR(255)                NOT NULL UNIQUE,
     hashed_password     VARCHAR(255)                NOT NULL,   -- bcrypt (Issue 3)
     full_name           VARCHAR(100),
+    credits_balance     INTEGER                     NOT NULL DEFAULT 0 CHECK (credits_balance >= 0),
+    is_admin            BOOLEAN                     NOT NULL DEFAULT FALSE,
     created_at          TIMESTAMP WITH TIME ZONE    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMP WITH TIME ZONE    NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -115,6 +117,33 @@ DROP TRIGGER IF EXISTS trg_jobs_set_updated_at ON jobs;
 CREATE TRIGGER trg_jobs_set_updated_at
     BEFORE UPDATE ON jobs
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+
+-- =============================================================================
+-- Tabla: credit_transactions
+-- Ledger auditable; amount es un delta (usage negativo, trial/refund positivo).
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS credit_transactions (
+    id                  UUID                        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id             UUID                        NOT NULL,
+    job_id              UUID,
+    transaction_type    VARCHAR(20)                 NOT NULL,
+    amount              INTEGER                     NOT NULL CHECK (amount <> 0),
+    idempotency_key     VARCHAR(100)                 NOT NULL UNIQUE,
+    created_at          TIMESTAMP WITH TIME ZONE    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_credit_transactions_usuario
+        FOREIGN KEY (user_id) REFERENCES usuarios (id)
+        ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT fk_credit_transactions_job
+        FOREIGN KEY (job_id) REFERENCES jobs (id)
+        ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT chk_credit_transactions_type
+        CHECK (transaction_type IN ('free_trial', 'usage', 'refund'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_credit_transactions_user_created
+    ON credit_transactions (user_id, created_at DESC);
 
 
 -- =============================================================================

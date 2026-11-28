@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, String, func, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Integer, String, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,11 +19,15 @@ from .mixins import TimestampMixin
 
 class Usuario(Base, TimestampMixin):
     __tablename__ = "usuarios"
-    __table_args__ = {"extend_existing": True}
+    __table_args__ = (
+        CheckConstraint("credits_balance >= 0", name="chk_usuarios_credits_balance"),
+        {"extend_existing": True},
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
+        default=uuid.uuid4,
         server_default=text("gen_random_uuid()"),
     )
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
@@ -31,6 +35,8 @@ class Usuario(Base, TimestampMixin):
     full_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     theme_preference: Mapped[str | None] = mapped_column(String(20), nullable=True, server_default="dark")
+    credits_balance: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
 
     def __repr__(self) -> str:  # pragma: no cover
