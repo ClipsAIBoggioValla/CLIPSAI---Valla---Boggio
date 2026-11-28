@@ -6,11 +6,14 @@ import logging
 import uuid
 from unittest.mock import Mock
 
-from _fixtures import build_client, make_clip, make_job
+from _fixtures import FakeResult, build_client, make_clip, make_job, make_usuario
 
 from backend_fastapi.app.core import security_middleware as sm
 from backend_fastapi.app.core.logging_security import RedactionFilter, redact
+from backend_fastapi.app.core.session import SESSION_COOKIE_NAME, set_session_cookie
 from backend_fastapi.app.routers.clips import _public_download_allowed
+from backend_fastapi.app.deps import _usuario_desde_token
+from backend_fastapi.app.security.jwt import create_access_token
 from backend_fastapi.app.services.media_signing import signed_query, verify_signed_query
 
 
@@ -53,7 +56,7 @@ def test_cors_acepta_origen_local_permitido(client) -> None:
     )
 
     assert res.headers["access-control-allow-origin"] == "http://localhost:3000"
-    assert res.headers.get("access-control-allow-credentials") != "true"
+    assert res.headers.get("access-control-allow-credentials") == "true"
 
 
 def test_cors_acepta_apex_de_clipsai(client) -> None:
@@ -63,6 +66,56 @@ def test_cors_acepta_apex_de_clipsai(client) -> None:
     )
 
     assert res.headers["access-control-allow-origin"] == "https://clipsai.xyz"
+
+
+def test_cookie_de_sesion_es_httponly_y_samesite() -> None:
+    from starlette.responses import Response
+
+    response = Response()
+    set_session_cookie(response, "token")
+
+    cookie = response.headers["set-cookie"]
+    assert "HttpOnly" in cookie
+    assert "SameSite=lax" in cookie
+    assert SESSION_COOKIE_NAME in cookie
+
+
+def test_csrf_rechaza_origen_ajeno_con_cookie(client) -> None:
+    client.cookies.set(SESSION_COOKIE_NAME, "cookie-de-prueba")
+    try:
+        res = client.post(
+            "/auth/login",
+            json={"email": "a@b.com", "password": "password123"},
+            headers={"Origin": "https://evil.example"},
+        )
+        assert res.status_code == 403
+    finally:
+        client.cookies.clear()
+
+
+def test_token_version_revoca_sesiones(db) -> None:
+    from fastapi import HTTPException
+    import pytest
+
+    user = make_usuario(token_version=1)
+    db.push_result(FakeResult(scalar=user))
+    token = create_access_token(user.id, token_version=0)
+
+    with pytest.raises(HTTPException) as exc:
+        _usuario_desde_token(token, db)
+    assert exc.value.status_code == 401
+
+
+def test_cookie_autentica_me(db) -> None:
+    user = make_usuario(token_version=0)
+    db.push_result(FakeResult(scalar=user))
+    anon = build_client(db, use_real_auth=True)
+    try:
+        anon.cookies.set(SESSION_COOKIE_NAME, create_access_token(user.id, token_version=0))
+        res = anon.get("/auth/me")
+        assert res.status_code == 200
+    finally:
+        anon.close()
 
 
 def test_rate_limit_global_devuelve_429(client) -> None:

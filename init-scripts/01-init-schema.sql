@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
     email               VARCHAR(255)                NOT NULL UNIQUE,
     hashed_password     VARCHAR(255)                NOT NULL,   -- bcrypt (Issue 3)
     full_name           VARCHAR(100),
+    token_version       INTEGER                     NOT NULL DEFAULT 0,
     created_at          TIMESTAMP WITH TIME ZONE    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMP WITH TIME ZONE    NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

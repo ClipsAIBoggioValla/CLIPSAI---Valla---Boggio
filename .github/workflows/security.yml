@@ -1,0 +1,67 @@
+name: Security
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+
+jobs:
+  backend-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Instalar dependencias de test
+        run: pip install -r backend_fastapi/requirements-test.txt
+      - name: Tests de seguridad
+        env:
+          PYTHONPATH: .
+        run: |
+          pytest -q \
+            backend_fastapi/tests/test_security_hardening.py \
+            backend_fastapi/tests/test_routers_coverage.py::TestAuth \
+            backend_fastapi/tests/test_routers_coverage.py::TestPublishStream \
+            backend_fastapi/tests/test_phase3_small_gaps.py::TestGetCurrentUserBrechas
+      - name: Auditoría de dependencias Python
+        run: |
+          pip install pip-audit
+          grep -v '^torch' backend_fastapi/requirements.txt | grep -v '^--' > /tmp/req-audit.txt
+          pip-audit -r /tmp/req-audit.txt
+
+  frontend-security:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend_react
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend_react/package-lock.json
+      - name: Instalar dependencias
+        run: npm ci
+      - name: Auditoría de dependencias npm
+        run: npm audit --audit-level=high
+      - name: Build de producción
+        run: npm run build
+
+  secrets-history:
+    # No bloquea el merge mientras el historial tenga claves conocidas:
+    # requiere rotarlas y purgar el historial (acción manual documentada en
+    # docs/SECURITY_HARDENING.md). El job queda como señal visible.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks (historial, redactado)
+        run: |
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest \
+            detect --source /repo --redact --no-banner

@@ -79,29 +79,44 @@ def _fallback_db_url(url: str) -> str:
 
 # Inicialización perezosa de la base de datos
 engine = None
+migration_engine = None
 SessionLocal = None
 
-db_url = _settings.database_url
 
-if db_url:
-    try:
-        _resolved_url = _fallback_db_url(db_url)
-        engine_options = {"pool_pre_ping": True, "future": True}
-        if _resolved_url.startswith("postgresql+"):
-            engine_options.update(
-                pool_recycle=240,
-                connect_args={
-                    "keepalives": 1,
-                    "keepalives_idle": 30,
-                    "keepalives_interval": 10,
-                    "keepalives_count": 5,
-                },
-            )
-        engine = create_engine(
-            _resolved_url,
-            **engine_options,
+def _engine_options(url: str) -> dict:
+    options = {"pool_pre_ping": True, "future": True}
+    if url.startswith("postgresql+"):
+        options.update(
+            pool_recycle=240,
+            connect_args={
+                "keepalives": 1,
+                "keepalives_idle": 30,
+                "keepalives_interval": 10,
+                "keepalives_count": 5,
+            },
         )
+    return options
 
+
+def _crear_engine(url: str):
+    resolved = _fallback_db_url(url)
+    return create_engine(resolved, **_engine_options(resolved))
+
+
+def _probar_conexion(db_engine) -> None:
+    from sqlalchemy import text
+
+    with db_engine.connect() as conn:
+        conn.execute(text("SELECT 1"))
+
+
+runtime_url = _settings.app_database_url.strip() or _settings.database_url
+migration_url = _settings.database_url
+
+if runtime_url:
+    try:
+        engine = _crear_engine(runtime_url)
+        migration_engine = _crear_engine(migration_url) if migration_url else engine
         SessionLocal = sessionmaker(
             bind=engine,
             autoflush=False,
@@ -109,14 +124,9 @@ if db_url:
             expire_on_commit=False,
             class_=Session,
         )
-
-        # Probar conexión
-        from sqlalchemy import text
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        
+        _probar_conexion(engine)
         DB_AVAILABLE = True
-        logger.info("Database connected successfully.")
+        logger.info("Database connected successfully (runtime role).")
     except Exception as e:
         logger.warning(f"Database connection failed on startup: {e}. Running in DB-less mode.")
         DB_AVAILABLE = False

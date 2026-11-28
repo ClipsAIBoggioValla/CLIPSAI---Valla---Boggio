@@ -7,16 +7,15 @@ import json
 import time
 import uuid
 from collections.abc import AsyncIterator
-from typing import Annotated, Any
+from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from ..database import SessionLocal
-from ..deps import DbSession
-from ..models import Clip, Job, Usuario, Video
-from ..security.jwt import TokenDecodeError, TokenExpiredError, decode_access_token
+from ..deps import CurrentUser, DbSession
+from ..models import Clip, Job, Video
 
 router = APIRouter(prefix="/clips", tags=["publish-stream"])
 POLL_INTERVAL_SECONDS = 2
@@ -58,17 +57,6 @@ def _effective_status(clip: Clip) -> str:
 
 def _event(event_name: str, payload: dict[str, Any]) -> str:
     return f"event: {event_name}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
-
-
-def _usuario_del_token(token: str) -> uuid.UUID:
-    """user_id del JWT; 401 si expiró o es inválido."""
-    try:
-        claims = decode_access_token(token)
-        return uuid.UUID(str(claims["sub"]))
-    except TokenExpiredError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail={"error": "token_expired", "detail": "Token expirado"}) from exc
-    except (TokenDecodeError, KeyError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail={"error": "invalid_token", "detail": "Token inválido"}) from exc
 
 
 def _clip_de_autorizacion(db: Session, clip_id: uuid.UUID, user_id: uuid.UUID) -> Clip:
@@ -197,14 +185,13 @@ async def publish_stream(
     clip_id: uuid.UUID,
     request: Request,
     db: DbSession,
-    token: Annotated[str, Query(description="JWT para clientes EventSource")],
+    current_user: CurrentUser,
 ) -> StreamingResponse:
-    """Emite el estado cada dos segundos y termina en estado terminal o tras 90s."""
-    user_id = _usuario_del_token(token)
+    """Emite el estado cada dos segundos y termina en estado terminal o tras 90s.
 
-    if db.get(Usuario, user_id) is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail={"error": "user_not_found", "detail": "Usuario no encontrado"})
-
+    Autenticación por cookie HttpOnly (EventSource con withCredentials) o Bearer.
+    """
+    user_id = current_user.id
     _clip_de_autorizacion(db, clip_id, user_id)
     # La sesión de autorización no debe retener una conexión durante los 90s del stream.
     db.close()

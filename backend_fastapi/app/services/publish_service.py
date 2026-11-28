@@ -277,11 +277,11 @@ def _validar_refresh_tiktok(resp: requests.Response) -> None:
     """Si la respuesta HTTP o el JSON indican error, lanza con el body exacto para auditoría."""
     # Si la respuesta HTTP no es exitosa (status != 200 o JSON contiene error / error_code != 0)
     if resp.status_code != 200:
-        _fallar_refresh_tiktok(resp, f"TikTok refresh failed status={resp.status_code} body={resp.text}")
+        _fallar_refresh_tiktok(resp, f"TikTok refresh failed status={resp.status_code}")
     data = _json_de_respuesta(resp)
     # Detecta error en JSON aunque status 200
     if _error_json_refresh_tiktok(data) or _error_data_anidada_tiktok(data):
-        _fallar_refresh_tiktok(resp, f"TikTok refresh error body={resp.text}")
+        _fallar_refresh_tiktok(resp, f"TikTok refresh error status={resp.status_code}")
 
 
 def _tokens_renovados_tiktok(data: dict, inner: dict) -> tuple[str | None, str | None]:
@@ -309,7 +309,7 @@ def _aplicar_refresh_tiktok(account: SocialAccount, resp: requests.Response, ref
     new_access_token, new_refresh_token = _tokens_renovados_tiktok(data, inner)
     if not new_access_token:
         logger.error("[publish] Error renovando token TikTok status=%s", resp.status_code)
-        raise Exception(f"TikTok refresh failed - no access_token in body={resp.text}")
+        raise Exception(f"TikTok refresh failed - no access_token (status={resp.status_code})")
     account.access_token = cifrar_token(new_access_token)
     if not new_refresh_token:
         new_refresh_token = refresh_token
@@ -643,12 +643,23 @@ def _permalink_youtube(data: dict) -> tuple[str, str]:
     return str(video_id), permalink
 
 
-def _detalle_error_api(resp: requests.Response) -> Any:
-    """Detail de error de una API: JSON si es posible, texto truncado si no."""
+def _detalle_error_api(resp: requests.Response) -> str:
+    """Detalle seguro de error: status + code/message, sin volcar el body crudo."""
     try:
-        return resp.json()
+        data = resp.json()
     except Exception:
-        return resp.text[:1000]
+        return f"status={resp.status_code}"
+    if not isinstance(data, dict):
+        return f"status={resp.status_code}"
+    err = data.get("error") if isinstance(data.get("error"), dict) else data
+    code = err.get("code") or data.get("error_code")
+    message = err.get("message") or data.get("message")
+    parts = [f"status={resp.status_code}"]
+    if code:
+        parts.append(f"code={code}")
+    if message:
+        parts.append(f"message={str(message)[:200]}")
+    return " ".join(parts)
 
 
 def _texto_o_fallback(caption: str | None, clip: Clip, fallback: str) -> str:
@@ -1032,16 +1043,11 @@ def _leer_archivo_tiktok(file_path: str) -> int:
     return file_size
 
 
-def _detalle_error_upload_tiktok(resp: requests.Response) -> Any:
-    """Detalle JSON o texto (truncado) de una respuesta errónea del init de TikTok."""
-    try:
-        detail = resp.json()
-        logger.error(f"[TIKTOK API ERROR] {resp.status_code}: error_code={detail.get('error_code')} message={detail.get('message')} detail={detail}")
-        return detail
-    except Exception:
-        detail = resp.text[:1000]
-        logger.error(f"[TIKTOK API ERROR] {resp.status_code}: {detail}")
-        return detail
+def _detalle_error_upload_tiktok(resp: requests.Response) -> str:
+    """Detalle seguro del init de TikTok: status + code/message."""
+    detail = _detalle_error_api(resp)
+    logger.error("[TIKTOK API ERROR] %s", detail)
+    return detail
 
 
 def _validar_upload_tiktok(resp: requests.Response) -> None:
@@ -1186,7 +1192,7 @@ def _subir_archivo_tiktok(upload_url: str, file_path: str, file_size: int) -> No
         logger.info("[TIKTOK UPLOAD] status=%s", resp_put.status_code)
         if resp_put.status_code not in (200, 201, 204):
             logger.error("[TIKTOK UPLOAD ERROR] status=%s", resp_put.status_code)
-            raise HTTPException(status_code=400, detail=f"TikTok upload error {resp_put.status_code}: {resp_put.text[:1000]}")
+            raise HTTPException(status_code=400, detail=f"TikTok upload error {resp_put.status_code}")
         logger.info("[TIKTOK UPLOAD] Confirmación subida exitosa status={}".format(resp_put.status_code))
     except HTTPException:
         raise

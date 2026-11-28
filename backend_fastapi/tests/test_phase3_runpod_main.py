@@ -492,7 +492,7 @@ def _aux_assert_options_origen_lista(tc) -> None:
     r = tc.options("/health", headers={"Origin": "http://localhost:3000"})
     assert r.status_code == 200
     assert r.headers["access-control-allow-origin"] == "http://localhost:3000"
-    assert "access-control-allow-credentials" not in r.headers
+    assert r.headers["access-control-allow-credentials"] == "true"
 
 
 def _aux_assert_options_regex_y_malo(tc) -> None:

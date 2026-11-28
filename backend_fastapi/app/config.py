@@ -129,6 +129,8 @@ class Settings(BaseSettings):
         default="postgresql+psycopg2://clipsai:changeme_placeholder@db:5432/clipsai",
         validation_alias="DATABASE_URL",
     )
+    # Rol de runtime con privilegios mínimos. Si está vacío, se usa DATABASE_URL.
+    app_database_url: str = Field(default="", validation_alias="APP_DATABASE_URL")
 
     def model_post_init(self, __context):  # type: ignore[override]
         _validar_jwt_produccion(self)

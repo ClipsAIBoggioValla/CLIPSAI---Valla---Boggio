@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Response, status
 from sqlalchemy import select
 
 from ..deps import CurrentUser, DbSession
 from ..models import Usuario
 from ..schemas.usuario import PasswordChange, UserResponse, UserUpdate, UserUpdateSimple
-from ..security import hash_password, verify_password
+from ..core.session import set_session_cookie
+from ..security import create_access_token, hash_password, verify_password
 
 router = APIRouter(tags=["users"])
 
@@ -105,18 +106,21 @@ def patch_me(payload: UserUpdate, current_user: CurrentUser, db: DbSession) -> U
 @router.post("/users/me/change-password/", status_code=status.HTTP_200_OK, include_in_schema=False)
 @router.post("/me/change-password", status_code=status.HTTP_200_OK, include_in_schema=False)
 @router.post("/me/change-password/", status_code=status.HTTP_200_OK, include_in_schema=False)
-def change_password_post(payload: PasswordChange, current_user: CurrentUser, db: DbSession) -> dict[str, str]:
+def change_password_post(payload: PasswordChange, current_user: CurrentUser, db: DbSession, response: Response) -> dict[str, str]:
     if not verify_password(payload.current_password, current_user.hashed_password):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La contraseña actual es incorrecta")
     if payload.current_password == payload.new_password:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La nueva contraseña debe ser diferente")
     current_user.hashed_password = hash_password(payload.new_password)
+    current_user.token_version = int(getattr(current_user, "token_version", 0) or 0) + 1
     db.add(current_user)
     db.commit()
+    token = create_access_token(subject=current_user.id, token_version=current_user.token_version)
+    set_session_cookie(response, token)
     return {"detail": "Contraseña actualizada correctamente"}
 
 
 @router.put("/me/password", status_code=status.HTTP_200_OK, summary="Cambiar contraseña alias PUT")
 @router.put("/me/password/", status_code=status.HTTP_200_OK, include_in_schema=False)
-def change_password_put(payload: PasswordChange, current_user: CurrentUser, db: DbSession) -> dict[str, str]:
-    return change_password_post(payload, current_user, db)
+def change_password_put(payload: PasswordChange, current_user: CurrentUser, db: DbSession, response: Response) -> dict[str, str]:
+    return change_password_post(payload, current_user, db, response)

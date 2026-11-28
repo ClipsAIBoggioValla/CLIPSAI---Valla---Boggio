@@ -11,7 +11,9 @@ from typing import Any
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
+from .cors import origin_is_allowed
 from .security.rate_limiter import RateLimiter, RateLimitExceeded
+from .session import SESSION_COOKIE_NAME
 
 logger = logging.getLogger("clipsai.security")
 
@@ -103,6 +105,29 @@ def _rate_limited_response(request_id: str) -> JSONResponse:
     )
 
 
+_CSRF_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def _csrf_ok(request: Request) -> bool:
+    """SameSite + validación de Origin/Referer para requests con cookie de sesión."""
+    if request.method not in _CSRF_METHODS:
+        return True
+    if SESSION_COOKIE_NAME not in request.cookies:
+        return True  # clientes Bearer/API sin cookie
+    origin = request.headers.get("origin") or request.headers.get("referer")
+    if not origin:
+        return True  # clientes no navegador
+    return origin_is_allowed(origin)
+
+
+def _csrf_failed_response(request_id: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=403,
+        content={"detail": "Origen no permitido para una operación con sesión"},
+        headers={"X-Request-ID": request_id},
+    )
+
+
 def _apply_rate_limit(request: Request, request_id: str) -> JSONResponse | None:
     if request.method == "OPTIONS" or _skip_rate_limit(request.url.path):
         return None
@@ -130,6 +155,15 @@ async def security_middleware(request: Request, call_next: Any) -> Any:
     """Rate limit, request id, headers de seguridad y logging de eventos."""
     request_id = _request_id(request)
     request.state.request_id = request_id
+
+    if not _csrf_ok(request):
+        logger.warning(
+            "security.csrf_rejected method=%s path=%s ip=%s request_id=%s",
+            request.method, request.url.path, _client_ip(request), request_id,
+        )
+        response = _csrf_failed_response(request_id)
+        _security_headers(request, response, request.url.path)
+        return response
 
     limited = _apply_rate_limit(request, request_id)
     if limited is not None:

@@ -1,28 +1,14 @@
 import { ApiError, type ApiErrorDetail } from '@/types/api'
 
-export const TOKEN_KEY = 'clipsai_token'
-
 const RAW_BASE_URL: string =
   ((import.meta as unknown as { env?: Record<string, string> })?.env?.VITE_API_URL ?? '').trim()
 
 const BASE_URL = (RAW_BASE_URL || 'https://clipsai-backend.onrender.com').replace(/\/$/, '')
 
-function getToken(): string | null {
-  try {
-    return localStorage.getItem(TOKEN_KEY)
-  } catch {
-    return null
-  }
-}
-
-function buildHeaders(extra?: HeadersInit, includeAuth = true): Headers {
+function buildHeaders(extra?: HeadersInit): Headers {
   const h = new Headers(extra)
   if (!h.has('Accept')) h.set('Accept', 'application/json')
   h.set('ngrok-skip-browser-warning', 'true')
-  if (includeAuth) {
-    const tok = getToken()
-    if (tok) h.set('Authorization', `Bearer ${tok}`)
-  }
   return h
 }
 
@@ -86,11 +72,6 @@ function redirectToLoginIfOutside(): void {
 function handleUnauthorized(path: string, status: number, detail: string): void {
   if (!shouldRedirectOn401(path)) return
   if (!isSessionFailure(status, detail)) return
-  try {
-    localStorage.removeItem(TOKEN_KEY)
-  } catch {
-    /* ignore */
-  }
   redirectToLoginIfOutside()
 }
 
@@ -146,8 +127,8 @@ async function parseSuccess<T>(res: Response): Promise<T> {
 }
 
 export async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', body, headers, noAuth = false, timeout = 10000 } = opts
-  const finalHeaders = buildHeaders(headers, !noAuth)
+  const { method = 'GET', body, headers, timeout = 10000 } = opts
+  const finalHeaders = buildHeaders(headers)
   const abortMessage = abortMessageFor(timeout)
   const res = await fetchWithTimeout(`${BASE_URL}${path}`, {
     method,

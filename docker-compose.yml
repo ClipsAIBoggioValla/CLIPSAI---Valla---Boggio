@@ -35,6 +35,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+      APP_DB_USER: ${APP_DB_USER:-clipsai_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-clipsai_app_dev}
       PGTZ: ${POSTGRES_TZ:-UTC}
       TZ: ${POSTGRES_TZ:-UTC}
     ports:
@@ -67,6 +69,9 @@ services:
     environment:
       PYTHONUNBUFFERED: 1
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      # Rol de runtime con DML mínimo (ASH). En volúmenes ya existentes,
+      # ejecutar una vez init-scripts/03-app-role.sh como owner.
+      APP_DATABASE_URL: postgresql+psycopg2://${APP_DB_USER:-clipsai_app}:${APP_DB_PASSWORD:-clipsai_app_dev}@db:5432/${POSTGRES_DB}
       JWT_SECRET: ${JWT_SECRET}
       JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
       JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-1440}

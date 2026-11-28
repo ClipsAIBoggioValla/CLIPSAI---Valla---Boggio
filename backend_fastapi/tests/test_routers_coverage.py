@@ -809,17 +809,21 @@ class TestPublishStream:
     def _endpoint(self, user_id: Any) -> str:
         return f"/clips/{_fixtures.uuid.uuid4()}/publish-stream"
 
-    def test_401_invalid_token(self, client) -> None:
-        res = client.get(self._endpoint("x"), params={"token": "token-inventado"})
-        assert res.status_code == 401
-        assert res.json()["detail"]["error"] == "invalid_token"
+    def test_401_token_invalido(self, db) -> None:
+        no_auth_client = build_client(db, use_real_auth=True)
+        try:
+            res = no_auth_client.get(self._endpoint("x"), headers={"Authorization": "Bearer token-inventado"})
+            assert res.status_code == 401
+            assert "Token invalido" in str(res.json()["detail"])
+        finally:
+            no_auth_client.close()
 
     def test_401_token_expirado(self, db, user) -> None:
         expired = create_access_token(user.id, expires_delta=timedelta(seconds=-1))
-        no_auth_client = build_client(db)
+        no_auth_client = build_client(db, use_real_auth=True)
         try:
-            res = no_auth_client.get(self._endpoint(user.id), params={"token": expired})
+            res = no_auth_client.get(self._endpoint(user.id), headers={"Authorization": f"Bearer {expired}"})
             assert res.status_code == 401
-            assert res.json()["detail"]["error"] == "token_expired"
+            assert "Token expirado" in str(res.json()["detail"])
         finally:
             no_auth_client.close()

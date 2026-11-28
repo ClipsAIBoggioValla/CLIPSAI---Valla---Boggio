@@ -78,13 +78,13 @@ class TestGetCurrentUserBrechas:
         db = FakeSession()
         token = create_access_token(subject="no-es-uuid")
         with pytest.raises(HTTPException, match="401"):
-            get_current_user(self._bearer(token), db)
+            get_current_user(self._bearer(token), None, db)
 
     def test_usuario_inexistente(self, db) -> None:
         token = create_access_token(subject=str(uuid_lib.uuid4()))
         db.push_result(FakeResult(scalar=None))
         with pytest.raises(HTTPException, match="Usuario no encontrado"):
-            get_current_user(self._bearer(token), db)
+            get_current_user(self._bearer(token), None, db)
 
 
 class TestClipCommon:

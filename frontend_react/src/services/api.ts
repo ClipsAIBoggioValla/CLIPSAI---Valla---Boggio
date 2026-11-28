@@ -1,4 +1,4 @@
-import { http, request, TOKEN_KEY } from '@/lib/apiClient'
+import { http, request } from '@/lib/apiClient'
 import { buildClipListQuery, normalizeJob, normalizeVideo, triggerBlobDownload, uploadFileToSignedUrl } from 'frontend_common/services/shared'
 import type {
   AuthToken,
@@ -25,6 +25,9 @@ export const authService = {
   },
   me(): Promise<AuthUser> {
     return http.get<AuthUser>('/auth/me')
+  },
+  logout(): Promise<{ detail: string }> {
+    return http.postJson<{ detail: string }>('/auth/logout', {})
   },
 }
 
@@ -131,14 +134,9 @@ export const clipService = {
     return http.delete<void>(`/clips/${clipId}`)
   },
   async downloadClip(clip: import('@/types/api').ClipListItem): Promise<void> {
-    const token = readStoredToken()
     const url = buildDownloadUrl(clip)
-    await tryDownload(url, token, `${clip.title || clip.id}.mp4`, () => window.open(url, '_blank'))
+    await tryDownload(url, `${clip.title || clip.id}.mp4`, () => window.open(url, '_blank'))
   },
-}
-
-function readStoredToken(): string | null {
-  try { return localStorage.getItem(TOKEN_KEY) } catch { return null }
 }
 
 function cacheBustParam(clip: import('@/types/api').ClipListItem): string {
@@ -152,10 +150,9 @@ function buildDownloadUrl(clip: import('@/types/api').ClipListItem): string {
   return `${BASE_URL}/clips/${clip.id}/descarga?${cacheBustParam(clip)}`
 }
 
-async function tryDownload(url: string, token: string | null, filename: string, openFallback: () => void): Promise<void> {
+async function tryDownload(url: string, filename: string, openFallback: () => void): Promise<void> {
   try {
     const headers: Record<string, string> = { 'ngrok-skip-browser-warning': 'true' }
-    if (token) headers['Authorization'] = `Bearer ${token}`
     const res = await fetch(url, { headers, credentials: 'include' })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const blob = await res.blob()
@@ -177,10 +174,9 @@ async function errorDetailFromResponse(res: Response, fallback: string): Promise
 }
 
 async function fetchBlob(url: string): Promise<{ blob: Blob; contentDisposition: string | null }> {
-  const token = readStoredToken()
   const res = await fetch(url, {
     credentials: 'include',
-    headers: { 'ngrok-skip-browser-warning': 'true', ...(token ? { Authorization: `Bearer ${token}` } : {}) } as HeadersInit,
+    headers: { 'ngrok-skip-browser-warning': 'true' } as HeadersInit,
   })
   if (!res.ok) throw new Error(await errorDetailFromResponse(res, `HTTP ${res.status}`))
   return { blob: await res.blob(), contentDisposition: res.headers.get('Content-Disposition') }

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -15,6 +15,7 @@ from ..models import Usuario
 from ..schemas import Token, UsuarioCreate, UsuarioLogin, UsuarioRead
 from ..security import create_access_token, hash_password, verify_password
 from ..core.security.rate_limiter import RateLimitExceeded, RateLimiter
+from ..core.session import clear_session_cookie, set_session_cookie
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 _auth_limiter = RateLimiter(max_requests=5, window_seconds=60)
@@ -92,11 +93,13 @@ def registro(payload: UsuarioCreate, db: DbSession, request: Request) -> Usuario
     response_model=Token,
     summary="Login con JSON (email + password)",
 )
-def login(payload: UsuarioLogin, db: DbSession, request: Request) -> Token:
-    """Login para clientes que envian JSON."""
+def login(payload: UsuarioLogin, db: DbSession, request: Request, response: Response) -> Token:
+    """Login para clientes que envian JSON; setea cookie HttpOnly."""
     _verificar_rate_limit_auth(request)
     usuario = _autenticar(db, payload.email, payload.password)
-    return Token(access_token=create_access_token(subject=usuario.id))
+    token = create_access_token(subject=usuario.id, token_version=getattr(usuario, "token_version", 0))
+    set_session_cookie(response, token)
+    return Token(access_token=token)
 
 
 @router.post(
@@ -108,6 +111,7 @@ def login_form(
     form: Annotated[OAuth2PasswordRequestForm, Depends()],
     db: DbSession,
     request: Request,
+    response: Response,
 ) -> Token:
     """Login compatible con `OAuth2PasswordRequestForm` de FastAPI.
 
@@ -116,7 +120,15 @@ def login_form(
     """
     _verificar_rate_limit_auth(request)
     usuario = _autenticar(db, form.username, form.password)
-    return Token(access_token=create_access_token(subject=usuario.id))
+    token = create_access_token(subject=usuario.id, token_version=getattr(usuario, "token_version", 0))
+    set_session_cookie(response, token)
+    return Token(access_token=token)
+
+
+@router.post("/logout", summary="Cerrar sesión y limpiar cookie HttpOnly")
+def logout(response: Response) -> dict[str, str]:
+    clear_session_cookie(response)
+    return {"detail": "Sesión cerrada"}
 
 
 @router.get(

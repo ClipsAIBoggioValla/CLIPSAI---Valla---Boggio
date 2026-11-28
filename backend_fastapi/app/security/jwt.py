@@ -26,6 +26,7 @@ def create_access_token(
     subject: uuid.UUID | str,
     expires_delta: timedelta | None = None,
     extra_claims: dict[str, Any] | None = None,
+    token_version: int = 0,
 ) -> str:
     """Emite un JWT firmado con el secreto de la app.
 
@@ -45,6 +46,7 @@ def create_access_token(
         "iat": now,
         "exp": expire,
         "type": "access",
+        "ver": int(token_version),
     }
     if extra_claims:
         to_encode.update(extra_claims)

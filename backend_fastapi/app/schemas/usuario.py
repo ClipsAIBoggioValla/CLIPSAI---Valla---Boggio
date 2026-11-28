@@ -13,6 +13,8 @@ class _UsuarioBase(BaseModel):
     email: EmailStr
     full_name: str | None = Field(default=None, max_length=100)
 
+    model_config = ConfigDict(extra="forbid")
+
 
 class UsuarioCreate(_UsuarioBase):
     """Payload de POST /auth/registro."""
@@ -25,6 +27,8 @@ class UsuarioLogin(BaseModel):
 
     email: EmailStr
     password: str = Field(min_length=1, max_length=128)
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class UsuarioRead(_UsuarioBase):
@@ -77,6 +81,8 @@ class UserUpdate(BaseModel):
     theme_preference: ThemePreference | None = Field(default=None)
     email: EmailStr | None = Field(default=None)
 
+    model_config = ConfigDict(extra="forbid")
+
     @field_validator("avatar_url")
     @classmethod
     def _validate_avatar_url(cls, v: str | None) -> str | None:
@@ -91,7 +97,7 @@ class UserUpdateSimple(BaseModel):
     avatar_url: str | None = Field(default=None, max_length=500)
     theme_preference: ThemePreference | None = Field(default=None)
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     @field_validator("avatar_url")
     @classmethod
@@ -103,3 +109,5 @@ class UserUpdateSimple(BaseModel):
 class PasswordChange(BaseModel):
     current_password: str = Field(min_length=1, max_length=128)
     new_password: str = Field(min_length=8, max_length=128)
+
+    model_config = ConfigDict(extra="forbid")
