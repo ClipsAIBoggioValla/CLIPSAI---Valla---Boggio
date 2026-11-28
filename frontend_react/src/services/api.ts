@@ -130,16 +130,10 @@ export const clipService = {
   remove(clipId: string): Promise<void> {
     return http.delete<void>(`/clips/${clipId}`)
   },
-  downloadUrl(clipId: string): string {
-    const raw: string =
-      ((import.meta as unknown as { env?: Record<string, string> })?.env?.VITE_API_URL ?? '').trim()
-    const base = (raw || 'https://clipsai-backend.onrender.com').replace(/\/$/, '')
-    return `${base}/clips/${clipId}/descarga`
-  },
   async downloadClip(clip: import('@/types/api').ClipListItem): Promise<void> {
     const token = readStoredToken()
-    const url = buildDownloadUrl(clip, token)
-    await tryDownload(url, token, `${clip.title || clip.id}.mp4`, () => window.open(this.downloadUrl(clip.id), '_blank'))
+    const url = buildDownloadUrl(clip)
+    await tryDownload(url, token, `${clip.title || clip.id}.mp4`, () => window.open(url, '_blank'))
   },
 }
 
@@ -151,9 +145,11 @@ function cacheBustParam(clip: import('@/types/api').ClipListItem): string {
   return `t=${clip.updated_at ? new Date(clip.updated_at as unknown as string).getTime() : Date.now()}`
 }
 
-function buildDownloadUrl(clip: import('@/types/api').ClipListItem, token: string | null): string {
-  const bust = cacheBustParam(clip)
-  return `${BASE_URL}/clips/${clip.id}/descarga${token ? `?token=${encodeURIComponent(token)}&${bust}` : `?${bust}`}`
+function buildDownloadUrl(clip: import('@/types/api').ClipListItem): string {
+  if (clip.stream_url) {
+    return clip.stream_url.startsWith('http') ? clip.stream_url : `${BASE_URL}${clip.stream_url}`
+  }
+  return `${BASE_URL}/clips/${clip.id}/descarga?${cacheBustParam(clip)}`
 }
 
 async function tryDownload(url: string, token: string | null, filename: string, openFallback: () => void): Promise<void> {

@@ -18,9 +18,10 @@ from sqlalchemy import func, select
 
 logger = logging.getLogger(__name__)
 
-from ..deps import CurrentUser, DbSession
+from ..deps import CurrentUser, DbSession, OptionalUser
 from ..models import Clip, Video
 from ..schemas import ClipListItem, ClipListResponse, ClipResponse, ClipUpdate
+from ..services.media_signing import signed_query, verify_signed_query
 from ..services.r2_service import BUCKET_NAME_ENV, delete_r2_object, get_r2_client, r2_object_key_from_url
 
 router = APIRouter(prefix="/clips", tags=["clips"])
@@ -61,7 +62,7 @@ def _clip_file_path(clip: Clip) -> str | None:
 
 
 def _clip_stream_url(clip_id: uuid.UUID) -> str:
-    return f"/clips/{clip_id}/descarga"
+    return f"/clips/{clip_id}/descarga?{signed_query(str(clip_id))}"
 
 
 def _enrich_clip_response(clip: Clip) -> dict:
@@ -502,6 +503,12 @@ def _assert_ownership(db: DbSession, clip: Clip, current_user) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado para este clip")
 
 
+def _public_download_allowed(clip: Clip) -> bool:
+    """Solo clips en publicación/publicados tienen descarga pública (Meta/TikTok)."""
+    estado = str(getattr(clip, "publication_status", "") or getattr(clip, "status", "") or "").upper()
+    return estado in {"PUBLISHING", "PUBLISHED"}
+
+
 def _filtrar_por_texto_y_score(base, q: Optional[str], min_score: Optional[float]):
     """Filtros de búsqueda por texto y score mínimo."""
     if q is not None and q.strip() != "":
@@ -834,9 +841,21 @@ def _tamano_verificado(ruta_final: str) -> int:
 def download_clip(
     clip_id: uuid.UUID,
     db: DbSession,
+    current_user: OptionalUser,
+    exp: str | None = Query(default=None),
+    sig: str | None = Query(default=None),
 ):
     # 1. Lectura directa desde BD: consulta registro clip y obtén ruta real almacenada
     clip = _get_clip_or_404(db, clip_id)
+    firmada = verify_signed_query(str(clip_id), exp, sig)
+    if not firmada and not _public_download_allowed(clip):
+        if current_user is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Autenticación requerida para descargar este clip",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        _assert_ownership(db, clip, current_user)
     raw_path = _raw_path_de_clip(db, clip)
     if not raw_path:
         logger.error(f"[CLIP DESCARGA] clip {clip_id} sin ruta en BD (file_path/video_path/output_path vacíos)")

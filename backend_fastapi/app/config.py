@@ -75,6 +75,13 @@ def _validar_jwt_produccion(settings: "Settings") -> None:
         raise ValueError("JWT_SECRET debe configurarse con un valor seguro en production")
 
 
+def _validar_jwt_algoritmo(settings: "Settings") -> None:
+    """Solo HMAC simétrico: no permitir none ni algoritmos asimétricos sin claves."""
+    permitidos = {"HS256", "HS384", "HS512"}
+    if settings.jwt_algorithm.strip().upper() not in permitidos:
+        raise ValueError(f"JWT_ALGORITHM debe ser uno de {sorted(permitidos)}")
+
+
 def _validar_webhook_secret_produccion(settings: "Settings") -> None:
     if (
         settings.app_env.strip().lower() == "production"
@@ -125,6 +132,7 @@ class Settings(BaseSettings):
 
     def model_post_init(self, __context):  # type: ignore[override]
         _validar_jwt_produccion(self)
+        _validar_jwt_algoritmo(self)
         _validar_webhook_secret_produccion(self)
         object.__setattr__(
             self,
@@ -148,7 +156,7 @@ class Settings(BaseSettings):
         min_length=16,
     )
     jwt_algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
-    jwt_expire_minutes: int = Field(default=1440, validation_alias="JWT_EXPIRE_MINUTES")
+    jwt_expire_minutes: int = Field(default=480, validation_alias="JWT_EXPIRE_MINUTES")
     runpod_webhook_secret: str = Field(default="", validation_alias="RUNPOD_WEBHOOK_SECRET")
 
     # ---- Backend público permanente ----

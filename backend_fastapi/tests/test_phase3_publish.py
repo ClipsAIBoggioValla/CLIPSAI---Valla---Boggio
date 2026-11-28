@@ -121,7 +121,7 @@ class TestGetPublicVideoUrl:
         monkeypatch.setenv("PUBLIC_BACKEND_URL", "https://api.clipsai.xyz")
         clip = make_clip(uuid_lib.uuid4(), storage_path="/app/storage/clips/clip.mp4")
         url = _get_public_video_url(clip)
-        assert url == f"https://api.clipsai.xyz/clips/{clip.id}/descarga"
+        assert url.startswith(f"https://api.clipsai.xyz/clips/{clip.id}/descarga?")
 
 
 # ------------------------------------------------------------- get account

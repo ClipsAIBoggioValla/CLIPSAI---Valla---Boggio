@@ -269,13 +269,15 @@ def build_client(
     `use_real_auth=True` deja correr el `get_current_user` real (JWT + consulta por
     db.execute con FakeResult); `user` alimenta el override de usuario autenticado.
     """
-    from backend_fastapi.app.deps import get_current_user, get_db
+    from backend_fastapi.app.deps import get_current_user, get_current_user_optional, get_db
     from backend_fastapi.app.main import app
     from fastapi.testclient import TestClient
 
     app.dependency_overrides[get_db] = lambda: db
     if use_real_auth:
         app.dependency_overrides.pop(get_current_user, None)
+        app.dependency_overrides.pop(get_current_user_optional, None)
     else:
         app.dependency_overrides[get_current_user] = lambda: user or make_usuario()
+        app.dependency_overrides[get_current_user_optional] = lambda: user or make_usuario()
     return TestClient(app)

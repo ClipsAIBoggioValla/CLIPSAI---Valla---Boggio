@@ -133,7 +133,7 @@ def exchange_tiktok_code(code: str, code_verifier: str) -> dict[str, Any]:
         "code_verifier": code_verifier,
     }
     resp = requests.post(TIKTOK_TOKEN_URL, headers=headers, data=data, timeout=15)
-    logger.info("[TIKTOK TOKEN RAW RESPONSE]: %s", resp.text)
+    logger.info("[TIKTOK TOKEN EXCHANGE] status=%s", resp.status_code)
     resp.raise_for_status()
     try:
         token_data = resp.json()
@@ -217,7 +217,7 @@ def _fetch_tiktok_user_info(access_token: str) -> str:
         url = f"{TIKTOK_USER_INFO_URL}?fields=open_id,union_id,avatar_url,display_name"
         headers = {"Authorization": f"Bearer {access_token}"}
         resp = requests.get(url, headers=headers, timeout=10)
-        logger.info("[TIKTOK USER INFO RAW RESPONSE]: %s", resp.text)
+        logger.info("[TIKTOK USER INFO] status=%s", resp.status_code)
         nombre = _nombre_de_user_info(resp)
         if nombre is not None:
             return nombre

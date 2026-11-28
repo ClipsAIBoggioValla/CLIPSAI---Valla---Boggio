@@ -309,7 +309,7 @@ class TestVideos:
     def test_post_videos_201_y_guarda_archivos(self, client, db, user, monkeypatch, tmp_path) -> None:
         monkeypatch.setenv("UPLOAD_DIR", str(tmp_path))
         video = tmp_path / "toma.mp4"
-        video.write_bytes(b"video-bytes")
+        video.write_bytes(b"\x00\x00\x00\x18ftypmp42")
         transcript = tmp_path / "toma.txt"
         transcript.write_text("00:00:00 - Hola", encoding="utf-8")
 
@@ -321,6 +321,15 @@ class TestVideos:
         assert res.status_code == 201, res.text
         assert db.commits >= 1
         assert any(path.suffix == ".mp4" for path in tmp_path.iterdir())
+
+    def test_post_videos_400_magic_bytes_invalidos(self, client, monkeypatch, tmp_path) -> None:
+        monkeypatch.setenv("UPLOAD_DIR", str(tmp_path))
+        falso = tmp_path / "toma.mp4"
+        falso.write_bytes(b"no-es-un-video")
+
+        with open(falso, "rb") as fv:
+            res = client.post("/videos", files={"video": ("toma.mp4", fv, "video/mp4")})
+        assert res.status_code == 400
 
     def test_post_videos_400_extension_invalida(self, client, monkeypatch, tmp_path) -> None:
         monkeypatch.setenv("UPLOAD_DIR", str(tmp_path))

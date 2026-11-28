@@ -6,6 +6,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 import logging
 import os
@@ -13,10 +16,13 @@ import re
 from typing import Any
 
 from .config import get_settings
+from .core.logging_security import install_redaction_filter, redact_detail
+from .core.security_middleware import allowed_hosts, security_middleware
 from .database import Base, engine
 from .routers import auth, clips, export, jobs, metrics, publish, sample, social_auth, stats, stream as publish_stream, subtitles, users, videos, webhooks
 
 logger = logging.getLogger(__name__)
+install_redaction_filter()
 
 from .models import Clip, Job, SocialAccount, Usuario, Video  # noqa: F401 — registra modelos para create_all
 
@@ -34,8 +40,11 @@ _CORS_HEADERS = [
     "X-Requested-With",
     "Accept",
     "Origin",
+    "X-Request-ID",
 ]
-_CORS_ORIGIN_REGEX = r"https://.*\.(ngrok-free\.dev|clipsai\.xyz|vercel\.app)"
+# Allowlist por defecto: solo subdominios de clipsai.xyz. Para previews de
+# Vercel/ngrok, definir CORS_ORIGIN_REGEX explícitamente en el entorno.
+_CORS_ORIGIN_REGEX = os.getenv("CORS_ORIGIN_REGEX", r"https://.*\.clipsai\.xyz")
 
 
 def _extras_de_entorno() -> list[str]:
@@ -257,10 +266,13 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_CORS_ORIGINS,
     allow_origin_regex=_CORS_ORIGIN_REGEX,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=_CORS_METHODS,
     allow_headers=_CORS_HEADERS,
+    expose_headers=["X-Request-ID"],
 )
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts())
+app.middleware("http")(security_middleware)
 
 
 @app.middleware("http")
@@ -272,10 +284,9 @@ async def handle_options_preflight(request, call_next):  # type: ignore[no-untyp
         origin = request.headers.get("origin", "")
         if _origin_is_allowed(origin):
             response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Access-Control-Allow-Methods"] = ", ".join(_CORS_METHODS)
         response.headers["Access-Control-Allow-Headers"] = ", ".join(_CORS_HEADERS)
-        response.headers["Access-Control-Expose-Headers"] = "*"
+        response.headers["Access-Control-Expose-Headers"] = "X-Request-ID"
         response.headers["Vary"] = "Origin"
         return response
     return await call_next(request)
@@ -329,6 +340,24 @@ publish.router.routes[:] = [
 app.include_router(publish.router)
 app.include_router(users.router)
 app.include_router(users.router, prefix="/api")
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_exception_redactado(request: Request, exc: StarletteHTTPException):
+    """Redacta tokens/URLs sensibles en cualquier HTTPException."""
+    headers = dict(exc.headers or {})
+    request_id = getattr(request.state, "request_id", "")
+    if request_id:
+        headers.setdefault("X-Request-ID", request_id)
+    return JSONResponse(status_code=exc.status_code, content={"detail": redact_detail(exc.detail)}, headers=headers)
+
+
+@app.exception_handler(Exception)
+async def _error_interno(request: Request, exc: Exception):
+    """No expone stack traces ni rutas internas en producción."""
+    request_id = getattr(request.state, "request_id", "")
+    logger.error("unhandled method=%s path=%s request_id=%s tipo=%s", request.method, request.url.path, request_id, type(exc).__name__)
+    return JSONResponse(status_code=500, content={"detail": "Error interno"}, headers={"X-Request-ID": request_id})
 
 
 @app.on_event("startup")

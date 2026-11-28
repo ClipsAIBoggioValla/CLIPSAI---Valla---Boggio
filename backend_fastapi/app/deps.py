@@ -16,10 +16,12 @@ from .security.jwt import TokenDecodeError, TokenExpiredError, decode_access_tok
 
 # `auto_error=True` -> si falta el header Authorization, FastAPI ya devuelve 401.
 _bearer_scheme = HTTPBearer(auto_error=True, description="JWT emitido por /auth/login")
+_optional_bearer_scheme = HTTPBearer(auto_error=False, description="JWT opcional")
 
 
 DbSession = Annotated[Session, Depends(get_db)]
 BearerCreds = Annotated[HTTPAuthorizationCredentials, Depends(_bearer_scheme)]
+OptionalBearerCreds = Annotated[HTTPAuthorizationCredentials | None, Depends(_optional_bearer_scheme)]
 
 
 def _unauthorized(detail: str) -> HTTPException:
@@ -30,17 +32,7 @@ def _unauthorized(detail: str) -> HTTPException:
     )
 
 
-def get_current_user(creds: BearerCreds, db: DbSession) -> Usuario:
-    """Extrae el JWT, valida firma/expiracion y busca el usuario en la DB.
-
-    Devuelve 401 en cualquiera de estos casos:
-      - Falta el header o el esquema no es Bearer (lo maneja HTTPBearer).
-      - Firma invalida o payload corrupto.
-      - Token expirado.
-      - El `sub` no corresponde a un usuario existente en la DB.
-    """
-    token = creds.credentials
-
+def _usuario_desde_token(token: str, db: Session) -> Usuario:
     try:
         payload = decode_access_token(token)
     except TokenExpiredError as exc:
@@ -57,8 +49,30 @@ def get_current_user(creds: BearerCreds, db: DbSession) -> Usuario:
     if usuario is None:
         # El usuario fue eliminado o el token corresponde a un id inexistente.
         raise _unauthorized("Usuario no encontrado")
-
     return usuario
 
 
+def get_current_user(creds: BearerCreds, db: DbSession) -> Usuario:
+    """Extrae el JWT, valida firma/expiracion y busca el usuario en la DB.
+
+    Devuelve 401 en cualquiera de estos casos:
+      - Falta el header o el esquema no es Bearer (lo maneja HTTPBearer).
+      - Firma invalida o payload corrupto.
+      - Token expirado.
+      - El `sub` no corresponde a un usuario existente en la DB.
+    """
+    return _usuario_desde_token(creds.credentials, db)
+
+
+def get_current_user_optional(creds: OptionalBearerCreds, db: DbSession) -> Usuario | None:
+    """Usuario autenticado o None; un token inválido no autentica."""
+    if creds is None:
+        return None
+    try:
+        return _usuario_desde_token(creds.credentials, db)
+    except HTTPException:
+        return None
+
+
 CurrentUser = Annotated[Usuario, Depends(get_current_user)]
+OptionalUser = Annotated[Usuario | None, Depends(get_current_user_optional)]

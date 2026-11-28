@@ -17,6 +17,7 @@ from ..config import get_settings
 from ..database import SessionLocal
 from ..models import Clip
 from ..models.social_account import SocialAccount
+from .media_signing import signed_query
 from .token_crypto import cifrar_token, descifrar_token
 
 
@@ -111,7 +112,7 @@ def _get_public_video_url(clip: Clip) -> str:
         fname = os.path.basename(clip.storage_path.strip())
         if fname:
             file_part = f"/{fname}"
-    public_url = f"https://{domain}/clips/{clip_id}/descarga"
+    public_url = f"https://{domain}/clips/{clip_id}/descarga?{signed_query(clip_id)}"
     alt_url = f"https://{domain}/storage/clips/{clip_id}.mp4"
     # Prefer alt_url para APIs pull si el dominio lo soporta; descarga como fallback
     # Ambas son HTTPS públicas vía PUBLIC_BACKEND_URL (https://api.clipsai.xyz)
@@ -221,16 +222,6 @@ def _credenciales_tiktok() -> tuple[str, str]:
     return client_key, client_secret
 
 
-def _payload_diagnostico_tiktok(client_key: str, refresh_token: str) -> dict:
-    """Payload reducido (secret oculto, token truncado) para el log de diagnóstico."""
-    return {
-        "client_key": client_key,
-        "client_secret": "HIDDEN",
-        "grant_type": "refresh_token",
-        "refresh_token": (refresh_token[:10] + "..." if len(refresh_token) > 10 else refresh_token),
-    }
-
-
 def _refresh_tiktok(account: SocialAccount, refresh_token: str, db) -> bool:
     """Refresh del token de TikTok vía OAuth. True si se renovó."""
     # Fuente de credenciales: settings.TIKTOK_CLIENT_KEY y settings.TIKTOK_CLIENT_SECRET (única fuente, sin fallback hardcodeado)
@@ -239,7 +230,6 @@ def _refresh_tiktok(account: SocialAccount, refresh_token: str, db) -> bool:
     if not client_key or not client_secret:
         logger.warning("[TIKTOK REFRESH] TIKTOK_CLIENT_KEY/SECRET no configurados en settings.TIKTOK_CLIENT_KEY / settings.TIKTOK_CLIENT_SECRET")
         return False
-    _tiktok_payload = _payload_diagnostico_tiktok(client_key, refresh_token)
     resp = requests.post(
         "https://open.tiktokapis.com/v2/oauth/token/",
         headers={"Content-Type": "application/x-www-form-urlencoded"},
@@ -251,8 +241,8 @@ def _refresh_tiktok(account: SocialAccount, refresh_token: str, db) -> bool:
         },
         timeout=15,
     )
-    logger.info("[TIKTOK REFRESH RAW RESPONSE]: %s", resp.text[:1000])
-    logger.error(f"[DIAGNOSTICO TIKTOK] Refresh payload enviado: {_tiktok_payload} | Status: {resp.status_code} | Body respuesta: {resp.text}")
+    logger.info("[TIKTOK REFRESH] status=%s", resp.status_code)
+    logger.error("[DIAGNOSTICO TIKTOK] refresh status=%s", resp.status_code)
     _validar_refresh_tiktok(resp)
     return _aplicar_refresh_tiktok(account, resp, refresh_token, db)
 
@@ -279,7 +269,7 @@ def _error_data_anidada_tiktok(data: dict) -> bool:
 
 def _fallar_refresh_tiktok(resp: requests.Response, mensaje: str) -> None:
     """Loguea el error de refresh TikTok y lanza la excepción de auditoría."""
-    logger.error(f"[publish] Error renovando token TikTok status={resp.status_code} body={resp.text}")
+    logger.error("[publish] Error renovando token TikTok status=%s", resp.status_code)
     raise Exception(mensaje)
 
 
@@ -318,7 +308,7 @@ def _aplicar_refresh_tiktok(account: SocialAccount, resp: requests.Response, ref
     inner = data.get("data", {}) if isinstance(data.get("data"), dict) else {}
     new_access_token, new_refresh_token = _tokens_renovados_tiktok(data, inner)
     if not new_access_token:
-        logger.error(f"[publish] Error renovando token TikTok status={resp.status_code} body={resp.text}")
+        logger.error("[publish] Error renovando token TikTok status=%s", resp.status_code)
         raise Exception(f"TikTok refresh failed - no access_token in body={resp.text}")
     account.access_token = cifrar_token(new_access_token)
     if not new_refresh_token:
@@ -350,9 +340,9 @@ def _refresh_youtube(account: SocialAccount, refresh_token: str, db) -> bool:
         },
         timeout=15,
     )
-    logger.info("[YOUTUBE REFRESH RAW RESPONSE]: %s", resp.text[:1000])
+    logger.info("[YOUTUBE REFRESH] status=%s", resp.status_code)
     if resp.status_code != 200:
-        logger.warning(f"[YOUTUBE REFRESH FAILED] {resp.status_code} {resp.text[:500]}")
+        logger.warning("[YOUTUBE REFRESH FAILED] status=%s", resp.status_code)
         return False
     return _aplicar_refresh_youtube(account, resp, db)
 
@@ -421,9 +411,9 @@ def _refresh_instagram(account: SocialAccount, refresh_token: str, db) -> bool:
         },
         timeout=15,
     )
-    logger.info("[INSTAGRAM REFRESH RAW RESPONSE]: %s", resp.text[:1000])
+    logger.info("[INSTAGRAM REFRESH] status=%s", resp.status_code)
     if resp.status_code != 200:
-        logger.warning(f"[INSTAGRAM REFRESH FAILED] {resp.status_code} {resp.text[:500]}")
+        logger.warning("[INSTAGRAM REFRESH FAILED] status=%s", resp.status_code)
         return False
     return _aplicar_refresh_instagram(account, resp, refresh_token, db)
 
@@ -488,7 +478,7 @@ def _registrar_error_refresh(db, platform_norm: str, exc: Exception) -> None:
     """Para TikTok propaga el error con body exacto; para el resto loguea y hace rollback."""
     # Para TikTok, propaga el error con body exacto para auditoría
     if platform_norm == "tiktok" and _es_error_refresh_tiktok(exc):
-        logger.error(f"[publish] Error renovando token TikTok status=error body={str(exc)}")
+        logger.error("[publish] Error renovando token TikTok tipo=%s", type(exc).__name__)
         raise
     logger.error(f"[{platform_norm} REFRESH EXCEPTION] {exc}", exc_info=True)
     _rollback_silencioso(db)
@@ -881,9 +871,9 @@ def _detalle_error_container_ig(access_token: str, creation_id: str) -> None:
         try:
             err_data = err_resp.json()
             err_msg = err_data.get("status") or err_data
-            logger.error(f"[IG ERROR DETAIL] container {creation_id} status_code ERROR -> status: {err_msg} | full: {err_data} | raw: {err_resp.text}")
+            logger.error("[IG ERROR DETAIL] container %s status_code=ERROR status=%s", creation_id, err_msg)
         except Exception:
-            logger.error(f"[IG ERROR DETAIL] container {creation_id} raw response: {err_resp.text}")
+            logger.error("[IG ERROR DETAIL] container %s status=%s", creation_id, err_resp.status_code)
     except Exception as e_err:
         logger.error(f"[IG ERROR DETAIL] fallo al obtener status para {creation_id}: {e_err}")
 
@@ -1098,7 +1088,7 @@ def _iniciar_upload_tiktok(account: SocialAccount, file_path: str, file_size: in
 
     try:
         data = resp.json()
-        logger.info(f"[TIKTOK API] success data={data}")
+        logger.info("[TIKTOK API] init ok")
     except Exception:
         data = {}
         logger.warning("[TIKTOK API] respuesta no JSON")
@@ -1108,12 +1098,12 @@ def _iniciar_upload_tiktok(account: SocialAccount, file_path: str, file_size: in
 def _logear_respuesta_tiktok(resp: requests.Response) -> None:
     """Logs detallados de la respuesta TikTok."""
     try:
-        logger.info(f"[TIKTOK API RESPONSE] status={resp.status_code} body={resp.text[:2000]}")
+        logger.info("[TIKTOK API RESPONSE] status=%s", resp.status_code)
         try:
             j = resp.json()
-            logger.info(f"[TIKTOK API] error_code={j.get('error_code')} message={j.get('message')} data={j.get('data')}")
+            logger.info("[TIKTOK API] error_code=%s message=%s", j.get("error_code"), j.get("message"))
             if j.get("error_code") not in (None, 0, "0", ""):
-                logger.error(f"[TIKTOK API ERROR] error_code={j.get('error_code')} message={j.get('message')} body={resp.text}")
+                logger.error("[TIKTOK API ERROR] error_code=%s message=%s", j.get("error_code"), j.get("message"))
         except Exception:
             pass
     except Exception as e:
@@ -1191,11 +1181,11 @@ def _subir_archivo_tiktok(upload_url: str, file_path: str, file_size: int) -> No
             "Content-Type": "video/mp4",
             "Content-Range": f"bytes 0-{file_size - 1}/{file_size}",
         }
-        logger.info(f"[TIKTOK UPLOAD] PUT {upload_url} Content-Range={headers_put['Content-Range']} size={file_size}")
+        logger.info("[TIKTOK UPLOAD] PUT Content-Range=%s size=%s", headers_put["Content-Range"], file_size)
         resp_put = requests.put(upload_url, headers=headers_put, data=file_bytes, timeout=60)
-        logger.info(f"[TIKTOK UPLOAD] status={resp_put.status_code} body={resp_put.text[:2000]}")
+        logger.info("[TIKTOK UPLOAD] status=%s", resp_put.status_code)
         if resp_put.status_code not in (200, 201, 204):
-            logger.error(f"[TIKTOK UPLOAD ERROR] status={resp_put.status_code} body={resp_put.text[:2000]}")
+            logger.error("[TIKTOK UPLOAD ERROR] status=%s", resp_put.status_code)
             raise HTTPException(status_code=400, detail=f"TikTok upload error {resp_put.status_code}: {resp_put.text[:1000]}")
         logger.info("[TIKTOK UPLOAD] Confirmación subida exitosa status={}".format(resp_put.status_code))
     except HTTPException:
@@ -1209,8 +1199,7 @@ def _auditar_cuenta_tiktok(account: SocialAccount) -> None:
     """Auditoría de credenciales BD en cada publicación TikTok (logs explícitos)."""
     try:
         _acc_exists = bool(getattr(account, "access_token", None))
-        _prefix = (account.access_token[:10] if _acc_exists and account.access_token else "None")
-        logger.error(f"[AUDITORIA BD] user_social_accounts platform=tiktok platform_account_id={getattr(account, 'platform_account_id', None)} access_token_exists={_acc_exists} access_token_prefix={_prefix} refresh_token_exists={bool(getattr(account, 'refresh_token', None))}")
+        logger.error("[AUDITORIA BD] platform=tiktok platform_account_id=%s access_token_exists=%s refresh_token_exists=%s", getattr(account, "platform_account_id", None), _acc_exists, bool(getattr(account, "refresh_token", None)))
     except Exception as e:
         logger.error(f"[AUDITORIA BD] tiktok audit error {e}")
 
@@ -1364,9 +1353,8 @@ def _auditar_cuenta_bd(account: SocialAccount, platform_norm: str) -> None:
     # AUDITORÍA DE BD EN CADA PUBLICACIÓN
     try:
         _acc_token_exists = bool(getattr(account, "access_token", None))
-        _acc_prefix = (account.access_token[:10] if _acc_token_exists and account.access_token else "None")
         _ref_exists = bool(getattr(account, "refresh_token", None))
-        logger.error(f"[AUDITORIA BD] user_social_accounts platform={account.platform} platform_account_id={account.platform_account_id} updated_at={getattr(account, 'updated_at', None)} access_token_exists={_acc_token_exists} access_token_prefix={_acc_prefix} refresh_token_exists={_ref_exists}")
+        logger.error("[AUDITORIA BD] platform=%s platform_account_id=%s updated_at=%s access_token_exists=%s refresh_token_exists=%s", account.platform, account.platform_account_id, getattr(account, "updated_at", None), _acc_token_exists, _ref_exists)
     except Exception as _e:
         logger.error(f"[AUDITORIA BD] error audit {str(_e)}")
 
@@ -1409,7 +1397,7 @@ _TIKTOK_DESCONECTAR_MSG = "Token de TikTok expirado. Por favor, desconecta y vue
 
 def _manejar_error_refresh(db, account: SocialAccount, platform_norm: str, refresh_exc: Exception) -> None:
     """Log del error de refresh: desconecta la cuenta (TikTok, YouTube, Instagram) o propaga."""
-    logger.error(f"[publish] Error renovando token {platform_norm} status=error body={refresh_exc}")
+    logger.error("[publish] Error renovando token %s tipo=%s", platform_norm, type(refresh_exc).__name__)
     if platform_norm == "tiktok":
         _desconectar_cuenta_oauth(db, account, platform_norm)
         raise HTTPException(status_code=400, detail=f"TikTok refresh failed body={refresh_exc}")
