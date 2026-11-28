@@ -19,6 +19,7 @@ from backend.core.schemas import RenderConfig
 from ..models import Video
 from ..schemas import VideoFromUrlRequest, VideoFromUrlResponse, VideoResponse
 from ..services.r2_service import get_r2_client
+from ..services.credits_policy import is_credits_exempt
 from ..services.ytdlp_service import (
     DownloadTooLarge,
     InvalidVideoUrl,
@@ -255,6 +256,7 @@ def import_video_from_url(
     try:
         job = create_job_for_video(
             db, entity.id, background_tasks, video=entity, is_admin=current_user.is_admin,
+            credits_exempt=is_credits_exempt(current_user),
         )
     except HTTPException:
         raise

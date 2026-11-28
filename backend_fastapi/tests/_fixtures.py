@@ -193,7 +193,7 @@ def make_usuario(**overrides: Any) -> Any:
         full_name="Usuaria de Prueba",
         avatar_url=None,
         theme_preference="dark",
-        credits_balance=15,
+        credits_balance=60,
         is_admin=False,
         created_at=now_utc(),
         updated_at=now_utc(),

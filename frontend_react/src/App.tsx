@@ -7,6 +7,7 @@ import SettingsPage from '@/pages/SettingsPage'
 import UploadPage from '@/pages/UploadPage'
 import JobStatusPage from '@/pages/JobStatusPage'
 import IntegrationsPage from '@/pages/IntegrationsPage'
+import CreditsPage from '@/pages/CreditsPage'
 import PrivacyPage from '@/pages/legal/PrivacyPage'
 import TermsPage from '@/pages/legal/TermsPage'
 import DataDeletionPage from '@/pages/legal/DataDeletionPage'
@@ -48,6 +49,7 @@ export default function App() {
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/clips" element={<ClipLibraryPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/credits" element={<CreditsPage />} />
         <Route path="/upload" element={<UploadPage />} />
         <Route path="/jobs/:jobId" element={<JobStatusPage />} />
         <Route path="/dashboard/integrations" element={<IntegrationsPage />} />

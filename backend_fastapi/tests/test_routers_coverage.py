@@ -100,9 +100,9 @@ class TestAuth:
         assert len(db.added) == 2
         # sql-injection de seguridad: el hash no es la contraseña
         assert db.added[0].hashed_password != PASSWORD
-        assert db.added[0].credits_balance == 15
+        assert db.added[0].credits_balance == 60
         assert db.added[1].transaction_type == "free_trial"
-        assert db.added[1].amount == 15
+        assert db.added[1].amount == 60
 
     def test_registro_409_si_email_tomado(self, client, db) -> None:
         db.push_result(FakeResult(rows=[("id-existente",)]))  # el SELECT previo encuentra el email

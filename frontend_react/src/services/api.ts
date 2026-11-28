@@ -87,6 +87,12 @@ export const statsService = {
   },
 }
 
+export const creditService = {
+  getCredits(page = 1, pageSize = 20): Promise<import('@/types/api').CreditsPage> {
+    return http.get<import('@/types/api').CreditsPage>(`/billing/credits?page=${page}&page_size=${pageSize}`)
+  },
+}
+
 export const metricsService = {
   getMetrics(): Promise<import('@/types/api').MetricsResponse> {
     return http.get<import('@/types/api').MetricsResponse>('/metrics')
