@@ -1,5 +1,5 @@
 """Fase 3 de cobertura — remate final: ramas chicas que quedaron de jobs.py
-(probe ffprobe, ventana de ASS), stream.py (error del job) y main.py
+(probe ffprobe, ventana de ASS, error terminal) y main.py
 (excepciones de constraints, sin huérfanos, cleanup roto).
 """
 
@@ -11,7 +11,6 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-import _fixtures
 from _fixtures import FakeSession, make_job, make_usuario, make_video
 
 from backend_fastapi.app.routers import jobs as jobs_router
@@ -88,7 +87,7 @@ class _patches:
             p.__exit__(*exc)
 
 
-class TestStreamConError:
+class TestJobErrorMessage:
     @pytest.fixture()
     def _app(self):
         from fastapi.testclient import TestClient
@@ -100,18 +99,16 @@ class TestStreamConError:
         app.dependency_overrides.pop(get_db, None)
         app.dependency_overrides.pop(get_current_user, None)
 
-    def test_job_failed_con_error_message(self, _app, client, db, user) -> None:
+    def test_job_failed_expone_error_message(self, _app, client, db, user) -> None:
         app, get_db, get_current_user = _app
         video = make_video(user.id)
         job = make_job(video.id, status="failed", error_message="Error en Claude: timeout")
-        db.push_result(_fixtures.FakeResult(scalar=job))
-        db.push_result(_fixtures.FakeResult(scalar=video))
+        db.seed(job, video)
         app.dependency_overrides[get_db] = lambda: db
         app.dependency_overrides[get_current_user] = lambda: user
-        with patch("backend_fastapi.app.database.SessionLocal", lambda: db):
-            r = client.get(f"/jobs/{job.id}/stream")
-        assert "Error en Claude" in r.text
-        assert "event: done" in r.text
+        r = client.get(f"/jobs/{job.id}")
+        assert r.status_code == 200
+        assert r.json()["error_message"] == "Error en Claude: timeout"
 
 
 class TestLifespanExtras:
