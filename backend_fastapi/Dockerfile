@@ -24,6 +24,7 @@ RUN pip install -r requirements.txt
 # El modelo Whisper se descarga en el primer arranque si no está cacheado
 
 COPY app ./app
+COPY backend ./backend
 
 # Storage efímero stateless (Koyeb / Google Cloud Run): clips y uploads en /tmp.
 # Sin disco persistente — los archivos finales viven en R2 (videos.clipsai.xyz).
