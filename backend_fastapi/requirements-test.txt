@@ -13,7 +13,7 @@ python-multipart==0.0.31
 email-validator==2.2.0
 requests==2.33.0
 python-dotenv==1.2.4
-boto3>=1.34,<2.0
+boto3>=1.44.11,<2.0
 yt-dlp>=2024.11.4
 numpy>=1.26,<3
 json-repair>=0.30.0,<1.0
