@@ -10,8 +10,9 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
 from ..models import CreditTransaction, Usuario, Video
+from .credits_policy import is_credits_exempt
 
-TRIAL_CREDITS = 15
+TRIAL_CREDITS = 60
 
 
 def credit_cost(duration_seconds: float | None) -> int:
@@ -63,11 +64,12 @@ def _balance_update(db, user_id: uuid.UUID, amount: int, minimum: int | None):
 
 
 def debit_job_credits(
-    db, user_id: uuid.UUID, job_id: uuid.UUID, duration_seconds: float, is_admin: bool = False,
+    db, user_id: uuid.UUID, job_id: uuid.UUID, duration_seconds: float,
+    is_admin: bool = False, credits_exempt: bool = False,
 ) -> int:
     """Descuenta una vez por job. El llamador confirma junto con el job."""
     credits = credit_cost(duration_seconds)
-    if is_admin:
+    if is_admin or credits_exempt:
         return 0
     key = f"usage:{job_id}"
     if _transaction_exists(db, key):
@@ -85,6 +87,7 @@ def debit_job_credits(
 def grant_free_trial(db, user: Usuario) -> None:
     """Asigna el trial al registrar la cuenta y registra el movimiento."""
     user.credits_balance = TRIAL_CREDITS
+    user.credits_exempt = is_credits_exempt(user)
     db.add(CreditTransaction(
         user_id=user.id, transaction_type="free_trial", amount=TRIAL_CREDITS,
         idempotency_key=f"trial:{user.id}",

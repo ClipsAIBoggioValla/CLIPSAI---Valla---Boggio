@@ -28,6 +28,7 @@ from ..models import Job, JobStatus, Video
 from ..schemas import JobResponse
 from ..services.transcript_utils import parse_transcript_text_to_segments
 from ..services.credits_service import debit_job_credits, refund_job_credits, resolve_video_duration
+from ..services.credits_policy import is_credits_exempt
 
 # Logging inmediato (Unbuffered Output) — flush automático a sys.stdout
 try:
@@ -2023,11 +2024,13 @@ def _persistir_fallo_wrapper(db2: Any, job_ref: Any, e: Exception, error_trace: 
     _flush_stdout()
 
 
-def _guardar_job_con_debito(db: Any, job: Job, user_id: uuid.UUID, duration: float, is_admin: bool) -> None:
+def _guardar_job_con_debito(
+    db: Any, job: Job, user_id: uuid.UUID, duration: float, is_admin: bool, credits_exempt: bool,
+) -> None:
     """Confirma juntos Job, débito y ledger; rollback completo ante cualquier fallo."""
     try:
         db.flush()
-        debit_job_credits(db, user_id, job.id, duration, is_admin)
+        debit_job_credits(db, user_id, job.id, duration, is_admin, credits_exempt)
         db.commit()
         db.refresh(job)
     except Exception:
@@ -2040,6 +2043,7 @@ def create_job_for_video(
     render_config: RenderConfig | None = None,
     video: Video | None = None,
     is_admin: bool = False,
+    credits_exempt: bool = False,
 ) -> Job:
     """Crea el job y agenda el pipeline compartido con la subida directa."""
     _validar_fuente_watermark_local(render_config)
@@ -2050,7 +2054,7 @@ def create_job_for_video(
     metadata = {"render_config": render_config.model_dump(exclude_none=True)} if render_config else None
     job = Job(id=uuid.uuid4(), video_id=video_id, status=JobStatus.PENDING.value, progress=0, result_metadata=metadata)
     db.add(job)
-    _guardar_job_con_debito(db, job, video.user_id, duration, is_admin)
+    _guardar_job_con_debito(db, job, video.user_id, duration, is_admin, credits_exempt)
     try:
         background_tasks.add_task(run_job_safely, str(job.id))
     except Exception:
@@ -2078,7 +2082,10 @@ def create_job(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado para este video")
 
     config = payload.render_config if payload else None
-    return create_job_for_video(db, video.id, background_tasks, config, video=video, is_admin=current_user.is_admin)
+    return create_job_for_video(
+        db, video.id, background_tasks, config, video=video,
+        is_admin=current_user.is_admin, credits_exempt=is_credits_exempt(current_user),
+    )
 
 
 @router.get(

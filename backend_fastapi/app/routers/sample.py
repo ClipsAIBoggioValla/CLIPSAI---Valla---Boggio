@@ -17,6 +17,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from ..deps import CurrentUser, DbSession
 from ..models import Job, Video
 from ..schemas import JobResponse
+from ..services.credits_policy import is_credits_exempt
 
 router = APIRouter(prefix="/videos", tags=["videos"])
 
@@ -115,4 +116,7 @@ def create_sample_job(
 
     from .jobs import create_job_for_video
 
-    return create_job_for_video(db, entity.id, background_tasks, video=entity, is_admin=current_user.is_admin)
+    return create_job_for_video(
+        db, entity.id, background_tasks, video=entity, is_admin=current_user.is_admin,
+        credits_exempt=is_credits_exempt(current_user),
+    )

@@ -247,16 +247,27 @@ def _migrar_esquema() -> None:
 
 
 def _migrar_creditos(conn: Any) -> None:
-    """Añade el balance legacy y crea el ledger idempotentemente en cada dialecto."""
-    from sqlalchemy import inspect, text
+    """Migra balance, exenciones aprobadas y ledger idempotentemente."""
+    from sqlalchemy import func, inspect, text, update
+    from .services.credits_policy import CREDITS_EXEMPT_EMAILS
+
+    def _marcar_cuentas_exentas() -> None:
+        conn.execute(update(Usuario).where(
+            func.lower(func.trim(Usuario.email)).in_(CREDITS_EXEMPT_EMAILS)
+        ).values(credits_exempt=True))
 
     if conn.dialect.name == "sqlite":
         columns = {column["name"] for column in inspect(conn).get_columns("usuarios")}
         if "credits_balance" not in columns:
             conn.execute(text("ALTER TABLE usuarios ADD COLUMN credits_balance INTEGER NOT NULL DEFAULT 0"))
+        if "credits_exempt" not in columns:
+            conn.execute(text("ALTER TABLE usuarios ADD COLUMN credits_exempt BOOLEAN NOT NULL DEFAULT FALSE"))
+        _marcar_cuentas_exentas()
         CreditTransaction.__table__.create(bind=conn, checkfirst=True)
         return
     conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS credits_balance INTEGER NOT NULL DEFAULT 0"))
+    conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS credits_exempt BOOLEAN NOT NULL DEFAULT FALSE"))
+    _marcar_cuentas_exentas()
     if conn.dialect.name == "postgresql":
         CreditTransaction.__table__.create(bind=conn, checkfirst=True)
 

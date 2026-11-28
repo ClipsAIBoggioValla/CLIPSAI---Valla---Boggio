@@ -292,6 +292,23 @@ export interface ClipListResponse {
   total_pages: number
 }
 
+export interface CreditTransactionRead {
+  id: string
+  job_id: string | null
+  transaction_type: 'free_trial' | 'usage' | 'refund'
+  amount: number
+  created_at: string
+}
+
+export interface CreditsPage {
+  balance: number | null
+  credits_unlimited: boolean
+  transactions: CreditTransactionRead[]
+  page: number
+  page_size: number
+  total: number
+}
+
 export type ClipSortBy = 'created_at_desc' | 'created_at_asc' | 'score_desc' | 'score_asc'
 
 export interface ClipListParams {

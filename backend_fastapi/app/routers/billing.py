@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 
 from ..deps import CurrentUser, DbSession
 from ..models import CreditTransaction
+from ..services.credits_policy import is_credits_exempt
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -51,9 +52,10 @@ def get_credits(
         .offset((page - 1) * page_size)
         .limit(page_size)
     ).all()
+    unlimited = bool(current_user.is_admin or is_credits_exempt(current_user))
     return CreditsPage(
-        balance=None if current_user.is_admin else int(getattr(current_user, "credits_balance", 0) or 0),
-        credits_unlimited=bool(current_user.is_admin),
+        balance=None if unlimited else int(getattr(current_user, "credits_balance", 0) or 0),
+        credits_unlimited=unlimited,
         transactions=list(transactions),
         page=page,
         page_size=page_size,

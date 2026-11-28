@@ -36,6 +36,7 @@ class Usuario(Base, TimestampMixin):
     avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     theme_preference: Mapped[str | None] = mapped_column(String(20), nullable=True, server_default="dark")
     credits_balance: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    credits_exempt: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
 
