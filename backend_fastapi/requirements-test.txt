@@ -3,7 +3,7 @@
 # en runners de GitHub solo para ejecutar los tests con mocks.
 fastapi==0.165.0
 starlette==1.10.0
-pydantic>=2.10.0
+pydantic>=2.14.4
 pydantic-settings>=2.7.0
 sqlalchemy==2.0.36
 psycopg2-binary>=2.9.9
