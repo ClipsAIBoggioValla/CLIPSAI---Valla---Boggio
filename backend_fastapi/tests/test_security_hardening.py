@@ -56,6 +56,15 @@ def test_cors_acepta_origen_local_permitido(client) -> None:
     assert res.headers.get("access-control-allow-credentials") != "true"
 
 
+def test_cors_acepta_apex_de_clipsai(client) -> None:
+    res = client.options(
+        "/health",
+        headers={"Origin": "https://clipsai.xyz", "Access-Control-Request-Method": "GET"},
+    )
+
+    assert res.headers["access-control-allow-origin"] == "https://clipsai.xyz"
+
+
 def test_rate_limit_global_devuelve_429(client) -> None:
     original = sm.security_limiter.max_requests
     sm.security_limiter.max_requests = 1

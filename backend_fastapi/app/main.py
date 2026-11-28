@@ -69,6 +69,8 @@ def _build_cors_origins() -> list[str]:
     """Orígenes CORS: base local + FRONTEND_URL/REDIRECT/CORS_EXTRA_ORIGINS."""
     origins = [
         "https://api.clipsai.xyz",
+        "https://clipsai.xyz",
+        "https://www.clipsai.xyz",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost:5173",

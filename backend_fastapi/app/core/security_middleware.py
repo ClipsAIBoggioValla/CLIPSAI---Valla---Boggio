@@ -41,7 +41,7 @@ def allowed_hosts() -> list[str]:
     if raw:
         return [item.strip() for item in raw.split(",") if item.strip()]
     if os.getenv("APP_ENV", "development").lower() == "production":
-        return ["api.clipsai.xyz", "clipsai.xyz", "localhost", "127.0.0.1", "testserver"]
+        return ["api.clipsai.xyz", "clipsai.xyz", "clipsai-backend.onrender.com", "localhost", "127.0.0.1", "testserver"]
     return ["*"]
 
 
